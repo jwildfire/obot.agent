@@ -88,7 +88,7 @@
 
 ## P004-ARCH-Q005: Static chart API location
 
-**Status:** draft  
+**Status:** decided  
 **Source:** P004 overview open questions  
 **Context:** Future static graphics may live alongside interactive renderers or in `gsm.safety`; the boundary affects package design.  
 **Question:** How much of the future static chart API should live in these renderer repos versus `gsm.safety`?
@@ -99,8 +99,8 @@
 2. Put static and interactive implementations side-by-side in renderer repos.
 3. Share display contracts in renderer repos, with static orchestration in `gsm.safety`.
 
-**Asked in Telegram:**  
-**Answer:**  
-**Decision:**  
-**Follow-up artifacts:**  
-**Notes:**
+**Asked in Telegram:** 2026-05-20  
+**Answer:** Option 1: static charts are likely to be built in R using ggplot either in `gsm.safety` or in `safetyCharts`, while interactive versions are JavaScript. `gsm.safety` will continue using htmlwidgets to render the charts, possibly via `safetyCharts`.  
+**Decision:** Keep static chart APIs out of the nextgen JavaScript renderer repos by default. Treat renderer repos as interactive JavaScript packages; keep static chart work in R-side packages such as `gsm.safety` or `safetyCharts`, with `gsm.safety` orchestrating htmlwidget rendering for interactive outputs.  
+**Follow-up artifacts:** P004 overview, future FDA-style static chart project docs, `gsm.safety`/`safetyCharts` design notes.  
+**Notes:** Revisit only if a specific static/interactive contract needs to be shared across packages.
