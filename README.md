@@ -36,6 +36,10 @@ First renderer: `safety-histogram`
 - `skills/` - reusable task instructions for agents working on renderer migrations.
 - `templates/` - starter templates for requirements matrices and migration plans.
 
+## Interview framework
+
+Use `docs/interview-framework.md` and `skills/stakeholder-interview/SKILL.md` whenever Jeremy input is needed through Telegram. Active P004 questions are tracked in `interviews/p004-open-questions.md`.
+
 ## Core workflow
 
 For each renderer:

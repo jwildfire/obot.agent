@@ -17,6 +17,10 @@ Modernize SafetyGraphics JavaScript renderers with a GxP-oriented engineering di
 
 Use gsm.viz as the reference implementation for nextgen JavaScript renderer architecture: ES modules, Chart.js, data schemas, `checkInputs()` -> `configure()` -> `structureData()` -> Chart.js render flow, Jest/jsdom/canvas tests, and static examples. See `docs/gsm-viz-reference.md`.
 
+## Stakeholder interviews
+
+Use `skills/stakeholder-interview/SKILL.md` for any Jeremy input needed through Telegram. Interviews are not limited to requirements; they cover architecture, prioritization, API design, validation strategy, review questions, and process decisions. Capture answers in `interviews/` and propagate decisions into the relevant durable project artifacts.
+
 ## Required artifacts per renderer
 
 - `docs/requirements/<renderer>-requirements.md`
