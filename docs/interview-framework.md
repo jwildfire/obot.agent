@@ -94,3 +94,13 @@ A completed interview entry should let a future agent understand:
 ## Recommendation requirement
 
 When asking Jeremy an interview question, include obot's recommendation whenever possible, along with a short justification and concise pros/cons for the realistic options. Skip a recommendation only when the question is purely factual or when there is not enough context to form a defensible position.
+
+## Telegram formatting rules
+
+Use the interview prefix `😺📝` for interview prompts. Always include the actual question text, not just the question ID. Keep each Telegram message short enough to avoid truncation; if context plus options plus recommendation is long, split into multiple messages. Preferred split:
+
+1. `😺📝 Interview <ID>` with context and exact question.
+2. Recommendation and short pros/cons.
+3. Options, if needed.
+
+Do not rely on one long message for nuanced architectural questions.

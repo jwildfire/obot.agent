@@ -47,3 +47,13 @@ For P004:
 ## Recommendation requirement
 
 Whenever possible, include your recommended answer before asking Jeremy to decide. Keep it concise: state the recommendation, why it is preferred, and the main pros/cons of the realistic alternatives. Do not overstate certainty; surface assumptions and ask for correction when needed.
+
+## Telegram formatting rules
+
+Use the interview prefix `😺📝` for interview prompts. Always include the actual question text, not just the question ID. Keep each Telegram message short enough to avoid truncation; if context plus options plus recommendation is long, split into multiple messages. Preferred split:
+
+1. `😺📝 Interview <ID>` with context and exact question.
+2. Recommendation and short pros/cons.
+3. Options, if needed.
+
+Do not rely on one long message for nuanced architectural questions.
