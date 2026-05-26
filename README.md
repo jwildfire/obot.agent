@@ -52,6 +52,14 @@ For each renderer:
 6. **Add automated tests** at unit, integration, browser, visual, and requirements levels.
 7. **Document traceability** from requirement to test to implementation PR.
 
+
+## Requirement matrices
+
+Renderer wiki requirements are harvested under `docs/requirements/`. These files are source-backed starting matrices and must be reviewed, de-duplicated, and mapped to tests before a renderer migration is considered complete.
+
+- [Requirement matrices](docs/requirements/README.md)
+- [Test framework](docs/test-framework.md)
+
 ## GxP stance
 
 This repo does not make any renderer validated by itself. It defines a pragmatic GxP-oriented engineering framework: traceable requirements, controlled changes, documented evidence, deterministic tests, and explicit review checkpoints. Qualification/validation decisions remain project-specific and require human governance.
