@@ -29,15 +29,19 @@ This framework defines how nextgen SafetyGraphics renderers should prove behavio
 
 ## AI review stage
 
-After raw harvesting and before Jeremy review, run `scripts/ai_review_requirements.py`. This stage should:
+After raw harvesting and before Jeremy review, run an agentic AI review, preferably with one or more sub-agents assigned disjoint renderer scopes. The reviewer receives the harvested matrix, package README/config/API context, and source wiki pages, then performs line-by-line sanity review.
 
-- remove obvious link/image/overview artifacts;
-- merge orphaned settings snippets into the previous requirement notes;
-- mark standalone rows as `ai-reviewed`;
-- flag unclear, legacy-specific, vague, statistical, or compound rows as `needs-jeremy-review`;
+The AI review should:
+
+- verify each row is a standalone, testable requirement;
+- merge obvious line-break/settings artifacts into the correct parent row;
+- remove link/image/overview rows that are not requirements;
+- propose wording edits for confusing rows;
+- flag legacy CAT/viz-library/Webcharts-specific rows that need scope decisions;
+- flag statistical or validation-sensitive rows needing explicit review;
 - write grill-me candidates to `interviews/p004-grill-queue.md`.
 
-AI review is not approval. It is a cleanup and triage step that makes Jeremy's review tractable.
+AI review is not approval. It is a judgment/triage step that makes Jeremy's review tractable. Do not implement it as a purely programmatic parser.
 
 ## Evidence types
 

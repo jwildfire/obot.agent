@@ -1,226 +1,231 @@
 # P004 grill-me queue
 
-Questions and ambiguous requirements surfaced during AI review.
+This queue is generated from the agentic AI review of harvested requirements. Ask one question at a time in Telegram using the grill-me format.
 
-## ae-timelines
+## Recommended first renderer
 
-- `AET-DATA-005`: The following data specs and chart settings can be used to create a chart with several custom filters, including Sex, Race and Query Status. The chart also highlights severe AEs and events under query. A sample chart using this configuration is found [here](https://rhoinc.github.io/viz-library/examples/0011-safetyExplorer-queries/aetimelines.html).
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `AET-CFG-001`: The most straightforward way to customize the AE Timelines is by using a configuration object whose properties describe the behavior and appearance of the chart. Since the AE Timelines is a Webcharts `chart` object, many default Webcharts settings are set in the [defaultSettings.js file](https://github.com/RhoInc/ae-timelines/blob/master/src/defaultSettings.js) as [described below](#webcharts-settings). Refer to the [Webcharts documentation](https://github.com/RhoInc/Webcharts/wiki/Chart-Configuration) for more details on these settings.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `AET-CFG-002`: In addition to the standard Webcharts settings several custom settings not available in the base Webcharts library have been added to the AE Timelines to facilitate data mapping and other custom functionality. These custom settings are described in detail below. All defaults can be overwritten by users.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `AET-CFG-013`: a Webcharts mark type: point, bar, line, or text
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `AET-API-001`: a factory to create a custom [Webcharts chart](https://github.com/RhoInc/Webcharts/wiki/Chart) object
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `AET-REQ-003`: More information is available in the project's [wiki](https://github.com/RhoInc/aeexplorer/wiki):
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
+Start with **safety-histogram** because it is the first migration target and exposes reusable policy decisions: legacy API compatibility, Webcharts settings compatibility, CAT/viz-library evidence, and statistical method parity.
 
-## aeexplorer
+## Cross-renderer policy questions
 
-- `AE-USER-001`: This is a text box feature which is used to filter out all adverse events below the percentage entered. The default is 0%, but the default value can be adjusted according to the user's needs. Users can type any alphanumeric value into this box. Values must be numeric for the filter to work. After hitting Enter or clicking outside the box, the Explorer will hide the data rows where the prevalence for all groups is below the threshold entered. If any group has a prevalence at or above the threshold entered, it will be displayed on screen with all nested categories shown. To return to the default view, the user must either refresh the page or enter 0 into the filter box and again hit Enter or click outside the box.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `AE-USER-007`: The Search box is used to search the category column of the table for terms of interest. Users can type any alphanumeric term into this box. After hitting Enter or clicking outside the box, the Safety Explorer will display only the categories that contain the search term entered. The search terms will also be highlighted in yellow within the category column. Text will also display next to the Search box indicating the number of categories returned with that search term. If there are no results matching the term entered, text will display next to the Search box indicating that no categories were returned with a matching search term. The table display will not change if there are no matches in the search.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `AE-USER-009`: By moving a mouse cursor over certain sections of the table, users can display metadata for some variables. Hovering over the ‘E’ superscript beside one of the filter labels will display an explanation of an event filter. Hovering the cursor over a particular row will highlight the row in gray. Hovering over a value in a treatment group will display the number of participants affected out of n. Hovering over a colored data point in the AE Rate by Group column will present the percentage value for the group. Hovering over a diamond in the Difference Between Groups column will perform two actions:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `AE-REG-010`: Ensure that the aeexplorer looks good in viz-library
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Vague visual acceptance criterion; define concrete browser/visual evidence.
-- `AE-REG-023`: Ensure details listing appears as normal before adding anything.
-  - AI comment: Vague visual acceptance criterion; define concrete browser/visual evidence.
-- `AE-REG-025`: Confirm in CAT with the following settings: { defaults:{webchartsDetailTable:true}} that the detail table view (accessed by clicking the label of any row in the summary table), is rendered using a webcharts table, and that sort, search, pagination and export work as expected.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `AE-REG-026`: Confirm that entering the following settings in the CAT will show the option to download the data file: `{"validation": true}`
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `AE-REG-031`: Confirm that the following settings set the serious event filter to ‘Y’ and make it the only filter to be displayed by default:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Merged harvested artifact AE-REG-032 into this row: `{"validation": true ,"variables": {"filters": [ {"value_col": "AESER" ,"label": "Srs?" ,"type": "event" ,"start": ["Y"]} ] } }`
-- `AE-REG-033`: Confirm that the following settings summarize the data by participant on default:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Merged harvested artifact AE-REG-034 into this row: `{"validation": true ,"defaults": {"summarizeBy": "participant"} }`
-- `AE-REG-035`: Confirm that the following settings summarize the data by event on default:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Merged harvested artifact AE-REG-036 into this row: `{"validation": true ,"defaults": {"summarizeBy": "event"} }`
-- `AE-REG-037`: Confirm that the following setting only shows treatment group totals and hides the 'Difference Between Groups' column:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Merged harvested artifact AE-REG-038 into this row: `{"defaults":{"totalCol":true,"groupCols":false}}`
-- `AE-REG-039`: Confirm that the following setting only shows the placebo group and hides the 'total' and 'Difference Between Groups' columns:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- `AE-REG-044`: Confirm that the value for the default variable appears in the variable control even if it is not specified in config. That is, ARM appears in the groups control with these settings:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Merged harvested artifact AE-REG-045 into this row: { variables:{group:"ARM"}, variableOptions:{ group:["RACE","SEX"] }, };
-- `AE-REG-046`: Confirm in CAT that margins are drawn for the dot plot when plotSettings.margin is specified. Just tweak the following settings object, and confirm that the margin changes as expected: {plotSettings: {margin: {left: 40, right: 40}}}
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `AE-DATA-004`: The following data specs and chart settings can be used to create a chart with several custom filters, including Sex, Race and Query Status. A sample chart using this configuration is found [here](https://rhoinc.github.io/viz-library/examples/0011-safetyExplorer-queries/ae-table/).
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
+### Q-P004-001 — Legacy API compatibility
 
-## paneled-outlier-explorer
+Should nextgen renderer packages preserve legacy factories like `safetyHistogram(element, settings).init(data)`, or can they expose a new API if rendered behavior and htmlwidget integration are preserved?
 
-- `POE-FUNC-002`: Users can view how many participants fall within the normal range for a measure by observing the small, green box to the bottom-left of each chart. This box contains an integer that corresponds to the number of subjects that fall within the normal range and are excluded from that chart on initial load. When the normal range method changes or is set to "None" the count in the box will change to reflect the new number of participants with inlier data. When there are no participants to display, the box will disappear. The box will reappear when the normal range is manipulated and participants fall within the normal ranges again.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `POE-FUNC-004`: Users can opt to change the method for the normal ranges to the following options: None, LLN-ULN, Standard Deviation, and Quantiles. The default for the normal range controls is set to "LLN-ULN", which is the upper and lower normal range specified in the data. Users may select "None", which will remove the green shading around the normal ranges and will remove the inlier count to the left of the charts. Users may also select "Standard Deviation", which will prompt the user to enter the number of standard deviations they would like to set as the normal range. Altering the default value will change the upper and lower normal range bands in the chart and will change the inlier count to the left of the chart. Users may also select "Quantiles", which prompts the user to enter an upper and lower quantile to set as the normal ranges. Altering the upper quantile will change the upper normal range band in the chart and altering the lower quantile will change the lower normal range band in the chart. Changing the normal ranges may change the number of inliers and the inlier count to the left of the chart will update based on your selections.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `POE-FUNC-017`: Users can click on a column header and sort the data within a column in ascending and descending order. The first time a user clicks the column header, the column is sorted in ascending order and a box appears above the data listing containing the variable name that has been selected and an arrow indicating the direction of the ordered data. When a user clicks the column header a second time, the data will be sorted in descending order and the direction of the arrow in the box above the data listing will change to match the new sort. Clicking on the red 'x' within the box containing the variable name both removes the sorting and closes the box. The sort feature can be turned on/off by configuring the chart settings.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `POE-FUNC-018`: Users can download the data as a CSV by clicking on the 'CSV' button located underneath the chart within the detailed view. The CSV file will contain all of the data if no filters have been utilized. If filters have been used, the CSV file will contain the resulting data. The file will also capture any sorting that has been initialized in the data. The CSV download will be named using the following convention: webchartsTableExport, date, and time. This feature can be turned on/off by configuring the chart settings.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `POE-CFG-001`: The most straightforward way to customize the Paneled Outlier Explorer is by using a configuration object whose properties describe the behavior and appearance of the chart. Since the Paneled Outlier Explorer is a Webcharts `chart` object, many default Webcharts settings are set in the [defaultSettings.js file](https://github.com/RhoInc/paneled-outlier-explorer/blob/master/src/defaultSettings.js) as [described below](#webcharts-specific-settings). Refer to the [Webcharts documentation](https://github.com/RhoInc/Webcharts/wiki/Chart-Configuration) for more details on these settings.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `POE-CFG-002`: In addition to the standard Webcharts settings several custom settings not available in the base Webcharts library have been added to the Paneled Outlier Explorer to facilitate data mapping and other custom functionality. These custom settings are described in detail below. All defaults can be overwritten by users.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `POE-API-001`: a factory to create a custom [Webcharts chart](https://github.com/RhoInc/Webcharts/wiki/Chart) object
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `POE-REQ-009`: Below is a list of potential performance improvements to help mitigate the limitations of the browser, ordered roughly from most to least feasible:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- `POE-REQ-024`: Refactor data flow in both paneled-outlier-explorer and webcharts by eliminating unnecessary data variables and transformations.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
+Recommendation: preserve a thin compatibility wrapper for vX.0.0 where practical, but design internals around a nextgen API. This limits migration friction while keeping the refactor clean.
 
-## safety-delta-delta
+### Q-P004-002 — Webcharts config compatibility
 
-- `SDD-FUNC-006`: Clicking on a point in the chart will open a table beside the chart that contains a detailed listing of all participant lab data. Each row of the table has summary data for a single measure for the selected participant, and includes, the measure name, a sparkline showing the measure's value over time, and an annotated numeric value summarizing the change in the measure between the selected time points. This linked table contains a standard set of default columns that appear consistently across all filters. When a point is clicked it is highlighted and the table header shows the participant ID and any other specified participant details.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SDD-REG-008`: Confirm that missing or non-numeric values in the dataset are handled and removed, and that the number of missing and non-numeric records appears opposite the number of participants annotation, beneath the controls. View the same Console in the developer tools and look for the "xxxx missing or non-numeric results have been removed." warning message. Download the dataset, remove some numeric values, save the datset, and then upload the new version, and render the chart. The number of missing or non-numeric values shown in the warning message should increment accordingly.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SDD-CFG-001`: The most straightforward way to customize the Safety Delta-Delta plot is by using a configuration object whose properties describe the behavior and appearance of the chart. Since the Safety Histogram is a Webcharts `chart` object, many default Webcharts settings are set in the [webchartsSettings.js file](https://github.com/RhoInc/safety-delta-delta/blob/master/src/configuration/webchartsSettings.js) as [described below](#webcharts-settings). Refer to the [Webcharts documentation](https://github.com/RhoInc/Webcharts/wiki/Chart-Configuration) for more details on these settings.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SDD-CFG-002`: In addition to the standard Webcharts settings several custom settings not available in the base Webcharts library have been added to the Safety Delta-Delta plot to facilitate data mapping and other custom functionality. These custom settings are described in detail below. All defaults can be overwritten by users.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `SDD-API-001`: a factory to create a custom [Webcharts chart](https://github.com/RhoInc/Webcharts/wiki/Chart) object
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
+Should nextgen renderers accept legacy Webcharts configuration objects, translate a supported subset, or drop Webcharts config compatibility entirely?
+
+Recommendation: translate a documented subset for core data mapping/controls and explicitly mark unsupported Webcharts-only settings as replaced/deferred. Full compatibility would preserve too much legacy surface area.
+
+### Q-P004-003 — CAT/viz-library test scope
+
+Should CAT/viz-library-specific regression tests be preserved as requirements, or rewritten as standalone demo/browser tests?
+
+Recommendation: rewrite them as standalone demo/browser tests unless they describe a behavior still needed by gsm.safety/htmlwidgets. CAT itself should be evidence context, not the required runtime.
+
+### Q-P004-004 — Visual acceptance criteria
+
+What viewport/browser target should define vague visual requirements like “fits on one page” or “looks good”?
+
+Recommendation: use a documented desktop viewport for baseline QA, e.g. Chromium 1440x900, and explicitly allow page scrolling unless the source behavior requires single-screen layout.
+
+### Q-P004-005 — Statistical parity
+
+For histogram p-values and grouped comparisons, should nextgen reproduce the exact legacy method/precision/disclaimer, or define a new documented method?
+
+Recommendation: preserve the legacy method only if we can identify it exactly and test fixture outputs; otherwise define a new method with explicit disclaimers and manual review before calling it production-ready.
 
 ## safety-histogram
 
-- `SH-FUNC-004`: This feature highlights the normal ranges for the selected measure by displaying a gray rectangle behind the data. This rectangle represents the normal range for that measure and data that falls within the upper and lower limits of the range contains records of participants who are associated with results that are considered normal. Normal ranges are not shown by default , but the option can be activated by checking the normal ranges check box above the chart. If the data does not cite a normal range for a measure, the option to activate the normal range function is not available and the checkbox disappears.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-FUNC-005`: Users are able to adjust the lower limit of the x-axis by manipulating the input within the Lower Limit box. Users are able to adjust the upper limit of the x-axis by manipulating the input within the Upper Limit box. Each limit box has up and down arrows to adjust the value of the box by 1. Users can select an arrow to change the input or delete the current value in the box and type in a new value. When typing in a value, users must click outside of the box to apply the changes. When a user manipulates an x-axis limit, the x-axis on the chart below the controls will reflect the change.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-FUNC-009`: Clicking on a bar will perform 3 actions:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- `SH-REG-014`: Confirm that missing or non-numeric values in the dataset are handled and removed, and that the number of missing and non-numeric records appears opposite the number of participants annotation, beneath the controls. View the same Console in the developer tools and look for the "xxxx missing or non-numeric results have been removed." warning message. Download the dataset, remove some numeric values, save the datset, and then upload the new version, and render the chart. The number of missing or non-numeric values shown in the warning message should increment accordingly.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-043`: Use these test notes for the following 4 tests [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiYmluX2FsZ29yaXRobSI6ICJTY290dCdzIG5vcm1hbCByZWZlcmVuY2UgcnVsZSIsCiAibm9ybWFsX3JhbmdlIjogdHJ1ZSwKICJkaXNwbGF5X25vcm1hbF9yYW5nZSI6IGZhbHNlLAogImFubm90YXRlX2Jpbl9ib3VuZGFyaWVzIjogZmFsc2UsCiAidGVzdF9ub3JtYWxpdHkiOiB0cnVlLAogImNvbXBhcmVfZGlzdHJpYnV0aW9ucyI6IGZhbHNlCn0=&draw&controls=min)
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-044`: Verify an annotation appears in the top right of the chart labeled Normality: with a p-value and an info icon
-  - AI comment: Statistical behavior needs explicit validation stance and acceptable approximation boundary.
-- `SH-REG-045`: Verify hovering over the p-value displays information about the statistical test
-  - AI comment: Statistical behavior needs explicit validation stance and acceptable approximation boundary.
-- `SH-REG-047`: Verify the p-value updates upon selecting a different measure
-  - AI comment: Statistical behavior needs explicit validation stance and acceptable approximation boundary.
-- `SH-REG-048`: (use these test notes for the following 4 tests and make sure the version is dev-v2.5.0 [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiZ3JvdXBzIjogWwogIHsKICAgImxhYmVsIjogIlNleCIsCiAgICJ2YWx1ZV9jb2wiOiAiU0VYIgogIH0sCiAgewogICAibGFiZWwiOiAiVHJlYXRtZW50IEdyb3VwIiwKICAgInZhbHVlX2NvbCI6ICJBUk0iCiAgfSwKICB7CiAgICJsYWJlbCI6ICJSYWNlIiwKICAgInZhbHVlX2NvbCI6ICJSQUNFIgogIH0sCiAgewogICAibGFiZWwiOiAiU2l0ZSIsCiAgICJ2YWx1ZV9jb2wiOiAiU0lURSIKICB9CiBdLAogImJpbl9hbGdvcml0aG0iOiAiU2NvdHQncyBub3JtYWwgcmVmZXJlbmNlIHJ1bGUiLAogIm5vcm1hbF9yYW5nZSI6IHRydWUsCiAiZGlzcGxheV9ub3JtYWxfcmFuZ2UiOiBmYWxzZSwKICJhbm5vdGF0ZV9iaW5fYm91bmRhcmllcyI6IGZhbHNlLAogInRlc3Rfbm9ybWFsaXR5IjogZmFsc2UsCiAiY29tcGFyZV9kaXN0cmlidXRpb25zIjogZmFsc2UKfQ==&draw&controls=min))
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-053`: (Use these test notes for the following 2 tests and make sure the version is dev-v2.5.0 [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiYmluX2FsZ29yaXRobSI6ICJTY290dCdzIG5vcm1hbCByZWZlcmVuY2UgcnVsZSIsCiAibm9ybWFsX3JhbmdlIjogdHJ1ZSwKICJkaXNwbGF5X25vcm1hbF9yYW5nZSI6IGZhbHNlLAogImFubm90YXRlX2Jpbl9ib3VuZGFyaWVzIjogZmFsc2UsCiAidGVzdF9ub3JtYWxpdHkiOiBmYWxzZSwKICJjb21wYXJlX2Rpc3RyaWJ1dGlvbnMiOiBmYWxzZQp9&draw&controls=min))
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-056`: (Use these test notes for the following 5 tests and make sure the version is dev-v2.5.0 [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiZ3JvdXBzIjogWwogIHsKICAgImxhYmVsIjogIlNleCIsCiAgICJ2YWx1ZV9jb2wiOiAiU0VYIgogIH0sCiAgewogICAibGFiZWwiOiAiVHJlYXRtZW50IEdyb3VwIiwKICAgInZhbHVlX2NvbCI6ICJBUk0iCiAgfSwKICB7CiAgICJsYWJlbCI6ICJSYWNlIiwKICAgInZhbHVlX2NvbCI6ICJSQUNFIgogIH0sCiAgewogICAibGFiZWwiOiAiU2l0ZSIsCiAgICJ2YWx1ZV9jb2wiOiAiU0lURSIKICB9CiBdLAogImJpbl9hbGdvcml0aG0iOiAiU2NvdHQncyBub3JtYWwgcmVmZXJlbmNlIHJ1bGUiLAogIm5vcm1hbF9yYW5nZSI6IHRydWUsCiAiZGlzcGxheV9ub3JtYWxfcmFuZ2UiOiBmYWxzZSwKICJhbm5vdGF0ZV9iaW5fYm91bmRhcmllcyI6IGZhbHNlLAogInRlc3Rfbm9ybWFsaXR5IjogZmFsc2UsCiAiY29tcGFyZV9kaXN0cmlidXRpb25zIjogdHJ1ZQp9&draw&controls=min)
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-058`: Verify an annotation appears in the top right of the each grouped histogram chart with a p-value and an info icon
-  - AI comment: Statistical behavior needs explicit validation stance and acceptable approximation boundary.
-- `SH-REG-059`: Verify hovering over a p-value displays information about the statistical test
-  - AI comment: Statistical behavior needs explicit validation stance and acceptable approximation boundary.
-- `SH-REG-061`: Verify the p-values update upon selecting a different measure
-  - AI comment: Statistical behavior needs explicit validation stance and acceptable approximation boundary.
-- `SH-REG-062`: (Use these test notes for the following 9 tests and make sure the version is dev-v2.5.0 [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiZ3JvdXBzIjogWwogIHsKICAgImxhYmVsIjogIlNleCIsCiAgICJ2YWx1ZV9jb2wiOiAiU0VYIgogIH0sCiAgewogICAibGFiZWwiOiAiVHJlYXRtZW50IEdyb3VwIiwKICAgInZhbHVlX2NvbCI6ICJBUk0iCiAgfSwKICB7CiAgICJsYWJlbCI6ICJSYWNlIiwKICAgInZhbHVlX2NvbCI6ICJSQUNFIgogIH0sCiAgewogICAibGFiZWwiOiAiU2l0ZSIsCiAgICJ2YWx1ZV9jb2wiOiAiU0lURSIKICB9CiBdLAogImJpbl9hbGdvcml0aG0iOiAiU2NvdHQncyBub3JtYWwgcmVmZXJlbmNlIHJ1bGUiLAogIm5vcm1hbF9yYW5nZSI6IHRydWUsCiAiZGlzcGxheV9ub3JtYWxfcmFuZ2UiOiBmYWxzZSwKICJhbm5vdGF0ZV9iaW5fYm91bmRhcmllcyI6IGZhbHNlLAogInRlc3Rfbm9ybWFsaXR5IjogZmFsc2UsCiAiY29tcGFyZV9kaXN0cmlidXRpb25zIjogZmFsc2UKfQ==&draw&controls=min)
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-072`: (Use this setting for the following test and make sure the version is dev-v2.5.0 [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiYmluX2FsZ29yaXRobSI6ICJTY290dCdzIG5vcm1hbCByZWZlcmVuY2UgcnVsZSIsCiAibm9ybWFsX3JhbmdlIjogdHJ1ZSwKICJkaXNwbGF5X25vcm1hbF9yYW5nZSI6IGZhbHNlLAogImFubm90YXRlX2Jpbl9ib3VuZGFyaWVzIjogZmFsc2UsCiAidGVzdF9ub3JtYWxpdHkiOiBmYWxzZSwKICJjb21wYXJlX2Rpc3RyaWJ1dGlvbnMiOiBmYWxzZQp9&draw)
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-073`: In CAT underneath 3. Customize the Chart, click the radio button labeled text. Verify a setting appears in the settings object named display_normal_range.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `SH-REG-074`: (Use these test notes for the following 2 tests and make sure the version is dev-v2.5.0 [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiZ3JvdXBzIjogWwogIHsKICAgImxhYmVsIjogIlNleCIsCiAgICJ2YWx1ZV9jb2wiOiAiU0VYIgogIH0sCiAgewogICAibGFiZWwiOiAiVHJlYXRtZW50IEdyb3VwIiwKICAgInZhbHVlX2NvbCI6ICJBUk0iCiAgfSwKICB7CiAgICJsYWJlbCI6ICJSYWNlIiwKICAgInZhbHVlX2NvbCI6ICJSQUNFIgogIH0sCiAgewogICAibGFiZWwiOiAiU2l0ZSIsCiAgICJ2YWx1ZV9jb2wiOiAiU0lURSIKICB9CiBdLAogImJpbl9hbGdvcml0aG0iOiAiU2NvdHQncyBub3JtYWwgcmVmZXJlbmNlIHJ1bGUiLAogIm5vcm1hbF9yYW5nZSI6IHRydWUsCiAiZGlzcGxheV9ub3JtYWxfcmFuZ2UiOiBmYWxzZSwKICJhbm5vdGF0ZV9iaW5fYm91bmRhcmllcyI6IGZhbHNlLAogInRlc3Rfbm9ybWFsaXR5IjogZmFsc2UsCiAiY29tcGFyZV9kaXN0cmlidXRpb25zIjogZmFsc2UKfQ==&draw&controls=min) )
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-077`: (Use this setting for the following test and make sure the version is dev-v2.5.0 [TEST NOTES](https://rhoinc.github.io/CAT/?re=c2FmZXR5LWhpc3RvZ3JhbQ==&ve=Z3JvdXAtY29tcGFyaXNvbnM=&de=Y2xpbmljYWwtdHJpYWxzL3JlbmRlcmVyLXNwZWNpZmljL2FkYmRzLmNzdg==&se=ewogIm1lYXN1cmVfY29sIjogIlRFU1QiLAogInZhbHVlX2NvbCI6ICJTVFJFU04iLAogImlkX2NvbCI6ICJVU1VCSklEIiwKICJ1bml0X2NvbCI6ICJTVFJFU1UiLAogIm5vcm1hbF9jb2xfbG93IjogIlNUTlJMTyIsCiAibm9ybWFsX2NvbF9oaWdoIjogIlNUTlJISSIsCiAiYmluX2FsZ29yaXRobSI6ICJTY290dCdzIG5vcm1hbCByZWZlcmVuY2UgcnVsZSIsCiAibm9ybWFsX3JhbmdlIjogdHJ1ZSwKICJkaXNwbGF5X25vcm1hbF9yYW5nZSI6IGZhbHNlLAogImFubm90YXRlX2Jpbl9ib3VuZGFyaWVzIjogZmFsc2UsCiAidGVzdF9ub3JtYWxpdHkiOiB0cnVlLAogImdyb3VwX2J5IjogIkFSTSIsCiAiY29tcGFyZV9kaXN0cmlidXRpb25zIjogdHJ1ZQp9&draw&controls=min) )
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SH-REG-078`: Verify a disclaimer appears in the tooltip of the info icons of the annotated p-values in both the main chart and the grouped histograms with this text: Caution: This graphic has been thoroughly tested, but is not validated.
-  - AI comment: Statistical behavior needs explicit validation stance and acceptable approximation boundary.
-- ... 7 additional flagged rows in `docs/requirements/safety-histogram.md`.
+### Q-SH-001 — Normal range behavior split
+
+Should `SH-FUNC-004` be split into separate requirements for normal-range band rendering, default hidden checkbox behavior, and missing LLN/ULN control hiding?
+
+Recommendation: yes. These are separately testable behaviors and should map to separate tests.
+
+### Q-SH-002 — X-axis limit controls
+
+Should `SH-FUNC-005` be split into lower/upper x-domain inputs, stepper behavior, blur-to-apply behavior, and chart redraw behavior?
+
+Recommendation: yes. This avoids one giant test with ambiguous failure diagnosis.
+
+### Q-SH-003 — Linked-table lead-in
+
+Can `SH-FUNC-009` be dropped if `SH-FUNC-010` through `SH-FUNC-012` cover the three linked-table actions?
+
+Recommendation: yes. Keep the child behavior rows and drop the lead-in.
+
+### Q-SH-004 — Histogram p-value method
+
+Should nextgen reproduce the legacy normality test exactly? If yes, what test name, precision, and fixture expected values should be used?
+
+Recommendation: require exact method/precision before implementation. If unavailable, mark p-value rows blocked and implement the rest first.
+
+### Q-SH-005 — External info links
+
+Should histogram info icons continue linking to external pages like Wikipedia, or should nextgen use inline help text?
+
+Recommendation: prefer inline help text plus optional docs links. External navigation from renderer UI is brittle and harder to validate.
+
+### Q-SH-006 — Validation disclaimer text
+
+Should the legacy disclaimer text “thoroughly tested, but is not validated” be preserved exactly?
+
+Recommendation: preserve exact legacy wording until Jeremy approves a replacement; disclaimer wording is compliance-sensitive.
 
 ## safety-outlier-explorer
 
-- `SOE-FUNC-005`: Users are able to adjust the lower limit of the y-axis by manipulating the input within the Lower Limit box. Users are able to adjust the upper limit of the y-axis by manipulating the input within the Upper Limit box. Each limit box has up and down arrows to adjust the value of the box by 1. Users can select an arrow to change the input or delete the current value in the box and type in a new value. When typing in a value, users must click outside of the box to apply the changes. When a user manipulates a y-axis limit, the y-axis on the chart below the controls will reflect the change.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SOE-FUNC-007`: Users can opt to change the method for the normal ranges to the following options: None, LLN-ULN, Standard Deviation, and Quantiles. The default for the normal range controls is set to "LLN-ULN", which is the upper and lower normal range specified in the data. Users may select "None", which will remove the green shading around the normal ranges and will remove the inlier count to the left of the charts. Users may also select "Standard Deviation", which will prompt the user to enter the number of standard deviations they would like to set as the normal range. Altering the default value will change the upper and lower normal range bands in the chart and will change the inlier count to the left of the chart. Users may also select "Quantiles", which prompts the user to enter an upper and lower quantile to set as the normal ranges. Altering the upper quantile will change the upper normal range band in the chart and altering the lower quantile will change the lower normal range band in the chart. Changing the normal ranges may change the number of inliers and the inlier count to the left of the chart will update based on your selections.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SOE-FUNC-011`: Clicking a data point will perform 2 actions:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- `SOE-REG-030`: Confirm that there is a specified unit variable in the form on the left panel of CAT.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `SOE-REG-043`: Confirm that adding the following block to the Settings input will add custom marks to the chart:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Merged harvested artifact SOE-REG-044 into this row: { "custom_marks": [ { "per": [ "USUBJID", "VISIT", "TEST", "STRESN" ], "type": "circle", "attributes": { "fill": "red", "fill-opacity": 1, "stroke": "black", "stroke-opacity": 1 }, "radius": 4, "values": { "DY": [ "56", "112", "168", "224", "280", "336" ] } } ] }
-- `SOE-DATA-004`: The following data specs and chart settings can be used to create a chart with several custom filters, including Sex, Race and Query Status. A sample chart using this configuration is found [here](https://rhoinc.github.io/viz-library/examples/0011-safetyExplorer-queries/safetyoutlierexplorer.html).
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `SOE-CFG-001`: The most straightforward way to customize the Safety Outlier Explorer is by using a configuration object whose properties describe the behavior and appearance of the chart. Since the Safety Outlier Explorer is a Webcharts `chart` object, many default Webcharts settings are set in the [defaultSettings.js file](https://github.com/RhoInc/safety-outlier-explorer/blob/master/src/defaultSettings.js) as [described below](#webcharts-settings). Refer to the [Webcharts documentation](https://github.com/RhoInc/Webcharts/wiki/Chart-Configuration) for more details on these settings.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SOE-CFG-002`: In addition to the standard Webcharts settings several custom settings not available in the base Webcharts library have been added to the Safety Outlier Explorer to facilitate data mapping and other custom functionality. These custom settings are described in detail below. All defaults can be overwritten by users.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `SOE-API-001`: a factory to create a custom [Webcharts chart](https://github.com/RhoInc/Webcharts/wiki/Chart) object
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
+### Q-SOE-001 — Custom marks
 
-## safety-results-over-time
+Should custom marks remain a required feature, and should the JSON fixture live as test data rather than requirement prose?
 
-- `SROT-FUNC-004`: Users are able to adjust the lower limit of the y-axis by manipulating the input within the Lower Limit box. Users are able to adjust the upper limit of the y-axis by manipulating the input within the Upper Limit box. Each limit box has up and down arrows to adjust the value of the box by 1. Users can select an arrow to change the input or delete the current value in the box and type in a new value. When typing in a value, users must click outside of the box to apply the changes. When a user manipulates a y-axis limit, the y-axis on the chart below the controls will reflect the change.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SROT-REG-022`: Confirm that you can update the Unit (setting: unit_col) to a nonexistent variable name in CAT and re-render the chart, where the chart should behave identically, except units are not appended to the options in the Measures filter, or to the y-axis label.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `SROT-REG-025`: Confirm that you can specify a group variable (ARM, SEX, etc.) as well as a group label (Treatment Group, Sex, etc.) in CAT and that the group labels, and not the group variable names) appear in the Group dropdown, as well as in the legend label.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `SROT-CFG-001`: The most straightforward way to customize the Safety Results Over Time is by using a configuration object whose properties describe the behavior and appearance of the chart. Since the Safety Results Over Time is a Webcharts `chart` object, many default Webcharts settings are set in the [defaultSettings.js file](https://github.com/RhoInc/safety-results-over-time/blob/master/src/defaultSettings.js) as [described below](#webcharts-settings). Refer to the [Webcharts documentation](https://github.com/RhoInc/Webcharts/wiki/Chart-Configuration) for more details on these settings.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SROT-CFG-002`: In addition to the standard Webcharts settings several custom settings not available in the base Webcharts library have been added to the Safety Results Over Time to facilitate data mapping and other custom functionality. These custom settings are described in detail below. All defaults can be overwritten by users.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `SROT-API-001`: a factory to create a custom [Webcharts chart](https://github.com/RhoInc/Webcharts/wiki/Chart) object
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
+Recommendation: yes. Requirement should state behavior; fixture belongs in test/evidence.
+
+### Q-SOE-002 — Query demo scope
+
+Should the legacy query-status viz-library example become a nextgen demo requirement, or only supporting evidence?
+
+Recommendation: convert to explicit custom filter/query-mark requirements and use the demo as evidence, not as the requirement itself.
+
+## paneled-outlier-explorer
+
+### Q-POE-001 — Performance idea rows
+
+Should exploratory performance ideas harvested from the wiki be requirements for P004, or a separate investigation backlog?
+
+Recommendation: move exploratory ideas to backlog unless they describe current baseline behavior users depend on.
+
+### Q-POE-002 — Brushing vs replacement interactions
+
+Should paneled-outlier-explorer keep brushing for baseline compatibility, or replace it with a new interaction model?
+
+Recommendation: keep baseline brushing behavior for P004 unless a replacement is explicitly approved; migration should not silently remove major interaction behavior.
+
+### Q-POE-003 — Nested JSON input
+
+Should nextgen paneled-outlier-explorer continue row-based CSV-style input, or support/require nested JSON?
+
+Recommendation: keep row-based input as the primary contract; nested JSON can be a later enhancement if it simplifies performance.
 
 ## safety-shift-plot
 
-- `SSP-REQ-003`: Clicking and dragging the mouse across the data points will open a table to the right of the chart that contains a detailed listing of participant records. This linked table contains the participant's subject ID, their baseline value for the selected measure, the comparison value for the selected measure, the difference between the baseline and comparison value using an integer and a percentage. When the table appears, the data points selected will appear in a gray box inside of the chart, lightening all of the data points not selected in the box. When a user clicks outside of the gray box, the gray box disappears along with the detailed table.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SSP-REG-015`: Confirm that the chart fits on one page.
-  - AI comment: Vague visual acceptance criterion; define concrete browser/visual evidence.
-- `SSP-REG-020`: Confirm that invalid results are removed from the data rather than measures with any invalid results. Invalid results include missing and non-numeric values. Then confirm that the number of removed results is noted in the console (You can confirm by downloading the data from CAT, updating the STRESN column so a few values are bad. When you reupload the edited data you will see that the number changes appropriately in the console).
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `SSP-DATA-004`: The following data specs and chart settings can be used to create a chart with several custom filters, including Sex, Race and Query Status. A sample chart using this configuration is found [here](https://rhoinc.github.io/viz-library/examples/0011-safetyExplorer-queries/safety-shift-plot/).
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `SSP-CFG-001`: The most straightforward way to customize a Safety Shift Plot is by using a configuration object whose properties describe the chart's behavior and appearance. Since the Safety Shift Plot is a Webcharts `chart` object, many default Webcharts settings are set in the [defaultSettings.js file](https://github.com/RhoInc/safety-shift-plot/blob/master/src/defaultSettings.js) as [described below](#webcharts-settings). Refer to the [Webcharts documentation](https://github.com/RhoInc/Webcharts/wiki/Chart-Configuration) for more details on these settings.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency. Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `SSP-CFG-002`: In addition to the standard Webcharts settings several custom settings not available in the base Webcharts library have been added to the Safety Shift Plot to facilitate data mapping and other custom functionality. These custom settings are described in detail below. All defaults can be overwritten by users.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `SSP-API-001`: A factory to create a custom [webChart chart](https://github.com/RhoInc/Webcharts/wiki/Chart) object.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
+### Q-SSP-001 — Brush details split
+
+Should `SSP-REQ-003` be split into brush trigger, detail table content, gray brushed region, non-selected point de-emphasis, and clear behavior?
+
+Recommendation: yes. Each behavior maps to a separate browser test.
+
+### Q-SSP-002 — Invalid data workflow
+
+Should CAT-specific upload/download instructions be dropped from nextgen invalid-data requirements?
+
+Recommendation: yes. Preserve invalid record handling and logging/display, but replace CAT upload/download with standalone fixture tests.
+
+### Q-SSP-003 — One-page layout
+
+What viewport/browser defines “chart fits on one page,” and is vertical scrolling allowed?
+
+Recommendation: define a desktop QA viewport and allow vertical scrolling unless Jeremy needs a stricter dashboard-style constraint.
+
+## safety-delta-delta
+
+### Q-SDD-001 — Details metadata placement
+
+Where should configured `details[]` metadata appear: above the chart, above the detail table, or in the table header?
+
+Recommendation: table header. It is tied to selected participant context and avoids cluttering the main chart.
+
+### Q-SDD-002 — Visit config semantics
+
+Do `settings.visits.x` and `settings.visits.y` mean baseline/comparison visits, x/y measure visits, or something else in the legacy API?
+
+Recommendation: treat them as baseline/comparison visit selectors if that matches observed legacy behavior; document aliases clearly.
+
+## safety-results-over-time
+
+### Q-SROT-001 — Tooltip precision
+
+Should `SROT-REG-014` and `SROT-REG-015` be merged into a single tooltip content/precision requirement?
+
+Recommendation: yes. They are one behavior split by line wrapping.
+
+### Q-SROT-002 — Missing unit column warning
+
+If `unit_col` references a nonexistent variable, should nextgen log a console warning or silently render without units?
+
+Recommendation: render without units and log a warning. Silent fallback hides configuration problems.
+
+### Q-SROT-003 — Unscheduled visits config
+
+Should `settings.unscheduled_visits` be added as a missing row alongside `settings.unscheduled_visit_pattern`?
+
+Recommendation: yes. The pattern only matters if the display toggle exists.
+
+## aeexplorer
+
+### Q-AE-001 — Input update timing
+
+Should prevalence and search filters update on Enter/blur as in the user spec, or live on every keystroke as in regression tests?
+
+Recommendation: use Enter/blur for parity with the user spec unless legacy baseline clearly updates live. Live updates can be expensive for large AE tables.
+
+### Q-AE-002 — Search highlight style
+
+Should search matches be highlighted yellow or bold regal orange?
+
+Recommendation: use the regression-test style if it reflects the newer product decision; otherwise preserve yellow. Need Jeremy decision because source conflicts.
+
+### Q-AE-003 — webchartsDetailTable mode
+
+Should nextgen preserve `webchartsDetailTable`, or only preserve detail-table capabilities like sort, search, pagination, and export?
+
+Recommendation: preserve capabilities, not Webcharts-specific mode names, unless compatibility wrapper requires it.
+
+## ae-timelines
+
+### Q-AET-001 — Sort options
+
+What exact AE timeline sort options and directions should nextgen support?
+
+Recommendation: start with subject identifier alphabetical and earliest AE start day; add additional options only if baseline/demo confirms them.
+
+### Q-AET-002 — Severe AE highlighting
+
+Is severe-AE highlighting a required behavior or only sample configuration in the query demo?
+
+Recommendation: treat it as configurable sample behavior unless the functional specs require it globally.
+
+### Q-AET-003 — Custom marks API
+
+Should nextgen custom marks retain Webcharts `type` and `per` semantics exactly, or use a new mark-extension API?
+
+Recommendation: support a small legacy-compatible adapter, but document nextgen mark-extension behavior separately.
 
 ## web-codebook
 
-- `WCB-FUNC-007`: This drop-down menu is used to group the data by a selected variable. One group variable can be selected at a time. The default group variable is set to none, but the default can be adjusted to any group upon the project team's request. Users can select any variable associated with the data file and may vary by data file. Selecting a group will display the file's data points by group. Display Type: Another feature that categorical variables assume when the data is grouped is the ability to display the data as paneled bar charts or as grouped dot plots. This feature is available for all categorical variables with 5 or fewer levels. The default is set to show the data as a paneled bar chart.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `WCB-FUNC-012`: Users can click on a bar to highlight that subset of the data. Once a bar is selected, the color of the bar will change from grey to orange. The codebook will also highlight that subset of data in all of the other charts in the codebook. Once a bar has been highlighted, the number of records affected will be noted in controls title next to number of rows selected. Users can select multiple grey bars to highlight and add their values to the highlighted population. Selecting a bar with highlight will remove the highlight from that bar and all associated highlighted data. In addition to highlighting the selected data in the codebook, highlighted records will have an orange background in the data listing view and will be sorted to appear first in the data listing. Users can remove the highlight by selecting the "Clear Highlighting" button and the highlight will reset if the user selects a grouping variable, changes the file, or changes a setting in the codebook.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `WCB-FUNC-015`: Displayed under the row of filters, this statement provides the total number of data set columns shown in the codebook. The statement also displays the number of data set rows in integers as well as the percentage of rows to one decimal place. The total number of columns is static when the user manipulates the data, but the number of rows shown changes. In the default view, all row data is included in the codebook, or 100%. When filters are used, the data shown in the codebook is manipulated and the number of data set rows shown at the top of the page may increase or decrease, depending on the variable selected. When columns are hidden or unhidden, the number of columns changes.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `WCB-FUNC-020`: By moving a mouse cursor over a continuous variable's bar in the chart, users can view metadata for some variables. Hovering the cursor over a particular bar will display the n and the range for that data point. Hovering over a vertical bar will display metadata (n and an additional variable) and hovering over a horizontal bar will display metadata (variable, n, percent, and number and line corresponding to difference from overall rate). Hovering over one of the data values listed underneath a categorical variable will display the n and hover over the "…" in a variable with continuous data will display the number of values not shown. When categorical data is grouped, users can hover over a grouped dot plot to display its metadata (variable, n, and percent).
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `WCB-FUNC-023`: Users can click on a column header and sort the data within a column in ascending and descending order. The first time a user clicks the column header, the column is sorted in ascending order and a box appears above the data listing containing the variable name that has been selected and an arrow indicating the direction of the ordered data. When a user clicks the column header a second time, the data will be sorted in descending order and the direction of the arrow in the box above the data listing will change to match the new sort. The box containing the variable name can be closed out.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `WCB-FUNC-025`: Users can download the data as a CSV by clicking on the 'CSV' button located underneath the chart within the detailed view. The CSV file will contain all of the data if no filters have been utilized. If filters have been used, the CSV file will contain the resulting data. The file will also capture any sorting that has been initialized in the data. The CSV download will be named using the following convention: webchartsTableExport, date, and time.
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `WCB-FUNC-026`: This tab allows users to create custom charts to compare 2 variables from the loaded data set. The user can use the x-axis and y-axis drop-down menus to select any column from the data. Grouping by a variable will panel the charts automatically and add the variable options as labels to the charts. This chart maker supports 4 chart types that render automatically in repose to the type of variables selected by the user. When x and y are both continuous, a scatter plot is created; when x is continuous and y is categorical, a horizontal dot plot is created; when x is categorical and y is continuous, a vertical dot plot is created; when x and y are both categorical, a stacked bar chart is created along with a legend. Additionally, all highlighting done in the codebook is also reflected as orange data points in the charts created by the Chart Maker.
-  - AI comment: Long compound row; consider splitting after Jeremy review if it encodes multiple behaviors.
-- `WCB-REG-020`: Change variableTypes for SITEID to continuous using CAT - confirm that the continuous chart is rendered in the codebook tab. Change it back to cagetorical, and confirm that it displays the categorical chart.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `WCB-REG-023`: Confirm that continuous variables are marked with a "#", categorical variables (with unique levels <= config.maxLevels) are marked with "cat" and categorical variables (with unique levels > config.maxLevels) are marked as 'abc' indicating a character variable.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `WCB-REG-024`: Change the maxLevels option using CAT (e.g. settings of `{maxLevels:10}`) and confirm that the type indicator updates as expected.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `WCB-REG-029`: Confirm that missing values are no longer counted as a unique level for categorical variables. For example, AESEQ in the default ADAE data set in CAT should have 5 unique levels (not 6).
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `WCB-REG-030`: Confirm that non-numeric variables are treated as missing when type is set to "continuous". This can be tested on any data set in CAT by toggling a character variable ("RACE", "SEX", etc) to a type of "continuous" on the settings page.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `WCB-REG-036`: Confirm that outliers are in the box plot for continuous charts lots of outliers (n>100). Message should be printed in console (e.g. `clinical-trials/sdtm/lb.csv` in CAT)
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `WCB-REG-047`: Confirm that filters that include missing values now show "[No Value Provided]" instead of just an empty string, and that the filters still work as expected. This can be seen for several filters (AESER, AEONGO) with the default data set in CAT.
-  - AI comment: Legacy CAT/viz-library-specific check; confirm whether it remains in scope for nextgen standalone demos.
-- `WCB-REG-095`: Confirm that "M" is treated as missing for "SEX" when using the following text settings:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- `WCB-CFG-011`: Added in v1.1. Sets control visibility on initial load, with the following valid options:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- `WCB-CFG-015`: Added in v1.3. Sets visibility for codebook charts on initial load, with the following valid options:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- `WCB-CFG-019`: Sets tabs to be included in the codebook. The simplest way to specify tabs is via an array of strings. Valid options are as follows (others are ignored):
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it. Merged harvested artifact WCB-CFG-020 into this row: `"codebook"` Merged harvested artifact WCB-CFG-021 into this row: `"listing"`
-- `WCB-CFG-049`: An valid [webcharts table configuration object](https://github.com/RhoInc/webcharts/wiki/Table-Configuration) that controls the appearance and features of the files listing. _Added in v1.2.1_
-  - AI comment: Legacy Webcharts API/detail; preserve behavior only if needed, not implementation dependency.
-- `WCB-API-001`: Everything in this library is scoped under the webcodebook namespace:
-  - AI comment: Requirement ends with a colon and may be an aggregate lead-in; confirm whether child rows cover it.
-- ... 2 additional flagged rows in `docs/requirements/web-codebook.md`.
+### Q-WCB-001 — Initial chart visibility
+
+For P004 baseline, should codebook charts be hidden or visible on initial load? Regression rows and config defaults conflict.
+
+Recommendation: choose visible if config default says `chartVisibility: "visible"`; add a separate test proving config can start hidden.
+
+### Q-WCB-002 — Exact type indicators
+
+Must P004 preserve exact type indicators `#`, `cat`, and `abc`, or only preserve underlying type classification behavior?
+
+Recommendation: preserve exact indicators in the initial migration because they are user-visible and regression-tested.
+
+### Q-WCB-003 — CSV export placement and filename
+
+Must nextgen preserve exact CSV button placement and `webchartsTableExport` filename prefix, or only filtered/sorted CSV export behavior?
+
+Recommendation: preserve export behavior, but allow filename prefix to change if documented. Button placement should match baseline unless UI redesign is explicit.
+
+### Q-WCB-004 — Webcharts table/chart factory exports
+
+Should nextgen preserve public chart factory names only, or exact legacy source-path-backed exports?
+
+Recommendation: preserve public names if consumed externally; do not preserve source-path-backed internals.
