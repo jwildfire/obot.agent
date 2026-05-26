@@ -10,31 +10,41 @@ Start with **safety-histogram** because it is the first migration target and exp
 
 ### Q-P004-001 — Legacy API compatibility
 
-Should nextgen renderer packages preserve legacy factories like `safetyHistogram(element, settings).init(data)`, or can they expose a new API if rendered behavior and htmlwidget integration are preserved?
+Status: answered by Jeremy on 2026-05-26 — agreed with recommendation.
+
+Decision: nextgen renderer packages should preserve a thin legacy factory compatibility wrapper where practical, while using a clean nextgen internal API.
 
 Recommendation: preserve a thin compatibility wrapper for vX.0.0 where practical, but design internals around a nextgen API. This limits migration friction while keeping the refactor clean.
 
 ### Q-P004-002 — Webcharts config compatibility
 
-Should nextgen renderers accept legacy Webcharts configuration objects, translate a supported subset, or drop Webcharts config compatibility entirely?
+Status: answered by Jeremy on 2026-05-26 — agreed with recommendation.
+
+Decision: nextgen renderers should translate a documented subset of legacy Webcharts configuration for core data mapping, filters, controls, and display behavior. Unsupported Webcharts-only settings should be explicitly marked `replaced` or `deferred`.
 
 Recommendation: translate a documented subset for core data mapping/controls and explicitly mark unsupported Webcharts-only settings as replaced/deferred. Full compatibility would preserve too much legacy surface area.
 
 ### Q-P004-003 — CAT/viz-library test scope
 
-Should CAT/viz-library-specific regression tests be preserved as requirements, or rewritten as standalone demo/browser tests?
+Status: answered by Jeremy on 2026-05-26 — agreed with recommendation.
+
+Decision: CAT/viz-library-specific regression tests should be rewritten as standalone demo/browser tests unless they describe behavior still needed by gsm.safety/htmlwidgets. CAT/viz-library remains historical evidence/context, not required runtime.
 
 Recommendation: rewrite them as standalone demo/browser tests unless they describe a behavior still needed by gsm.safety/htmlwidgets. CAT itself should be evidence context, not the required runtime.
 
 ### Q-P004-004 — Visual acceptance criteria
 
-What viewport/browser target should define vague visual requirements like “fits on one page” or “looks good”?
+Status: answered by Jeremy on 2026-05-26 — agreed with recommendation.
+
+Decision: default browser QA should use Chromium at 1440x900. Vertical scrolling is allowed unless a source requirement explicitly requires single-screen/no-scroll behavior.
 
 Recommendation: use a documented desktop viewport for baseline QA, e.g. Chromium 1440x900, and explicitly allow page scrolling unless the source behavior requires single-screen layout.
 
 ### Q-P004-005 — Statistical parity
 
-For histogram p-values and grouped comparisons, should nextgen reproduce the exact legacy method/precision/disclaimer, or define a new documented method?
+Status: answered by Jeremy on 2026-05-26 — agreed with recommendation.
+
+Decision: nextgen histogram p-values and grouped comparisons should preserve the legacy method only if the exact method and fixture-level expected outputs can be identified. Otherwise, p-value rows should be marked `blocked` while non-statistical renderer work proceeds.
 
 Recommendation: preserve the legacy method only if we can identify it exactly and test fixture outputs; otherwise define a new method with explicit disclaimers and manual review before calling it production-ready.
 
@@ -42,19 +52,25 @@ Recommendation: preserve the legacy method only if we can identify it exactly an
 
 ### Q-SH-001 — Normal range behavior split
 
-Should `SH-FUNC-004` be split into separate requirements for normal-range band rendering, default hidden checkbox behavior, and missing LLN/ULN control hiding?
+Status: answered by Jeremy on 2026-05-26 — yes.
+
+Decision: split `SH-FUNC-004` into separate requirements for normal-range band rendering, default hidden checkbox behavior, and missing LLN/ULN control hiding.
 
 Recommendation: yes. These are separately testable behaviors and should map to separate tests.
 
 ### Q-SH-002 — X-axis limit controls
 
-Should `SH-FUNC-005` be split into lower/upper x-domain inputs, stepper behavior, blur-to-apply behavior, and chart redraw behavior?
+Status: answered by Jeremy on 2026-05-26 — agreed with recommendation.
+
+Decision: split `SH-FUNC-005` into lower/upper x-domain inputs, stepper behavior, blur-to-apply behavior, and chart redraw behavior.
 
 Recommendation: yes. This avoids one giant test with ambiguous failure diagnosis.
 
 ### Q-SH-003 — Linked-table lead-in
 
-Can `SH-FUNC-009` be dropped if `SH-FUNC-010` through `SH-FUNC-012` cover the three linked-table actions?
+Status: answered by Jeremy on 2026-05-26 — drop `SH-FUNC-009`; update `SH-FUNC-010` through `SH-FUNC-012` with needed context.
+
+Decision: `SH-FUNC-009` is dropped as a non-testable lead-in. `SH-FUNC-010` through `SH-FUNC-012` retain the clicked-bar/detail-table context.
 
 Recommendation: yes. Keep the child behavior rows and drop the lead-in.
 

@@ -13,7 +13,7 @@ The current matrices are working drafts. The initial harvest intentionally captu
 | [aeexplorer](./aeexplorer.md) | 74 | reviewed by sub-agent | resolve input timing, highlight style, detail-table scope |
 | [paneled-outlier-explorer](./paneled-outlier-explorer.md) | 114 | reviewed by sub-agent | separate exploratory ideas from P004 requirements |
 | [safety-delta-delta](./safety-delta-delta.md) | 48 | reviewed by sub-agent | resolve visit/config semantics and detail placement |
-| [safety-histogram](./safety-histogram.md) | 121 | reviewed by sub-agent | resolve statistical parity and API/config compatibility |
+| [safety-histogram](./safety-histogram.md) | 120 | reviewed by sub-agent | resolve statistical parity and API/config compatibility |
 | [safety-outlier-explorer](./safety-outlier-explorer.md) | 84 | reviewed by sub-agent | resolve custom marks and legacy API scope |
 | [safety-results-over-time](./safety-results-over-time.md) | 58 | reviewed by sub-agent | merge tooltip rows and repair unscheduled-visit config rows |
 | [safety-shift-plot](./safety-shift-plot.md) | 39 | reviewed by sub-agent | split brush/invalid-data behavior and define visual viewport |
