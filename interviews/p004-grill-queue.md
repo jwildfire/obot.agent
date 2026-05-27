@@ -82,15 +82,19 @@ Recommendation: require exact method/precision before implementation. If unavail
 
 ### Q-SH-005 — External info links
 
-Should histogram info icons continue linking to external pages like Wikipedia, or should nextgen use inline help text?
+Status: answered by Jeremy on 2026-05-26 — agreed with recommendation.
+
+Decision: safety-histogram info icons should use inline/help-panel text inside the chart/demo. Optional external documentation links may live outside the chart UI.
 
 Recommendation: prefer inline help text plus optional docs links. External navigation from renderer UI is brittle and harder to validate.
 
 ### Q-SH-006 — Validation disclaimer text
 
-Should the legacy disclaimer text “thoroughly tested, but is not validated” be preserved exactly?
+Status: answered by Jeremy on 2026-05-26 — remove the disclaimer.
 
-Recommendation: preserve exact legacy wording until Jeremy approves a replacement; disclaimer wording is compliance-sensitive.
+Decision: the nextgen safety-histogram UI should remove the legacy p-value tooltip disclaimer text: `Caution: This graphic has been thoroughly tested, but is not validated.`
+
+Recommendation was overridden: preserve exact legacy wording until replacement approval. Jeremy approved removal instead.
 
 ## safety-outlier-explorer
 
