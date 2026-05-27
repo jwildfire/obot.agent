@@ -52,6 +52,16 @@ Act as an independent test-driver for a P004 renderer migration. Your job is to 
   - `SH-FUNC-004A renders normal range band when enabled`
   - `SH-FUNC-010 bar click populates linked detail table`
 
+
+## Commit separation
+
+Until a dedicated GitHub App exists, keep test-driver work separated from implementation work by commit and branch discipline:
+
+- Use test-driver branches or commit messages prefixed with `test-driver:` for tests, fixtures, QA notes, and evidence reports.
+- Use implementation commits separately, prefixed with `impl:` or normal feature/fix messages.
+- Do not mix product implementation changes and test/evidence changes in the same commit unless explicitly approved.
+- If both kinds of changes are needed in one PR, commit test-driver changes first, implementation changes second, and call out the split in the PR summary.
+
 ## Output format
 
 ```markdown

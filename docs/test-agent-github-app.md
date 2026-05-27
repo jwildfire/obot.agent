@@ -73,6 +73,16 @@ git config user.email "<app-id>+obot-test-agent[bot]@users.noreply.github.com"
 
 Do not hard-code this until the app exists and GitHub exposes the exact bot identity.
 
+
+## Interim commit separation before app installation
+
+Until `obot-test-agent` exists and has credentials configured, separate test-driver and implementation work by branch/commit discipline:
+
+- Prefix test-driver commits with `test-driver:`.
+- Keep implementation commits separate from test/evidence commits.
+- Do not mix renderer implementation edits with test-driver evidence edits in one commit unless explicitly approved.
+- If one PR contains both workstreams, list test-driver commits and implementation commits separately in the PR summary.
+
 ## Test-driver guardrails
 
 The app should only be used by the bounded test-driver workflow:
