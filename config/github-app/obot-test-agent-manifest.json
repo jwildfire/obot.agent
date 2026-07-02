@@ -1,0 +1,18 @@
+{
+  "name": "obot-test-agent",
+  "url": "https://github.com/obot-claw/safety-agent",
+  "description": "Bounded P004 test-driver agent for Vitest/Playwright evidence commits and PRs.",
+  "public": false,
+  "hook_attributes": {
+    "active": false
+  },
+  "default_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "issues": "write",
+    "actions": "read",
+    "checks": "read",
+    "statuses": "read"
+  },
+  "default_events": []
+}

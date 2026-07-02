@@ -1,0 +1,1 @@
+https://github.com/organizations/obot-claw/settings/apps/new?name=obot-test-agent&description=Bounded%20P004%20test-driver%20agent%20for%20Vitest%2FPlaywright%20evidence%20commits%20and%20PRs&url=https%3A%2F%2Fgithub.com%2Fobot-claw%2Fsafety-agent&public=false&webhook_active=false&contents=write&pull_requests=write&issues=write&actions=read&checks=read&statuses=read

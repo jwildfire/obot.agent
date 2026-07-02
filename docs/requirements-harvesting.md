@@ -20,3 +20,15 @@
 ## Output format
 
 Use the template in `templates/requirements-matrix.md`.
+
+## AI review stage
+
+Raw harvesting is intentionally broad. Before human review, perform an agentic AI review. Assign one or more sub-agents disjoint renderer scopes and provide each reviewer with:
+
+- the harvested requirement matrix;
+- the package README, configuration/API docs, and source wiki pages;
+- the instruction to review each row as a potential standalone requirement.
+
+The reviewer should remove obvious non-requirements, merge orphaned code/settings snippets into nearby rows, propose wording edits, flag ambiguous rows as `needs-jeremy-review`, and create/update `interviews/p004-grill-queue.md` for Telegram/grill-me follow-up.
+
+Rows marked `needs-jeremy-review` should not block documentation, but they should be resolved before implementation is called complete for that renderer.
