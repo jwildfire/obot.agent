@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# obot-app-token — mint a 1-hour installation token for the obotclaw GitHub App.
+#
+# Prints the token to stdout and nothing else, so it composes:
+#   GH_TOKEN=$(obot-app-token) gh api ...        # act as obotclaw[bot]
+#   git push https://x-access-token:$(obot-app-token)@github.com/jwildfire/<repo>.git
+#
+# The private key lives in the macOS Keychain (service "obot-github-app"),
+# stored base64-encoded because `security find-generic-password -w` mangles
+# raw multiline values. Seed it with:
+#   security add-generic-password -a obotclaw -s obot-github-app -w "$(base64 -i key.pem)"
+#
+# Design: obot.roadmap requirement #3, requirements/design/3_design.html §5.
+# No dependencies beyond macOS system tools (security, openssl, curl).
+
+set -euo pipefail
+
+APP_ID="${OBOT_APP_ID:-4215246}"
+INSTALLATION_ID="${OBOT_INSTALLATION_ID:-144370633}"
+KEYCHAIN_SERVICE="${OBOT_KEYCHAIN_SERVICE:-obot-github-app}"
+API="${GITHUB_API_URL:-https://api.github.com}"
+
+fail() { printf 'obot-app-token: %s\n' "$1" >&2; exit 1; }
+
+pem="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -w 2>/dev/null | base64 -d)" \
+  || fail "no Keychain item for service '$KEYCHAIN_SERVICE' (see header comment to seed it)"
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+now="$(date +%s)"
+header="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
+payload="$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)"
+sig="$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign <(printf '%s' "$pem") | b64url)"
+
+resp="$(curl -sS -X POST \
+  -H "Authorization: Bearer ${header}.${payload}.${sig}" \
+  -H "Accept: application/vnd.github+json" \
+  "$API/app/installations/$INSTALLATION_ID/access_tokens")"
+
+token="$(printf '%s' "$resp" | sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p' | head -n 1)"
+[ -n "$token" ] || fail "token mint failed: $(printf '%s' "$resp" | tr -d '\n' | cut -c 1-300)"
+
+printf '%s\n' "$token"
