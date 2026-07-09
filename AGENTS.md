@@ -41,6 +41,22 @@ Minimum test layers:
 5. **Visual regression tests** - stable screenshots where feasible.
 6. **Requirements traceability tests** - every harvested requirement maps to test evidence or a documented manual review.
 
+## Branching and release model (safety.viz)
+
+Established 2026-07-08 alongside the documentation-site design
+([obot.roadmap#21](https://github.com/jwildfire/obot.roadmap/issues/21),
+[design doc](https://jwildfire.github.io/obot.roadmap/requirements/design/21_design.html)):
+
+- **`dev` is the integration branch** — feature-branch PRs target `dev`.
+- **Releases are PRs from `dev` → `main`.** `main` is protected: PR required, the
+  "Build, format, and test" check must pass, no force pushes or deletions.
+- **The documentation site builds three tiers** from the `gh-pages` branch:
+  the site root from `main` (releases), `/dev/` from `dev` (integration preview),
+  and `/pr/{N}/` per open PR (removed on close).
+- **Definition of done:** a renderer module is not done — and its migration
+  requirement is not Released — until its site entry is complete: gallery demo,
+  test-evidence page (requirements → tests → screenshots), and API reference.
+
 ## Preferred migration sequence
 
 1. Baseline and document current behavior.
