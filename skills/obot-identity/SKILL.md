@@ -8,11 +8,13 @@ applies. Covers minting tokens with `scripts/obot-app-token` and the git/gh usag
 
 | Actor | Identity |
 |---|---|
-| Jeremy working interactively; agent work Jeremy reviews before it posts (requirement drafting, working-session PRs, sign-offs, merges) | **@jwildfire** — existing `gh` auth, unchanged |
-| Automation acting on its own; agent actions that should read as obot's (scheduled workflows, cross-repo rollups, bot status comments) | **obotclaw[bot]** — token from `obot-app-token` |
+| Jeremy acting himself: his comments, reviews, sign-offs, merges | **@jwildfire** — existing `gh` auth, unchanged |
+| Agent-authored development work: commits, branch pushes, and the PRs the agent drafts — working sessions included (Jeremy's call, 2026-07-09; first: safety.viz#11) | **obotclaw[bot]** — token from `obot-app-token`, bot-attributed commits below |
+| Automation acting on its own (scheduled workflows, cross-repo rollups, bot status comments) | **obotclaw[bot]** — same |
 
 The AGENTS.md attribution convention (drafted-by line in the body) applies to the *content*
-of issues, PRs, and comments regardless of which identity posts them.
+of issues, PRs, and comments regardless of which identity posts them. Jeremy still reviews
+and merges as @jwildfire — the bot authors the work; it never approves or merges it.
 
 ## The app, in one paragraph
 
