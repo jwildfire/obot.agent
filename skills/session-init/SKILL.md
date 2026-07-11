@@ -45,9 +45,10 @@ conversation's own context) or at the end of a session (that is
 
 ### 0. Session identity reminder
 
-Sessions are named and colored by convention: `session init YYYY-MM-DD`, orange.
+Sessions are named and colored by convention: `😺🤖 {YYYY-MM-DD} {session # (only if > 1 that day)}`, orange
+(template per Jeremy 2026-07-11; applies to spawned siblings too, numbered in day order).
 In an interactive session these are the built-in slash commands
-`/name session init YYYY-MM-DD` and `/color orange`, which the model **cannot
+`/name 😺🤖 YYYY-MM-DD` and `/color orange`, which the model **cannot
 run** — remind @jwildfire to type them if the session isn't named yet. A
 background session can set `name` and `color` directly in its own
 `~/.claude/jobs/{id}/state.json`.
@@ -79,7 +80,7 @@ pull is **batched, not per-repo/per-item** — three calls total, no drill-downs
   ```
 
   Filter to the active repos (obot.roadmap, safety.viz, gsm.safety,
-  safety-histogram, safety.agent) in the parse step (`jq` is not installed —
+  safety-histogram, obot.agent) in the parse step (`jq` is not installed —
   use `python3`). Do **not** run `gh pr view` / `gh pr checks` per item — list
   fields plus board stage are enough to prioritize; drill into a specific PR
   only when its next step is genuinely ambiguous from title/state/draft flag.

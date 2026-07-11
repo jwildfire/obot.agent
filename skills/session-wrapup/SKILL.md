@@ -56,7 +56,7 @@ subagents). Sweep the evidence, don't trust recall:
   made, promises to @jwildfire, and anything that never reached GitHub, the
   scratchpad, or memory.
 - **GitHub activity** since the session started, across the active repos
-  (`obot.roadmap`, `safety.viz`, `gsm.safety`, `safety-histogram`, `safety.agent`,
+  (`obot.roadmap`, `safety.viz`, `gsm.safety`, `safety-histogram`, `obot.agent`,
   and upstream `gsm.agent` via its local clone — the Gilead-BioStats API is
   SAML-blocked). Per repo:
   `gh issue list -R jwildfire/{repo} --state all --search "updated:>={YYYY-MM-DD}"`
