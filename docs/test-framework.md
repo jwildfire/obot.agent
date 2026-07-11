@@ -15,7 +15,7 @@ This framework defines how nextgen SafetyGraphics renderers should prove behavio
    - Evidence: jsdom or lightweight browser tests tagged with requirement IDs.
 4. **Browser functional tests**
    - real rendered demos: controls, filters, hover/click/brush, listing search/sort/pagination/export, console warnings/errors.
-   - Evidence: Playwright or OpenClaw browser QA notes with URL, cache-busting token, steps, and requirement IDs.
+   - Evidence: automated Playwright tests, or interactive Claude-in-Chrome QA notes with URL, cache-busting token, steps, and requirement IDs.
 5. **Visual regression tests**
    - screenshots for stable baseline states and critical interactions.
    - Evidence: screenshot diffs with explicit thresholds and accepted-review notes.

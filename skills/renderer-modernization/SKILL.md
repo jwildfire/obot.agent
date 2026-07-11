@@ -1,3 +1,8 @@
+---
+name: renderer-modernization
+description: "Use when planning or implementing migration work in a legacy SafetyGraphics renderer. Sequences the work — requirements matrix first, baseline tests, extracting pure logic from Webcharts callbacks, compatibility wrapper, incremental replacement — and lists the hard don'ts."
+---
+
 # Renderer Modernization Skill
 
 Use when planning or implementing migration work in a legacy SafetyGraphics renderer.

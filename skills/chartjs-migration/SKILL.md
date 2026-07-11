@@ -1,3 +1,8 @@
+---
+name: chartjs-migration
+description: "Use when replacing Webcharts rendering with Chart.js or deciding whether Chart.js fits a display. Covers fit-assessment questions, an incremental migration pattern behind a thin adapter, and the gsm.viz validate-configure-structure-render flow."
+---
+
 # Chart.js Migration Skill
 
 Use when replacing Webcharts rendering with Chart.js or deciding whether Chart.js fits a display.
