@@ -45,9 +45,10 @@ conversation's own context) or at the end of a session (that is
 
 ### 0. Session identity reminder
 
-Sessions are named and colored by convention: `😺🤖 {YYYY-MM-DD} {session # (only if > 1 that day)}`, orange
+Sessions are named by convention: `😺🤖 {YYYY-MM-DD} {session # (only if > 1 that day)}`
 (template per Jeremy 2026-07-11; applies to spawned siblings too, numbered in day order).
-In an interactive session these are the built-in slash commands
+Colors: **orange** for the main/lead session, **green** for spawned siblings
+(per Jeremy 2026-07-11). In an interactive session these are the built-in slash commands
 `/name 😺🤖 YYYY-MM-DD` and `/color orange`, which the model **cannot
 run** — remind @jwildfire to type them if the session isn't named yet. A
 background session can set `name` and `color` directly in its own
