@@ -1,3 +1,8 @@
+---
+name: gxp-test-framework
+description: "Use when designing or reviewing tests for nextgen renderer work. Defines the required test layers (unit, integration, browser, visual regression, traceability), evidence-first principles, and a review checklist tying requirement IDs to test evidence."
+---
+
 # GxP Test Framework Skill
 
 Use when designing or reviewing tests for nextgen renderer work.

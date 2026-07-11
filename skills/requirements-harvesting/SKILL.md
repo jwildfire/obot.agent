@@ -1,3 +1,8 @@
+---
+name: requirements-harvesting
+description: "Use when extracting functional requirements from legacy renderer documentation — wiki specs, settings schemas, READMEs, test fixtures — into atomic requirements with stable IDs, grouped by area, feeding docs/requirements/ matrices and traceability."
+---
+
 # Requirements Harvesting Skill
 
 Use when extracting functional requirements from legacy renderer documentation.

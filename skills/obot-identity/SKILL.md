@@ -1,3 +1,8 @@
+---
+name: obot-identity
+description: "Use when an agent action should be attributed to the obot automation identity (obotclaw[bot]) rather than @jwildfire, or when deciding which of the two identities applies. Covers minting installation tokens with scripts/obot-app-token and the git/gh usage patterns for bot-attributed commits, pushes, issues, and PRs."
+---
+
 # obot Identity Skill
 
 Use when an agent action should be attributed to the obot automation identity
@@ -15,6 +20,15 @@ applies. Covers minting tokens with `scripts/obot-app-token` and the git/gh usag
 The AGENTS.md attribution convention (drafted-by line in the body) applies to the *content*
 of issues, PRs, and comments regardless of which identity posts them. Jeremy still reviews
 and merges as @jwildfire — the bot authors the work; it never approves or merges it.
+
+### Attribution mechanics (D2, resolved 2026-07-11)
+
+`obotclaw[bot]` is the **git author** of agent-authored commits, AND commits keep the
+agent `Co-Authored-By` trailer (e.g.
+`Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`). This is an explicit, documented
+divergence-plus-extension of gsm.agent's trailer-only attribution convention: upstream
+attributes via the trailer alone, while here the bot takes authorship and the trailer stays
+so the drafting model remains visible. The drafted-by body line convention is unchanged.
 
 ## The app, in one paragraph
 

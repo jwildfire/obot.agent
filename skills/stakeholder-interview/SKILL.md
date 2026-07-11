@@ -1,3 +1,8 @@
+---
+name: stakeholder-interview
+description: "Use when Jeremy's input is needed through Telegram for any project decision — architecture, prioritization, requirements, acceptance criteria, release, terminology, process. Guides question writing with a recommendation, capture into interviews/ logs, and propagating decisions into durable artifacts."
+---
+
 # Stakeholder Interview Skill
 
 Use this skill when Jeremy's input is needed through Telegram for any project decision, not only requirements.

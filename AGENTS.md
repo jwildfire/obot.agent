@@ -1,4 +1,18 @@
-# AGENTS.md - SafetyGraphics Nextgen Renderer Agents
+# AGENTS.md — obot overlay on the gsm.agent harness
+
+## Overlay contract
+
+This repo is an **overlay** on the
+[gsm.agent](https://github.com/Gilead-BioStats/gsm.agent) harness (cloned as `.github/`
+in the obot2 workspace). gsm.agent's AGENTS.md conventions — drafts, attribution,
+approval gates, worktrees, TDD — apply here **in full**. This file adds only the obot
+program layer; it does not restate what upstream owns, and where the two appear to
+conflict, upstream wins unless the divergence is documented explicitly. The one
+documented divergence is commit attribution mechanics — see
+[`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md).
+
+The tiers of agent execution used in this program (*session* / *spawned agent* /
+*subagent*) are defined in [`docs/terminology.md`](docs/terminology.md).
 
 ## Mission
 
@@ -19,7 +33,7 @@ Use gsm.viz as the reference implementation for nextgen JavaScript renderer arch
 
 ## Stakeholder interviews
 
-Use `skills/stakeholder-interview/SKILL.md` for any Jeremy input needed through Telegram. Interviews are not limited to requirements; they cover architecture, prioritization, API design, validation strategy, review questions, and process decisions. Capture answers in `interviews/` and propagate decisions into the relevant durable project artifacts.
+Use `skills/stakeholder-interview/SKILL.md` for any Jeremy input needed through Telegram — architecture, prioritization, API design, validation strategy, review questions, and process decisions, not only requirements. Capture answers in `interviews/` and propagate decisions into the relevant durable artifacts.
 
 ## Required artifacts per renderer
 
@@ -41,9 +55,16 @@ Minimum test layers:
 5. **Visual regression tests** - stable screenshots where feasible.
 6. **Requirements traceability tests** - every harvested requirement maps to test evidence or a documented manual review.
 
-## Branching and release model (safety.viz)
+This is the project-level test-first discipline for JS renderer work, used alongside the
+upstream [`tdd`](https://github.com/Gilead-BioStats/gsm.agent/blob/main/skills/tdd/SKILL.md)
+skill; how the two relate will be settled when gsm.agent's Q3 skills-library work lands
+(D1, deferred 2026-07-11).
 
-Established 2026-07-08 alongside the documentation-site design
+## Branching and release model (safety.viz only)
+
+This model applies to **safety.viz and nothing else** — it is not an ecosystem default.
+For every other repo, follow the upstream rule: do not assume `dev`/`main`; check the
+repo's actual branch model. Established 2026-07-08 alongside the documentation-site design
 ([obot.roadmap#21](https://github.com/jwildfire/obot.roadmap/issues/21),
 [design doc](https://jwildfire.github.io/obot.roadmap/requirements/design/21_design.html)):
 

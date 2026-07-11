@@ -14,7 +14,7 @@ Source: https://github.com/openai/skills
 
 The OpenAI skills catalog is the most relevant baseline for Codex-compatible skills. It documents the standard pattern: a skill is a folder containing `SKILL.md` plus optional scripts/resources. It also supports installation via `$skill-installer` from curated/experimental folders or GitHub URLs.
 
-Recommendation: use this as the structural standard for `safety-agent` skills. Keep local P004 skills in the same `SKILL.md` pattern so they remain portable.
+Recommendation: use this as the structural standard for `obot.agent` skills. Keep local P004 skills in the same `SKILL.md` pattern so they remain portable.
 
 ### 2. Anthropic `webapp-testing`
 
@@ -51,7 +51,7 @@ Sources:
 
 `skill-validator` checks skill structure, link validity, token cost, content quality, and CI integration. `skill-scanner` is a best-effort security scanner for agent skills and explicitly warns that no automated scan is proof of safety. SkillTester provides utility/security benchmarking for many marketplace skills.
 
-Recommendation: before importing third-party skills into `safety-agent`, run a manual review plus at least one static/quality/security check. Do not install large community skill packs wholesale.
+Recommendation: before importing third-party skills into `obot.agent`, run a manual review plus at least one static/quality/security check. Do not install large community skill packs wholesale.
 
 ## Recommended adoption plan
 
@@ -125,7 +125,7 @@ Use before implementation or PR review. Should enforce:
 
 ## Decision
 
-Adopt external skills as references, not dependencies. Build and maintain a narrow local P004 skills library inside `safety-agent`, with clear validation and security guardrails.
+Adopt external skills as references, not dependencies. Build and maintain a narrow local P004 skills library inside `obot.agent`, with clear validation and security guardrails.
 
 ## Follow-up decision: bounded test-driver sub-agent
 
