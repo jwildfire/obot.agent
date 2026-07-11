@@ -68,4 +68,7 @@ Established 2026-07-08 alongside the documentation-site design
 
 ## Repository write policy
 
-Use `obot-claw` forks as staging repositories. Future transfer to `SafetyGraphics` should happen only after repository scope, naming, permissions, and governance are clear.
+All active repos live under the `jwildfire` account; agent-authored commits, pushes,
+and PRs come from `obotclaw[bot]` per `skills/obot-identity/SKILL.md`. Future transfer
+to `SafetyGraphics` should happen only after repository scope, naming, permissions,
+and governance are clear.

@@ -1,4 +1,4 @@
-# Safety Agent Entrypoint
+# obot.agent Entrypoint
 
 Read `AGENTS.md` first. Then choose the relevant skill in `skills/`:
 

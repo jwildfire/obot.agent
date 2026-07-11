@@ -19,7 +19,7 @@ and merges as @jwildfire — the bot authors the work; it never approves or merg
 ## The app, in one paragraph
 
 `obotclaw` is a GitHub App owned by @jwildfire (App ID 4215246, installation 144370633),
-installed only on the whitelisted portfolio repos: obot.roadmap, safety.agent, safety.viz,
+installed only on the whitelisted portfolio repos: obot.roadmap, obot.agent, safety.viz,
 gsm.safety, safety-histogram. Tokens are installation tokens — 1-hour TTL, capped at the
 app's permissions (Contents/Issues/PRs/Discussions/Workflows RW, Actions read, Metadata).
 The private key never leaves the macOS Keychain (service `obot-github-app`). Design:
