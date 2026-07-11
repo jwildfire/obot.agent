@@ -1,10 +1,10 @@
-# safety-agent
+# obot.agent
 
 Agent instructions and GxP-oriented workflow framework for modernizing legacy SafetyGraphics JavaScript renderers.
 
 ## Purpose
 
-`safety-agent` is the operating guide for agents working on the next generation of SafetyGraphics renderer packages. The immediate project is to modernize the legacy RhoInc Safety Explorer Suite renderers staged under `obot-claw`, remove the `webcharts` dependency, and move toward independent modern JavaScript renderers, likely using Chart.js where it fits the display model.
+`obot.agent` (formerly `safety.agent`) is the operating guide for agents working on the next generation of SafetyGraphics renderer packages. The immediate project is to modernize the legacy RhoInc Safety Explorer Suite renderers — forked under `jwildfire` as their migration starts — remove the `webcharts` dependency, and move toward independent modern JavaScript renderers, likely using Chart.js where it fits the display model.
 
 The framework is designed to keep migration work traceable:
 
@@ -23,10 +23,10 @@ Use `gsm.viz` as the JavaScript architecture reference for nextgen renderer work
 First renderer: `safety-histogram`
 
 - Upstream: https://github.com/RhoInc/safety-histogram
-- Staging fork: https://github.com/obot-claw/safety-histogram
+- Working fork: https://github.com/jwildfire/safety-histogram (nextgen work on `dev`)
 - Requirements source: https://github.com/RhoInc/safety-histogram/wiki/Technical-Documentation#functional-specs
-- P004 overview: https://obot-claw.github.io/projects/004/overview.html
-- Safety Histogram deep dive: https://obot-claw.github.io/projects/004/safety-histogram.html
+- Migration requirement: https://github.com/jwildfire/obot.roadmap/issues/2
+- Roadmap site: https://jwildfire.github.io/obot.roadmap/
 
 ## Repository layout
 
