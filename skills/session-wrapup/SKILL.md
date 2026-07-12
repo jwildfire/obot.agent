@@ -17,6 +17,9 @@ done when four things are true:
    applied or proposed scaffold updates (skills, AGENTS.md, memory, config).
 4. **Summary posted** — the day's diary entry is committed, the site deploy is
    green, and the deployed URL is shared for review.
+5. **Next session prepped** — every agreed next-session priority links a hub
+   requirement; any priority without one has its **Business Requirement +
+   Overview** drafted and filed before the session ends.
 
 The routine is **interactive** (@jwildfire's call, 2026-07-09): first **collect**
 the full picture read-only, then **discuss** — present findings and ask clarifying
@@ -92,6 +95,10 @@ check — and record mismatches as **proposed fixes**, don't edit anything yet:
 - **Links intact?** PRs carry `Closes #X` lines and Development-sidebar links;
   sub-issues are attached to their parent (use the `sub-issue-linking` skill).
 - **Metadata set?** Milestone (lowercase `YYYYqN` or `backlog`) and topic labels.
+- **Releases tied?** Any release published this session lists its hub
+  requirement(s) in the release notes — a `Requirements delivered:` line placed
+  before the closing attribution rule. Retro-add via the releases API
+  (`gh api -X PATCH repos/{owner}/{repo}/releases/{id}`) when missing.
 
 Then sweep the session itself for **uncaptured todos**: promises made in
 conversation, "we should…" moments, blockers hit, review requests, deferred
@@ -135,6 +142,17 @@ Draft a prioritized, concrete list of what the next session should pick up:
   carried, so nothing silently drops.
 - The agreed list lands in the diary's **"Next session: loose ends"** section and
   the memory next-session pointer (step 6).
+
+**Roadmap prep — obot.agent orchestration job (1), roadmap-standards enforcement:**
+every priority on the drafted list must link a hub requirement. For any priority
+without one, draft the requirement's **Business Requirement + Overview** sections
+(via `requirement-drafting`; scope questions to @jwildfire are welcome —
+AskUserQuestion) and **file it before the checkpoint**, so the step-5 priorities
+question presents each priority *with* its requirement link. Board-add every new
+requirement with a Status (normally `Requirement Gathering`) and link existing
+implementation issues as sub-issues at filing time (`sub-issue-linking`; note the
+one-parent-per-issue constraint). Later lifecycle sections (Data Requirement,
+Design, Tasks) stay stubbed for their own stages.
 
 ### 5. Checkpoint — three questions, content inside the prompt
 
