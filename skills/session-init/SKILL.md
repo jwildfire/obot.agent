@@ -54,6 +54,11 @@ run** — remind @jwildfire to type them if the session isn't named yet. A
 background session can set `name` and `color` directly in its own
 `~/.claude/jobs/{id}/state.json`.
 
+**Ultracode sessions are tracked separately** from regular siblings (per Jeremy
+2026-07-12): multi-agent Workflow/ultracode jobs use the tag
+`⚡️🤖 {description}` (e.g. `⚡️🤖 open.gismo v1`) — description-based, no date.
+The 😺🤖/👯🤖 templates and colors above stay unchanged for ordinary sessions.
+
 ### 1. Sweep the evidence — in subagents, not inline
 
 The sweep reads far more than the session ever needs again (issue lists, board
