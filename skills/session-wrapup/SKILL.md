@@ -110,7 +110,10 @@ checkpoint, never assume it.
 
 ### 3. Scaffold review — collect candidates
 
-Review the session for scaffold updates and list them as candidates to discuss:
+Start from the scratchpad's `## Scaffold` section — the list
+[`session-scaffold`](../session-scaffold/SKILL.md) built as friction happened;
+those entries are the primary candidates. Then review the session for anything
+the list missed:
 
 - **Repeatable pattern** executed by hand two or more times, or an existing skill
   that gave stale/wrong guidance → a new skill or a skill update. Hub-process
@@ -193,6 +196,18 @@ issues without the checkpoint.
 - **Changelog**: if the session changed what `roadmap.html` shows (stage moves, new
   requirements), append a `site/roadmap-changelog.json` entry with the semver bump
   rules in `AGENTS.md`.
+- **Session report** (design #24, D2): render the frozen operational record and
+  place it beside the entry —
+
+  ```bash
+  node obot.agent/tools/session-hub/session-hub.mjs --report   # from the workspace root
+  ```
+
+  Output lands at `obot.roadmap/reports/sessions/{slug}.html` (slug mirrors the
+  diary file). Add one line to the entry directly under the `<span class="meta">`
+  paragraph: `📊 [Session report](../reports/sessions/{slug}.html)`. The report
+  commits together with the diary entry. Render it **after** the scratchpad
+  check-states from step 6 are final — the report freezes them.
 - **Post**: commit directly to `main` and push (standard-update grant). The site
   deploy triggers on `diary/**` pushes.
 - **Verify the deploy**: `gh run list -R jwildfire/obot.roadmap --workflow=deploy-site.yml --limit 1`
@@ -209,5 +224,6 @@ Confirm, and state in the closing response:
 - [ ] No todo exists only in conversation — each has an issue, diary line, or
       memory entry.
 - [ ] Scaffold updates applied or proposed; memory current.
+- [ ] Session report rendered and linked from the diary entry.
 - [ ] Next-session list recorded (diary + memory).
 - [ ] Diary entry deployed (workflow green) and the deployed URL shared.

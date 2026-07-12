@@ -31,12 +31,16 @@ Created on first write with this skeleton:
 ## Todo
 
 ## Notes
+
+## Scaffold
 ```
 
 `## Overview` belongs to [`session-init`](../session-init/SKILL.md) (the
 persisted kickoff list); `## Todo` belongs to this skill; `## Notes` belongs to
-[`session-note`](../session-note/SKILL.md). Lines are checked off (`- [x]`) when
-captured elsewhere — never deleted.
+[`session-note`](../session-note/SKILL.md); `## Scaffold` belongs to
+[`session-scaffold`](../session-scaffold/SKILL.md). Lines are checked off
+(`- [x]`) when captured elsewhere — never deleted. The
+[session hub](../../tools/session-hub/README.md) renders all four sections live.
 
 ## When to Use
 
