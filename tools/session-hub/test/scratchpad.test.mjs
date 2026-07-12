@@ -49,6 +49,15 @@ test('parseItems: groups, checkboxes, continuation, prose passthrough', () => {
   assert.match(aa.items[1].text, /continuation line folds in$/);
 });
 
+test('parseItems: leading "N." moves into item.num', () => {
+  const p = splitSections(FIXTURE);
+  const named = parseItems(findSection(p, 'Overview')).filter((g) => g.group);
+  assert.equal(named[0].items[0].num, 1);
+  assert.match(named[0].items[0].text, /^safety\.viz v1\.0 wrap/);
+  assert.equal(named[0].items[1].num, 4);
+  assert.equal(named[1].items[0].num, 6);
+});
+
 test('parseItems: timestamped and plain notes', () => {
   const p = splitSections(FIXTURE);
   const [g] = parseItems(findSection(p, 'Notes'));

@@ -14,6 +14,7 @@ function liveModel(overrides = {}) {
         updatedAt: '2026-07-12T03:00:00.000Z', tokens: 123456,
         children: [{ id: '21', href: 'https://github.com/jwildfire/obot.agent/pull/21', kind: 'pr' }],
         result: null, model: 'fable-5',
+        intent: 'drive hub requirement obot.roadmap#24 through design',
       }],
     },
     agentsCli: { data: [] },
@@ -35,14 +36,52 @@ function liveModel(overrides = {}) {
 
 test('live render: panels, sources, agent card, refresh meta', () => {
   const html = render(liveModel());
-  for (const s of ['Priorities', 'Roadmap activity', 'Agents', 'Notes', 'Scaffold improvements', 'Next session']) {
-    assert.ok(html.includes(`<h2>${s}`), `panel ${s}`);
+  for (const s of ['Priorities', 'Roadmap activity', 'Agents', 'Notes', 'Scaffold', 'Next session', 'Accomplishments']) {
+    assert.ok(html.includes(`${s}</h2>`), `panel ${s}`);
   }
   assert.ok(html.includes('http-equiv="refresh"'), 'live mode auto-refreshes');
-  assert.ok(html.includes('😺🤖 07-11 devops-dash'));
   assert.ok(html.includes('123.5k tok'));
   assert.ok(html.includes('obot.agent#21'), 'children chip short label');
   assert.ok(html.includes('Session 2026-07-11-2'), 'slug in masthead');
+});
+
+test('priorities are one-line drill-downs: plain-text summary, full detail in body', () => {
+  const html = render(liveModel());
+  assert.ok(html.includes('<details class="pri" id="p1">'));
+  const summary = html.match(/<details class="pri" id="p1">\s*<summary>([\s\S]*?)<\/summary>/)[1];
+  assert.ok(summary.includes('ship session-hub — see #24'), 'summary is markdown-stripped plain text');
+  assert.ok(!summary.includes('href="https://github.com/jwildfire/obot.roadmap/issues/24"'), 'links live in the drill-down, not the summary');
+  assert.ok(html.includes('<code>session-hub</code>'), 'drill-down keeps inline markdown');
+});
+
+test('agent↔priority cross-links: agchip on the priority, pchip on the agent', () => {
+  const html = render(liveModel());
+  assert.ok(html.includes('href="#agent-sib5678"'), 'priority row links to the agent');
+  assert.ok(html.match(/class="agchip"[^>]*>devops-dash</), 'agent chip shows the short name');
+  assert.ok(html.includes('id="agent-sib5678"'));
+  assert.ok(html.match(/<a class="pchip" href="#p1">P1<\/a>/), 'agent card links back to the priority');
+});
+
+test('secondary panels are collapsed by default; agent name uses short form', () => {
+  const html = render(liveModel());
+  const folds = html.match(/<details class="panel fold">/g) ?? [];
+  assert.ok(folds.length >= 3, 'Roadmap activity, Notes, Scaffold, Next session fold');
+  assert.ok(!html.includes('<details class="panel fold" open'), 'folds start closed');
+  assert.ok(html.match(/<span class="agent-name">devops-dash<\/span>/), 'summary shows short name');
+  assert.ok(html.includes('😺🤖 07-11 devops-dash'), 'full name preserved in the drill-down');
+});
+
+test('accomplishments: release row, requirement closure badge, closure counts', () => {
+  const html = render(liveModel({
+    ghSweep: { data: { fetchedAt: 1, sinceIso: 'x', items: [
+      { repo: 'obot.roadmap', number: 26, title: 'reports home', event: 'closed', isPullRequest: false, labels: ['requirement'], updatedAt: '2026-07-12T03:00:00.000Z', url: 'https://github.com/jwildfire/obot.roadmap/issues/26' },
+      { repo: 'safety.viz', number: 28, title: 'rc', event: 'merged', isPullRequest: true, labels: [], updatedAt: '2026-07-12T02:40:00.000Z', url: 'https://github.com/jwildfire/safety.viz/pull/28' },
+    ], releases: [{ repo: 'obot.agent', tag: 'v0.1.0', name: 'v0.1.0', url: 'https://github.com/jwildfire/obot.agent/releases/tag/v0.1.0', publishedAt: '2026-07-12T02:30:00.000Z' }] } },
+  }));
+  assert.ok(html.includes('obot.agent v0.1.0</strong></a> released'), 'release row');
+  assert.ok(html.includes('✓ closed'), 'requirement closure badge');
+  assert.ok(html.includes('1 PRs merged · 1 issues closed'), 'closure drill-down summary');
+  assert.ok(html.match(/Closure<\/span><span class="value">3/), 'closure tile counts merged+closed+released');
 });
 
 test('render escapes untrusted text', () => {

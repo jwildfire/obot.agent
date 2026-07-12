@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBoundary, scopeAgents, buildModel } from '../lib/model.mjs';
+import { resolveBoundary, scopeAgents, buildModel, extractRefs, shortName, buildAccomplishments } from '../lib/model.mjs';
 
 const WS = '/ws/obot2';
 const jobsData = [
@@ -98,6 +98,73 @@ test('buildModel: tiles, alerts, slug, notices', () => {
   assert.equal(m.tiles.activity, 1);
   assert.match(m.notices.agentsCli, /unavailable/);
   assert.equal(m.notices.jobs, null);
+});
+
+test('extractRefs: URLs, shorthand, aliases, stopwords', () => {
+  const refs = extractRefs('merge [PR #23](https://github.com/jwildfire/safety.viz/pull/23), triage hub #24, gsm.safety#30, PR #99 alone, step #4');
+  assert.ok(refs.has('safety.viz#23'), 'URL ref');
+  assert.ok(refs.has('obot.roadmap#24'), 'hub alias');
+  assert.ok(refs.has('gsm.safety#30'), 'shorthand');
+  assert.ok(!refs.has('pr#99'), 'PR stopword');
+  assert.ok(!refs.has('step#4'), 'step stopword');
+});
+
+test('shortName strips emoji + dates; numeric residue falls back by color', () => {
+  assert.equal(shortName({ name: '😺🤖 07-11 devops-dash' }), 'devops-dash');
+  assert.equal(shortName({ name: '👯🤖 07-11 sv-v1.1' }), 'sv-v1.1');
+  assert.equal(shortName({ name: '😺🤖 07-11 2', color: 'orange', id: 'ce8f336e' }), 'lead');
+  assert.equal(shortName({ name: '👯🤖 07-11 3', color: 'green', id: 'ab12cd34' }), 'ab12cd');
+});
+
+test('agents link to priorities via shared refs (children URL ↔ item text)', () => {
+  const jobs = {
+    data: [{
+      id: 'sib5678', name: '👯🤖 07-11 sv-v1', color: 'green', state: 'working', detail: '',
+      cwd: WS, createdAt: '2026-07-11T22:40:00.000Z', updatedAt: '2026-07-12T02:00:00.000Z', tokens: 1,
+      children: [{ id: '23', href: 'https://github.com/jwildfire/safety.viz/pull/23', kind: 'pr' }],
+      result: null, model: null, intent: 'wrap the safety.viz release',
+    }],
+  };
+  const scratchpad = {
+    data: {
+      marker: { sessionNumber: 2, jobId: 'sib5678' },
+      overview: { groups: [{ group: 'A', items: [
+        { checked: false, num: 1, text: 'safety.viz v1.0 wrap — merge [PR #23](https://github.com/jwildfire/safety.viz/pull/23)' },
+        { checked: false, num: 2, text: 'unrelated item about blog posts' },
+      ] }] },
+      todo: null, notes: null, scaffold: null,
+    },
+  };
+  const m = buildModel({
+    collected: { jobs, agentsCli: { data: [] }, scratchpad, nextSession: { notice: 'x' }, ghSweep: { notice: 'x' } },
+    workspace: WS, date: '2026-07-11', mode: 'live', generatedAtIso: 'x', tzOffsetMinutes: 240,
+  });
+  const items = m.panels.overview.groups[0].items;
+  assert.deepEqual(items[0].agents.map((a) => a.short), ['sv-v1']);
+  assert.deepEqual(items[1].agents, []);
+  assert.deepEqual(m.agents[0].priorities, [1]);
+});
+
+test('buildAccomplishments: closure + requirements + releases filtering', () => {
+  const boundary = { startIso: '2026-07-11T22:00:00Z' };
+  const ghSweep = { data: {
+    items: [
+      { repo: 'obot.roadmap', number: 26, title: 'reports home', event: 'closed', isPullRequest: false, labels: ['infrastructure'], updatedAt: '2026-07-12T03:00:00Z', url: 'u1' },
+      { repo: 'obot.roadmap', number: 24, title: 'session hub', event: 'updated', isPullRequest: false, labels: ['requirement', 'ai'], updatedAt: '2026-07-12T02:00:00Z', url: 'u2' },
+      { repo: 'safety.viz', number: 28, title: 'rc', event: 'merged', isPullRequest: true, labels: [], updatedAt: '2026-07-12T01:00:00Z', url: 'u3' },
+      { repo: 'safety.viz', number: 30, title: 'old', event: 'updated', isPullRequest: true, labels: [], updatedAt: '2026-07-11T01:00:00Z', url: 'u4' },
+    ],
+    releases: [
+      { repo: 'obot.agent', tag: 'v0.1.0', name: 'v0.1.0', url: 'r1', publishedAt: '2026-07-12T02:10:00Z' },
+      { repo: 'safety.viz', tag: 'v0.1.0', name: 'old release', url: 'r2', publishedAt: '2026-07-10T00:00:00Z' },
+    ],
+  } };
+  const acc = buildAccomplishments(ghSweep, boundary);
+  assert.equal(acc.closedIssues.length, 1);
+  assert.equal(acc.mergedPrs.length, 1);
+  assert.deepEqual(acc.requirements.map((r) => r.number), [24]);
+  assert.deepEqual(acc.releases.map((r) => r.tag + '@' + r.repo), ['v0.1.0@obot.agent']);
+  assert.equal(buildAccomplishments({ notice: 'x' }, boundary), null);
 });
 
 test('buildModel: fully degraded inputs still produce a model', () => {

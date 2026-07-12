@@ -46,7 +46,7 @@ crash (design §4; `test/` exercises every degradation path).
 | `claude agents --json --cwd <ws>` | `kind`, `name`, `status`, `state`, `startedAt`, `sessionId`, `id`, `cwd` — interactive sessions + liveness of background ones |
 | `.claude/session-notes/YYYY-MM-DD.md` | sections `## Overview` / `## Todo` / `## Notes` / `## Scaffold`; the `<!-- session-init … -->` marker is the session-boundary anchor (D4: marker time → anchor job's `createdAt` → local midnight) |
 | memory + diary | `next-session-todo` memory; newest diary entry's "Next session" section |
-| `gh search issues/prs` | batched sweep, `updated ≥ session start`, cached at `.claude/session-hub/cache/gh-sweep.json` (~5 min TTL) — derived, never committed. Event labels (`opened`/`merged`/`closed`/`updated`) are best-effort from search fields; Gilead-BioStats repos excluded (SAML). |
+| `gh search issues/prs` + releases | batched sweep (`updated ≥ session start`, labels included) plus one releases call per `ACTIVE_REPOS` repo, cached at `.claude/session-hub/cache/gh-sweep.json` (~5 min TTL) — derived, never committed. Event labels (`opened`/`merged`/`closed`/`updated`) are best-effort from search fields; Gilead-BioStats repos excluded (SAML). Feeds the Accomplishments panel (releases + `requirement`-labeled hub issues + closures). |
 
 Not shown: cost in USD — no persisted per-session cost source exists; `tokens`
 is the effort metric (design §2 note).

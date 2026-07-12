@@ -1,6 +1,8 @@
-// Renderer (design #24 §5): one self-contained HTML page from the session model.
-// Visual system = the concept mockup's (warm palette, light/dark, inline CSS).
-// Every panel header names its source; degraded collectors render a notice line.
+// Renderer (design #24 §5, layout revised per @jwildfire 2026-07-11): Priorities
+// and Agents are the highlight — one line each, detail behind <details>
+// drill-downs, agent↔priority cross-links as colored chips. Accomplishments
+// (releases / requirements progress, closure emphasized) sit right under the
+// tiles; everything else is a collapsed panel. Zero JS beyond scroll restore.
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -12,6 +14,15 @@ export function inline(text) {
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (m, pre, url) => `${pre}<a href="${url}">${shortUrl(url)}</a>`);
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return s;
+}
+
+/** Markdown stripped to plain text — for one-line summaries. */
+export function plainText(text) {
+  let s = String(text ?? '');
+  s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '$1');
+  s = s.replace(/`([^`]+)`/g, '$1');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
   return s;
 }
 
@@ -52,64 +63,125 @@ function fmtDuration(a, b) {
 
 const notice = (msg) => (msg ? `<p class="notice">⚠ ${esc(msg)}</p>` : '');
 
-function itemsList(groups, { numbered = false } = {}) {
+const agentChip = (a) =>
+  `<a class="agchip" href="#agent-${esc(a.id)}" style="--c:${agentDot(a.color)}">${esc(a.short)}</a>`;
+
+/* ---------- priorities: one line each, drill-down body ---------- */
+
+function prioritiesList(groups) {
   if (!groups) return '';
-  let n = 0;
+  return groups
+    .filter((g) => g.items.length)
+    .map((g) => {
+      const label = g.group ? `<div class="group-label">${esc(g.group)}</div>` : '';
+      const rows = g.items
+        .map((it) => {
+          if (it.prose) return `<p class="prose-line">${inline(it.text)}</p>`;
+          const box = it.checked === null ? '<span class="box none"></span>' : `<span class="box${it.checked ? ' done' : ''}"></span>`;
+          const chips = (it.agents ?? []).map(agentChip).join('');
+          const cls = it.checked === true ? ' is-done' : '';
+          return `<details class="pri${cls}" id="p${it.num}">
+  <summary><span class="tw">▸</span>${box}<span class="num">${it.num}</span><span class="crop">${esc(plainText(it.text))}</span><span class="chips">${chips}</span></summary>
+  <div class="drill">${inline(it.text)}</div>
+</details>`;
+        })
+        .join('\n');
+      return label + rows;
+    })
+    .join('\n');
+}
+
+/* ---------- agents: one line each, drill-down body ---------- */
+
+function agentCard(a, mode) {
+  const [pillCls, icon] = STATE_PILL[a.state] ?? STATE_PILL.unknown;
+  const maxTok = 400000;
+  const pct = typeof a.tokens === 'number' ? Math.min(100, Math.round((a.tokens / maxTok) * 100)) : 0;
+  const dot = agentDot(a.color);
+  const since =
+    mode === 'report' && a.createdAt
+      ? `${fmtTime(a.createdAt)}–${fmtTime(a.updatedAt)} (${fmtDuration(a.createdAt, a.updatedAt)})`
+      : a.createdAt ? `since ${fmtTime(a.createdAt)}` : '';
+  const pchips = (a.priorities ?? [])
+    .map((n) => `<a class="pchip" href="#p${n}">P${n}</a>`)
+    .join('');
+  const chips = (a.children ?? [])
+    .map((c) => `<a class="refchip" href="${esc(c.href)}">${esc(c.kind === 'pr' ? 'PR ' : '')}${esc(shortUrl(c.href))}</a>`)
+    .join(' ');
+  const detail = mode === 'report' && a.result ? a.result : a.detail;
+  return `<details class="agent" id="agent-${esc(a.id)}">
+  <summary><span class="tw">▸</span><span class="agent-dot" style="background:${dot}"></span><span class="agent-name">${esc(a.short ?? a.name)}</span><span class="chips">${pchips}</span><span class="pill ${pillCls}"><i>${icon}</i>${esc(a.state)}${a.stale ? ' (stale)' : ''}</span></summary>
+  <div class="drill">
+    ${detail ? `<div class="agent-detail">${inline(detail)}</div>` : ''}
+    <div class="agent-meta">
+      ${since ? `<span>${esc(since)}</span>` : ''}
+      ${typeof a.tokens === 'number' ? `<span class="tokbar"><b style="width:${pct}%;background:${dot}"></b></span><span>${fmtTokens(a.tokens)} tok</span>` : ''}
+      ${a.model ? `<span>${esc(a.model)}</span>` : ''}
+      ${a.kind === 'interactive' ? '<span>interactive</span>' : ''}
+    </div>
+    ${chips ? `<div class="agent-chips">${chips}</div>` : ''}
+    ${a.name && a.short !== a.name ? `<div class="agent-fullname">${esc(a.name)}</div>` : ''}
+    ${a.degraded ? `<div class="notice">⚠ ${esc(a.degraded)}</div>` : ''}
+  </div>
+</details>`;
+}
+
+/* ---------- accomplishments: releases + requirements, closure first ---------- */
+
+function accomplishmentsPanel(acc, noticeMsg) {
+  const body = [];
+  if (noticeMsg) body.push(notice(noticeMsg));
+  if (acc) {
+    for (const r of acc.releases) {
+      body.push(`<div class="acc-row release">🚀 <a href="${esc(r.url)}"><strong>${esc(r.repo)} ${esc(r.tag)}</strong></a> released <time>${fmtTime(r.publishedAt)}</time></div>`);
+    }
+    for (const q of acc.requirements) {
+      const badge = q.event === 'closed' ? '<span class="closed-badge">✓ closed</span>' : `<span class="ev">${esc(q.event)}</span>`;
+      body.push(`<div class="acc-row">📋 <a href="${esc(q.url)}">hub#${q.number}</a> <span class="crop-inline">${esc(q.title)}</span> ${badge}</div>`);
+    }
+    const closures = [...acc.mergedPrs, ...acc.closedIssues];
+    if (closures.length) {
+      const rows = closures
+        .map((i) => `<div class="acc-row"><a href="${esc(i.url)}">${esc(i.repo)}#${i.number}</a> <span class="crop-inline">${esc(i.title)}</span> <span class="closed-badge">✓ ${esc(i.event)}</span></div>`)
+        .join('\n');
+      body.push(`<details class="acc-more"><summary><span class="tw">▸</span>✅ <strong>${acc.mergedPrs.length} PRs merged · ${acc.closedIssues.length} issues closed</strong></summary><div class="drill">${rows}</div></details>`);
+    }
+    if (!acc.releases.length && !acc.requirements.length && !closures.length) {
+      body.push('<p class="notice">no releases, requirement moves, or closures yet this session</p>');
+    }
+  }
+  return `<section class="panel accomplish">
+  <div class="panel-head"><h2>Accomplishments</h2><span class="src">derived: releases + requirement issues + closures since session start</span></div>
+  <div class="panel-body">${body.join('\n')}</div>
+</section>`;
+}
+
+/* ---------- collapsed secondary panels ---------- */
+
+function collapsedPanel(title, src, summaryExtra, body) {
+  return `<details class="panel fold">
+  <summary class="panel-head"><h2><span class="tw">▸</span>${title}</h2><span class="src">${summaryExtra ? esc(summaryExtra) + ' · ' : ''}${esc(src)}</span></summary>
+  <div class="panel-body">${body}</div>
+</details>`;
+}
+
+function itemsList(groups) {
+  if (!groups) return '';
   return groups
     .filter((g) => g.items.length)
     .map((g) => {
       const label = g.group ? `<div class="group-label">${esc(g.group)}</div>` : '';
       const lis = g.items
         .map((it) => {
-          n++;
           const box = it.checked === null ? '' : `<span class="box${it.checked ? ' done' : ''}"></span>`;
-          const num = numbered && !it.prose ? `<span class="num">${n}</span>` : '';
           const time = it.time ? `<time>${esc(it.time)}</time>` : '';
           const cls = it.checked === true ? ' class="is-done"' : '';
-          return `<li${cls}>${box}${num}${time}<span class="txt">${inline(it.text)}</span></li>`;
+          return `<li${cls}>${box}${time}<span class="txt">${inline(it.text)}</span></li>`;
         })
         .join('\n');
       return `${label}<ul class="todo">${lis}</ul>`;
     })
     .join('\n');
-}
-
-function panel(title, src, body, { badge = '' } = {}) {
-  return `<section class="panel">
-  <div class="panel-head"><h2>${title}${badge}</h2><span class="src">${esc(src)}</span></div>
-  <div class="panel-body">${body}</div>
-</section>`;
-}
-
-function agentCard(a, mode) {
-  const [pillCls, icon] = STATE_PILL[a.state] ?? STATE_PILL.unknown;
-  const maxTok = 400000;
-  const pct = typeof a.tokens === 'number' ? Math.min(100, Math.round((a.tokens / maxTok) * 100)) : 0;
-  const since =
-    mode === 'report' && a.createdAt
-      ? `${fmtTime(a.createdAt)}–${fmtTime(a.updatedAt)} (${fmtDuration(a.createdAt, a.updatedAt)})`
-      : a.createdAt ? `since ${fmtTime(a.createdAt)}` : '';
-  const chips = (a.children ?? [])
-    .map((c) => `<a class="refchip" href="${esc(c.href)}">${esc(c.kind === 'pr' ? 'PR ' : '')}${esc(shortUrl(c.href))}</a>`)
-    .join(' ');
-  const detail = mode === 'report' && a.result ? a.result : a.detail;
-  const dot = agentDot(a.color);
-  return `<div class="agent">
-  <div class="agent-top">
-    <span class="agent-dot" style="background:${dot}"></span>
-    <span class="agent-name">${esc(a.name)}</span>
-    <span class="pill ${pillCls}"><i>${icon}</i>${esc(a.state)}${a.stale ? ' (stale)' : ''}</span>
-  </div>
-  ${detail ? `<div class="agent-detail">${inline(detail)}</div>` : ''}
-  <div class="agent-meta">
-    ${since ? `<span>${esc(since)}</span>` : ''}
-    ${typeof a.tokens === 'number' ? `<span class="tokbar"><b style="width:${pct}%;background:${dot}"></b></span><span>${fmtTokens(a.tokens)} tok</span>` : ''}
-    ${a.model ? `<span>${esc(a.model)}</span>` : ''}
-    ${a.kind === 'interactive' ? '<span>interactive</span>' : ''}
-  </div>
-  ${chips ? `<div class="agent-chips">${chips}</div>` : ''}
-  ${a.degraded ? `<div class="notice">⚠ ${esc(a.degraded)}</div>` : ''}
-</div>`;
 }
 
 function activityFeed(items) {
@@ -121,6 +193,12 @@ function activityFeed(items) {
     .join('\n')}</div>`;
 }
 
+function countItems(sectionData) {
+  let n = 0;
+  for (const g of sectionData?.groups ?? []) n += g.items.length;
+  return n;
+}
+
 export function render(model) {
   const m = model;
   const isReport = m.mode === 'report';
@@ -130,10 +208,15 @@ export function render(model) {
     .join(' · ');
 
   const banner = isReport
-    ? `<div class="banner ok"><span class="dot"></span>Session report — frozen at wrapup. ${m.tiles.agents.total} agents, ${fmtTokens(m.tiles.tokens.total)} tokens, ${m.tiles.activity ?? '?'} roadmap events.</div>`
+    ? `<div class="banner ok"><span class="dot"></span>Session report — frozen at wrapup. ${m.tiles.agents.total} agents, ${fmtTokens(m.tiles.tokens.total)} tokens, ${m.tiles.closure ?? 0} closures/releases.</div>`
     : m.alerts.length
-      ? `<div class="banner"><span class="dot"></span>${m.alerts.map((a) => `${esc(a.name)} — ${esc(a.state)}${a.detail ? `: ${esc(a.detail)}` : ''}`).join(' · ')}</div>`
+      ? `<div class="banner"><span class="dot"></span>${m.alerts.map((a) => `${esc(a.short ?? a.name)} — ${esc(a.state)}${a.detail ? `: ${esc(a.detail)}` : ''}`).join(' · ')}</div>`
       : '';
+
+  const acc = m.accomplishments;
+  const closureSub = acc
+    ? `${acc.mergedPrs.length} merged · ${acc.closedIssues.length} closed · ${acc.releases.length} released`
+    : '—';
 
   const nextSessionBody = m.panels.nextSession
     ? [
@@ -145,24 +228,29 @@ export function render(model) {
     : '';
 
   const left = [
-    panel('Priorities', 'scratchpad · ## Overview (session-init)',
-      notice(m.notices.scratchpad) + (m.panels.overview ? itemsList(m.panels.overview.groups, { numbered: true }) : notice(m.panels.overview === null && !m.notices.scratchpad ? 'no ## Overview section in today’s scratchpad' : ''))),
-    m.panels.todo ? panel('Todo', 'scratchpad · ## Todo (session-update)', itemsList(m.panels.todo.groups)) : '',
-    panel('Roadmap activity', `gh search issues/prs · updated ≥ session start (derived, cached${m.sweepFetchedAt ? ` · swept ${fmtTime(new Date(m.sweepFetchedAt).toISOString())}` : ''})`,
+    `<section class="panel">
+  <div class="panel-head"><h2>Priorities</h2><span class="src">scratchpad · ## Overview — click a row for detail</span></div>
+  <div class="panel-body">${notice(m.notices.scratchpad)}${m.panels.overview ? prioritiesList(m.panels.overview.groups) : ''}</div>
+</section>`,
+    collapsedPanel('Roadmap activity', 'gh sweep, all events', `${m.tiles.activity ?? 0} events`,
       notice(m.notices.ghSweep) + (m.panels.activity ? activityFeed(m.panels.activity) : '')),
-  ].filter(Boolean).join('\n');
+  ].join('\n');
 
   const right = [
-    panel('Agents', '~/.claude/jobs/*/state.json + claude agents --json',
-      notice(m.notices.jobs) + notice(m.notices.agentsCli) +
-      (m.agents.length ? `<div class="agents">${m.agents.map((a) => agentCard(a, m.mode)).join('\n')}</div>` : '<p class="notice">no sessions in scope</p>')),
-    panel('Notes', 'scratchpad · ## Notes (session-note)',
+    `<section class="panel">
+  <div class="panel-head"><h2>Agents</h2><span class="src">state.json + claude agents — P# links to the priority</span></div>
+  <div class="panel-body">${notice(m.notices.jobs)}${notice(m.notices.agentsCli)}${
+    m.agents.length ? `<div class="agents">${m.agents.map((a) => agentCard(a, m.mode)).join('\n')}</div>` : '<p class="notice">no sessions in scope</p>'
+  }</div>
+</section>`,
+    m.panels.todo && countItems(m.panels.todo) ? collapsedPanel('Todo', 'scratchpad · ## Todo', `${countItems(m.panels.todo)}`, itemsList(m.panels.todo.groups)) : '',
+    collapsedPanel('Notes', 'scratchpad · ## Notes', `${countItems(m.panels.notes)}`,
       m.panels.notes ? itemsList(m.panels.notes.groups) : notice('no ## Notes section in today’s scratchpad')),
-    panel('Scaffold improvements', 'scratchpad · ## Scaffold (session-scaffold)',
+    collapsedPanel('Scaffold', 'scratchpad · ## Scaffold', `${countItems(m.panels.scaffold)}`,
       m.panels.scaffold ? itemsList(m.panels.scaffold.groups) : notice('no ## Scaffold section yet — capture with "scaffold: …"')),
-    panel('Next session', 'next-session-todo memory + last diary loose ends',
-      notice(m.notices.nextSession) + nextSessionBody, { badge: ' <span class="badge-new">render-only</span>' }),
-  ].join('\n');
+    collapsedPanel('Next session', 'memory + last diary', '',
+      notice(m.notices.nextSession) + nextSessionBody),
+  ].filter(Boolean).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -191,15 +279,17 @@ ${isReport ? '' : '<meta http-equiv="refresh" content="60">'}
   <div class="tile"><span class="label">Priorities</span><span class="value">${m.tiles.priorities.open} <small>open · ${m.tiles.priorities.done} done</small></span><span class="sub">scratchpad kickoff list</span></div>
   <div class="tile"><span class="label">Agents</span><span class="value">${m.tiles.agents.total}</span><span class="sub">${esc(stateCounts) || '—'}</span></div>
   <div class="tile"><span class="label">Tokens</span><span class="value">${fmtTokens(m.tiles.tokens.total)}</span><span class="sub">across ${m.tiles.tokens.reporting} reporting sessions</span></div>
-  <div class="tile"><span class="label">Roadmap movement</span><span class="value">${m.tiles.activity ?? '—'} <small>events</small></span><span class="sub">since session start</span></div>
+  <div class="tile"><span class="label">Closure</span><span class="value">${m.tiles.closure ?? '—'}</span><span class="sub">${esc(closureSub)}</span></div>
 </section>
+
+${accomplishmentsPanel(acc, acc ? null : m.notices.ghSweep)}
 
 <div class="grid">
   <div class="col">${left}</div>
   <div class="col">${right}</div>
 </div>
 
-<div class="foot">${isReport ? `frozen operational record · pairs with diary/${esc(m.slug)}.md` : 'live view · panels annotate their sources'} · boundary: ${esc(m.boundary.anchor)} (${fmtTime(m.boundary.startIso)}) · session-hub (obot.agent v0.2 · <a href="https://github.com/jwildfire/obot.roadmap/issues/24">#24</a>)</div>
+<div class="foot">${isReport ? `frozen operational record · pairs with diary/${esc(m.slug)}.md` : 'live view · click rows to drill down'} · boundary: ${esc(m.boundary.anchor)} (${fmtTime(m.boundary.startIso)}) · session-hub (obot.agent v0.2 · <a href="https://github.com/jwildfire/obot.roadmap/issues/24">#24</a>)</div>
 </div>
 ${isReport ? '' : SCROLL_RESTORE}
 </body>
@@ -214,6 +304,15 @@ const SCROLL_RESTORE = `<script>
     var y=sessionStorage.getItem(k);
     if(y!==null) window.scrollTo(0,Number(y));
     addEventListener('scroll',function(){sessionStorage.setItem(k,String(window.scrollY));},{passive:true});
+    var o='session-hub-open';
+    var open=new Set(JSON.parse(sessionStorage.getItem(o)||'[]'));
+    document.querySelectorAll('details[id]').forEach(function(d){
+      if(open.has(d.id)) d.open=true;
+      d.addEventListener('toggle',function(){
+        if(d.open) open.add(d.id); else open.delete(d.id);
+        sessionStorage.setItem(o, JSON.stringify(Array.from(open)));
+      });
+    });
   } catch(e){}
 })();
 </script>`;
@@ -270,38 +369,55 @@ const CSS = `
   .tile .value { font-size:27px; font-weight:650; font-variant-numeric:tabular-nums; }
   .tile .value small { font-size:15px; font-weight:500; color:var(--ink-3); }
   .tile .sub { font-size:12px; color:var(--ink-2); }
-  .grid { display:grid; grid-template-columns:1.45fr 1fr; gap:16px; align-items:start; }
+  .grid { display:grid; grid-template-columns:1.15fr 1fr; gap:16px; align-items:start; }
   .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
   .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); overflow:hidden; }
   .panel-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px;
                 padding:12px 16px 10px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  .panel-head h2 { font-size:14px; font-weight:650; margin:0; }
+  .panel-head h2 { font-size:14px; font-weight:650; margin:0; display:inline-flex; align-items:center; gap:6px; }
   .src { font-family:var(--mono); font-size:10.5px; color:var(--ink-3); }
-  .panel-body { padding:12px 16px 14px; display:flex; flex-direction:column; gap:10px; }
-  .badge-new { font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
-               color:var(--accent-ink); background:var(--accent-tint); border-radius:4px; padding:2px 7px; }
+  .panel-body { padding:12px 16px 14px; display:flex; flex-direction:column; gap:8px; }
   .group-label { font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
-                 color:var(--ink-3); padding-top:4px; }
-  ul.todo { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
-  .todo li { display:flex; gap:10px; align-items:baseline; }
-  .box { flex:none; width:15px; height:15px; border-radius:4px; border:1.5px solid var(--ink-3);
-         position:relative; align-self:flex-start; margin-top:3px; }
+                 color:var(--ink-3); padding:6px 0 2px; }
+
+  /* drill-downs */
+  summary { cursor:pointer; }
+  summary::-webkit-details-marker { display:none; }
+  summary { list-style:none; }
+  .tw { flex:none; display:inline-block; font-size:10px; color:var(--ink-3); transition:transform .12s ease; width:10px; }
+  details[open] > summary .tw { transform:rotate(90deg); }
+  .drill { padding:8px 4px 6px 26px; font-size:12.5px; color:var(--ink-2); display:flex; flex-direction:column; gap:7px; }
+
+  /* priorities */
+  details.pri > summary { display:flex; align-items:center; gap:8px; padding:4px 0; min-width:0; }
+  details.pri.is-done .crop { color:var(--ink-3); text-decoration:line-through; }
+  .box { flex:none; width:14px; height:14px; border-radius:4px; border:1.5px solid var(--ink-3); position:relative; }
+  .box.none { border-style:dotted; }
   .box.done { background:var(--good); border-color:var(--good); }
-  .box.done::after { content:""; position:absolute; left:4px; top:1px; width:4px; height:8px;
+  .box.done::after { content:""; position:absolute; left:4px; top:1px; width:3px; height:7px;
                      border:solid var(--panel); border-width:0 2px 2px 0; transform:rotate(40deg); }
-  .todo .num { font-family:var(--mono); font-size:12px; color:var(--ink-3); flex:none; width:18px; text-align:right; }
-  .todo .txt { min-width:0; }
-  .todo li.is-done .txt { color:var(--ink-3); text-decoration:line-through; }
-  .todo time { font-family:var(--mono); font-size:11px; color:var(--ink-3); flex:none; }
-  .refchip { font-family:var(--mono); font-size:11px; white-space:nowrap; background:var(--panel-2);
-             border:1px solid var(--line); border-radius:4px; padding:1px 6px; color:var(--accent-ink); }
-  .agents { display:flex; flex-direction:column; gap:10px; }
-  .agent { border:1px solid var(--line); border-radius:8px; background:var(--panel);
-           padding:10px 12px; display:flex; flex-direction:column; gap:7px; }
-  .agent-top { display:flex; align-items:center; gap:8px; }
+  .num { font-family:var(--mono); font-size:11.5px; color:var(--ink-3); flex:none; min-width:14px; text-align:right; }
+  .crop { flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; }
+  .chips { flex:none; display:inline-flex; gap:4px; max-width:45%; overflow:hidden; }
+  .prose-line { margin:0; font-size:12px; color:var(--ink-3); }
+
+  /* agent↔priority chips */
+  .agchip { font-family:var(--mono); font-size:10px; border-radius:999px; padding:1px 7px; white-space:nowrap;
+            color:var(--c); border:1px solid color-mix(in srgb, var(--c) 55%, transparent);
+            background:color-mix(in srgb, var(--c) 10%, transparent);
+            max-width:110px; overflow:hidden; text-overflow:ellipsis; }
+  .pchip { font-family:var(--mono); font-size:10px; border-radius:999px; padding:1px 7px; white-space:nowrap;
+           color:var(--accent-ink); border:1px solid var(--line); background:var(--accent-tint); }
+
+  /* agents */
+  .agents { display:flex; flex-direction:column; gap:6px; }
+  details.agent { border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+  details.agent > summary { display:flex; align-items:center; gap:8px; padding:8px 10px; min-width:0; }
+  details.agent > .drill { padding:2px 12px 10px 28px; }
   .agent-dot { flex:none; width:9px; height:9px; border-radius:50%; }
   .agent-name { font-family:var(--mono); font-size:12.5px; font-weight:600; overflow:hidden;
-                text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+                text-overflow:ellipsis; white-space:nowrap; flex:1 1 auto; min-width:0; }
+  .agent-fullname { font-family:var(--mono); font-size:10.5px; color:var(--ink-3); }
   .pill { margin-left:auto; flex:none; display:inline-flex; align-items:center; gap:5px;
           font-size:11px; font-weight:600; border-radius:999px; padding:2px 9px; }
   .pill i { font-style:normal; font-size:10px; }
@@ -312,11 +428,34 @@ const CSS = `
   .agent-detail { font-size:12px; color:var(--ink-2); }
   .agent-meta { display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:11px;
                 color:var(--ink-3); font-variant-numeric:tabular-nums; flex-wrap:wrap; }
-  .tokbar { flex:1 1 60px; min-width:50px; height:4px; border-radius:2px; background:var(--panel-2); overflow:hidden; }
+  .tokbar { flex:1 1 60px; min-width:50px; max-width:120px; height:4px; border-radius:2px; background:var(--panel-2); overflow:hidden; }
   .tokbar b { display:block; height:100%; border-radius:2px; }
   .agent-chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .refchip { font-family:var(--mono); font-size:11px; white-space:nowrap; background:var(--panel-2);
+             border:1px solid var(--line); border-radius:4px; padding:1px 6px; color:var(--accent-ink); }
+
+  /* accomplishments */
+  .accomplish { border-color:color-mix(in srgb, var(--good) 35%, var(--line)); }
+  .acc-row { display:flex; align-items:baseline; gap:8px; font-size:13px; min-width:0; }
+  .acc-row time { font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  .crop-inline { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .closed-badge { flex:none; font-size:11px; font-weight:600; color:var(--good); background:var(--good-tint);
+                  border-radius:999px; padding:1px 8px; }
+  .ev { flex:none; font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  details.acc-more > summary { display:flex; align-items:center; gap:8px; font-size:13px; padding:2px 0; }
+
+  /* collapsed secondary panels */
+  details.fold > summary.panel-head { border-bottom:none; }
+  details.fold[open] > summary.panel-head { border-bottom:1px solid var(--line); }
+
+  ul.todo { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .todo li { display:flex; gap:10px; align-items:baseline; font-size:13px; }
+  .todo li .box { align-self:flex-start; margin-top:3px; }
+  .todo .txt { min-width:0; }
+  .todo li.is-done .txt { color:var(--ink-3); text-decoration:line-through; }
+  .todo time { font-family:var(--mono); font-size:11px; color:var(--ink-3); flex:none; }
   .feed { display:flex; flex-direction:column; }
-  .evt { display:flex; gap:12px; align-items:baseline; padding:7px 0; border-bottom:1px solid var(--line); }
+  .evt { display:flex; gap:12px; align-items:baseline; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .evt:last-child { border-bottom:none; }
   .evt time { font-family:var(--mono); font-size:11px; color:var(--ink-3); flex:none; width:68px; }
   .evt .txt { min-width:0; }

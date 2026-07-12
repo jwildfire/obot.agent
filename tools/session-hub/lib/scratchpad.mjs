@@ -67,17 +67,23 @@ export function parseItems(section) {
       let text = item[1];
       let checked = null;
       let time = null;
+      let num = null;
       const box = text.match(/^\[( |x|X)\]\s*(.*)/);
       if (box) {
         checked = box[1].toLowerCase() === 'x';
         text = box[2];
+      }
+      const numbered = text.match(/^(\d+)[.)]\s+(.*)/);
+      if (numbered) {
+        num = Number(numbered[1]);
+        text = numbered[2];
       }
       const t = text.match(/^(\d{1,2}:\d{2})\s*[—–-]\s*(.*)/);
       if (t) {
         time = t[1];
         text = t[2];
       }
-      last = { checked, time, text };
+      last = { checked, time, num, text };
       cur.items.push(last);
       continue;
     }

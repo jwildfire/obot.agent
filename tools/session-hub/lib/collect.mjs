@@ -142,12 +142,16 @@ export function collectNextSession({ workspace, hubDir }) {
   return { data: out };
 }
 
+// Repos polled for releases in the sweep (small, fixed: one cheap API call each).
+export const ACTIVE_REPOS = ['obot.roadmap', 'obot.agent', 'safety.viz', 'gsm.safety', 'safety-histogram'];
+
 /**
  * Batched gh sweep: issues + PRs owned by `owner` updated since `sinceIso`,
- * cached at <workspace>/.claude/session-hub/cache/gh-sweep.json with a TTL.
+ * plus recent releases across ACTIVE_REPOS, cached at
+ * <workspace>/.claude/session-hub/cache/gh-sweep.json with a TTL.
  * Never stored beyond the cache (design: derived, never committed).
  */
-export function collectGhSweep({ workspace, sinceIso, owner = 'jwildfire', ttlMs = 5 * 60 * 1000, exec = execFileSync, now = () => Date.now() } = {}) {
+export function collectGhSweep({ workspace, sinceIso, owner = 'jwildfire', activeRepos = ACTIVE_REPOS, ttlMs = 5 * 60 * 1000, exec = execFileSync, now = () => Date.now() } = {}) {
   const cacheDir = path.join(workspace, '.claude', 'session-hub', 'cache');
   const cacheFile = path.join(cacheDir, 'gh-sweep.json');
   try {
@@ -157,7 +161,7 @@ export function collectGhSweep({ workspace, sinceIso, owner = 'jwildfire', ttlMs
     }
   } catch { /* cold cache */ }
 
-  const fields = 'repository,number,title,state,url,updatedAt,createdAt,closedAt,isPullRequest';
+  const fields = 'repository,number,title,state,url,updatedAt,createdAt,closedAt,labels,isPullRequest';
   const run = (kind, extra = []) =>
     JSON.parse(
       exec('gh', ['search', kind, '--owner', owner, '--updated', `>=${sinceIso}`,
@@ -180,11 +184,25 @@ export function collectGhSweep({ workspace, sinceIso, owner = 'jwildfire', ttlMs
         number: i.number, title: i.title,
         state: mergedUrls.has(i.url) ? 'merged' : (i.state?.toLowerCase?.() ?? ''),
         url: i.url, updatedAt: i.updatedAt, createdAt: i.createdAt, closedAt: i.closedAt,
+        labels: (Array.isArray(i.labels) ? i.labels : []).map((l) => String(l?.name ?? l).toLowerCase()),
         isPullRequest: !!i.isPullRequest,
         event: deriveEvent({ ...i, state: mergedUrls.has(i.url) ? 'merged' : i.state }, sinceIso),
       }))
       .sort((a, b) => String(a.updatedAt).localeCompare(String(b.updatedAt)));
-    const data = { fetchedAt: now(), sinceIso, items };
+    // releases: one cheap call per active repo, best-effort
+    const releases = [];
+    for (const repo of activeRepos) {
+      try {
+        const rel = JSON.parse(exec('gh', ['api', `repos/${owner}/${repo}/releases?per_page=10`],
+          { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }));
+        for (const r of Array.isArray(rel) ? rel : []) {
+          if (!r.draft && r.published_at && r.published_at >= sinceIso) {
+            releases.push({ repo, tag: r.tag_name, name: r.name || r.tag_name, url: r.html_url, publishedAt: r.published_at });
+          }
+        }
+      } catch { /* repo unreachable or no releases — skip */ }
+    }
+    const data = { fetchedAt: now(), sinceIso, items, releases };
     try {
       fs.mkdirSync(cacheDir, { recursive: true });
       fs.writeFileSync(cacheFile, JSON.stringify(data));
