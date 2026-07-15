@@ -22,8 +22,9 @@ done when four things are true:
 design): **the scratchpad is the inventory.** During the session,
 [`session-update`](../session-update/SKILL.md) /
 [`session-note`](../session-note/SKILL.md) and the scratchpad heartbeat (every
-sibling's spawn briefing requires tagged key-event lines and a close-out entry;
-a workspace Stop hook nudges any session that goes quiet — see `session-update`)
+[`session-spawn`](../session-spawn/SKILL.md) briefing requires tagged key-event
+lines and a close-out entry; a workspace Stop hook nudges any session that goes
+quiet — see `session-update`)
 keep `.claude/session-notes/{YYYY-MM-DD}.md` current. The wrapup **folds that
 record and verifies it** with one GitHub delta agent — it does not re-derive the
 day from transcript-mining subagents and per-repo sweeps. A thin scratchpad is a

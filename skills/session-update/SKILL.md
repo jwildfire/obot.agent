@@ -48,10 +48,10 @@ ultracode jobs — and [`session-wrapup`](../session-wrapup/SKILL.md) folds it a
 the session inventory, so an unlogged event is invisible at wrapup. Three
 mechanisms keep it current (the lean-bookends design, 2026-07-14):
 
-- **Spawn briefing** — `scaffold:spawn` (v1.0.2+) instructs every sibling to log
-  key events (start, milestones, PRs/issues posted, blockers, completion) and to
-  append a final close-out line (what shipped, what's unfinished) before it
-  ends.
+- **Spawn briefing** — [`session-spawn`](../session-spawn/SKILL.md) instructs
+  every sibling to log key events (start, milestones, PRs/issues posted,
+  blockers, completion) and to append a final close-out line (what shipped,
+  what's unfinished) before it ends.
 - **Stop-hook nudge** — a workspace hook
   (`.claude/hooks/scratchpad-heartbeat.sh`) reminds any working session that
   goes >30 minutes without a scratchpad write, once per staleness window.
