@@ -33,14 +33,42 @@ Created on first write with this skeleton:
 ## Notes
 
 ## Scaffold
+
+## Session log
 ```
 
 `## Overview` belongs to [`session-init`](../session-init/SKILL.md) (the
 persisted kickoff list); `## Todo` belongs to this skill; `## Notes` belongs to
 [`session-note`](../session-note/SKILL.md); `## Scaffold` belongs to
-[`session-scaffold`](../session-scaffold/SKILL.md). Lines are checked off
-(`- [x]`) when captured elsewhere — never deleted. The
-[session hub](../../tools/session-hub/README.md) renders all four sections live.
+[`session-scaffold`](../session-scaffold/SKILL.md); `## Session log` belongs to
+the heartbeat (below). Lines are checked off (`- [x]`) when captured elsewhere —
+never deleted. The [session hub](../../tools/session-hub/README.md) renders
+these sections live.
+
+### The heartbeat: every agent logs key events
+
+The scratchpad is shared by **all of the day's sessions** — lead, siblings, and
+ultracode jobs — and [`session-wrapup`](../session-wrapup/SKILL.md) folds it as
+the session inventory, so an unlogged event is invisible at wrapup. Three
+mechanisms keep it current (the lean-bookends design, 2026-07-14):
+
+- **Spawn briefing** — [`session-spawn`](../session-spawn/SKILL.md) instructs
+  every sibling to log key events (start, milestones, PRs/issues posted,
+  blockers, completion) and to append a final close-out line (what shipped,
+  what's unfinished) before it ends.
+- **Stop-hook nudge** — a workspace hook
+  (`.claude/hooks/scratchpad-heartbeat.sh`) reminds any working session that
+  goes >30 minutes without a scratchpad write, once per staleness window.
+- **This skill and `session-note`** — @jwildfire's and the lead's own capture
+  channels.
+
+**Multi-writer rules:** log under `## Session log` as tagged one-liners —
+`- HH:MM {tag} — {event}` with the session's tag (`😺🤖 lead`, `👯🤖 {slug}`,
+`⚡️🤖 {description}`) and links inline. **Append-only via shell `>>`** — never
+rewrite the file with the Write tool from a sibling; concurrent sessions share
+it. The lead may edit other sections (check-offs, Overview refresh) after
+re-reading the file. If the file is missing, create it via `>>` with the
+skeleton above.
 
 ## When to Use
 
