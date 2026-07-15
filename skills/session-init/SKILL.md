@@ -1,6 +1,6 @@
 ---
 name: session-init
-description: "Open a working session: sweep the evidence via subagents (requirement issues, open PRs, the project board, recent diaries, scratchpad, memory), then present and persist a prioritized list split into agent-actionable vs @jwildfire-gated items. Use at the start of any coding session — 'session init', 'session overview', 'prioritized list of open tasks', 'what's on deck'. Do NOT use mid-session (session-todo re-renders the persisted list) or for closing out (that is session-wrapup)."
+description: "Open a working session from the previous wrapup's hand-off: read the carried list (scratchpad Overview, latest diary loose ends, next-session memory), reconcile it with one cheap GitHub delta sweep, then present and persist a prioritized list split into agent-actionable vs @jwildfire-gated items. Use at the start of any coding session — 'session init', 'session overview', 'prioritized list of open tasks', 'what's on deck'. Do NOT use mid-session (session-todo re-renders the persisted list) or for closing out (that is session-wrapup)."
 argument-hint: "Optional: session focus to weight the priorities toward"
 ---
 
@@ -17,10 +17,21 @@ start of the next. Formerly named `session-overview`. The canonical trigger is
 > list. format as a numbered list with short bullets with links to relevant
 > roadmap items, issues and prs.
 
+**The lean contract** (@jwildfire, 2026-07-12; superseding the sweep-first
+design): the previous wrapup already persisted the priorities — in the
+scratchpad's `## Overview`, the diary's hand-off sections, and the
+`next-session-todo` memory. Init **trusts that hand-off and checks a delta**; it
+does not re-derive the list from a full GitHub/board/diary sweep. Budgets: the
+whole init lands in **~2 minutes** (2026-07-10) and a **small slice of context —
+well under 10%** (2026-07-12). The full sweep survives only as the
+[fallback](#fallback-full-sweep) for when the hand-off is missing or stale.
+
 The init is done when four things are true:
 
-1. **Evidence swept** — open issues, open PRs, the project board, and the recent
-   diary entries have all been read; nothing is prioritized from memory alone.
+1. **Hand-off read and reconciled** — the carried list has been read from the
+   previous wrapup's outputs and checked against a single GitHub delta sweep;
+   nothing is prioritized from memory alone, and nothing is re-derived that the
+   wrapup already wrote down.
 2. **Priorities presented** — a single numbered list, ordered by importance, each
    item with short bullets and links to the roadmap items, issues, and PRs it
    draws on.
@@ -45,67 +56,62 @@ conversation's own context) or at the end of a session (that is
 
 ### 0. Session identity reminder
 
-Sessions are named by convention: `😺🤖 {YYYY-MM-DD} {session # (only if > 1 that day)}`
-(template per Jeremy 2026-07-11; applies to spawned siblings too, numbered in day order).
-Colors: **orange** for the main/lead session, **green** for spawned siblings
-(per Jeremy 2026-07-11). In an interactive session these are the built-in slash commands
-`/name 😺🤖 YYYY-MM-DD` and `/color orange`, which the model **cannot
-run** — remind @jwildfire to type them if the session isn't named yet. A
-background session can set `name` and `color` directly in its own
-`~/.claude/jobs/{id}/state.json`.
+Sessions are named `😺🤖 {YYYY-MM-DD} {session # (only if > 1 that day)}`; the
+main/lead session is **orange**, spawned siblings are **green** and tagged
+`👯🤖 {date} {slug}` (@jwildfire, 2026-07-11). Ultracode/Workflow jobs are
+tracked separately as `⚡️🤖 {description}` — description-based, no date
+(2026-07-12). Interactive sessions set these with the built-in `/name` and
+`/color` slash commands, which the model **cannot run** — remind @jwildfire to
+type them if the session isn't named yet. A background session sets `name` and
+`color` directly in its own `~/.claude/jobs/{id}/state.json`.
 
-**Ultracode sessions are tracked separately** from regular siblings (per Jeremy
-2026-07-12): multi-agent Workflow/ultracode jobs use the tag
-`⚡️🤖 {description}` (e.g. `⚡️🤖 open.gismo v1`) — description-based, no date.
-The 😺🤖/👯🤖 templates and colors above stay unchanged for ordinary sessions.
+### 1. Read the hand-off — inline, no subagents
 
-### 1. Sweep the evidence — in subagents, not inline
+The carried list lives in three small places the wrapup maintains; read them
+directly (they are cheap) and merge:
 
-The sweep reads far more than the session ever needs again (issue lists, board
-JSON, whole diary entries): run it in **parallel subagents** and keep only their
-digests in the conversation — do not paste raw listings. Launch both in a single
-message; read-only `Explore`-type agents suffice. Do not prioritize from recall
-alone: everything below must come back from the sweep.
+- **Session scratchpad(s)** — `.claude/session-notes/{YYYY-MM-DD}.md` in the
+  workspace root: the most recent file's `## Overview` check-state, plus any
+  unchecked `## Todo` stragglers from sessions that ended without a wrapup.
+- **The latest diary entry** in [`diary/`](../../../obot.roadmap/diary/) — only
+  its "Next session: loose ends" and "🙋 ToDo" sections (skip the rest; skip
+  `README.md`).
+- **The `next-session-todo` memory** — the agreed priorities from the last
+  wrapup checkpoint.
 
-**Latency budget: the whole init should land in ~2 minutes** (@jwildfire,
-2026-07-10 — the first run took ~5 and that was too slow). Two rules keep it
-fast: the sweep runs **unattended** — kickoff sessions launch in auto mode, every
-command here is read-only, and if something would stall on a permission prompt
-the agent skips it, notes the gap in its digest, and moves on; and the GitHub
-pull is **batched, not per-repo/per-item** — three calls total, no drill-downs.
+These converge on the same list; where they disagree, the newest wins. Do not
+pull the board or list issues yet — that is the delta agent's job. If all three
+sources are missing or stale (no wrapup ran, or the newest hand-off is more than
+~3 days old), skip to the [fallback](#fallback-full-sweep).
 
-- **GitHub sweep agent** — open issues and PRs across the active repos, plus the
-  project board, in **three batched calls** (not a per-repo loop):
+### 2. Delta check — one subagent
 
-  ```bash
-  gh search issues --owner jwildfire --state open --limit 100 \
-    --json repository,number,title,updatedAt
-  gh search prs --owner jwildfire --state open --limit 100 \
-    --json repository,number,title,isDraft,updatedAt
-  gh project item-list 1 --owner jwildfire --format json --limit 80   # board stages
-  ```
+Launch a single read-only `Explore`-type subagent to reconcile the carried list
+against live GitHub state — **three batched calls, no per-item drill-downs**:
 
-  Filter to the active repos (obot.roadmap, safety.viz, gsm.safety,
-  safety-histogram, obot.agent) in the parse step (`jq` is not installed —
-  use `python3`). Do **not** run `gh pr view` / `gh pr checks` per item — list
-  fields plus board stage are enough to prioritize; drill into a specific PR
-  only when its next step is genuinely ambiguous from title/state/draft flag.
-  Digest to return, one line per item: `repo#N — title — board stage —
-  draft/open — whether the next step is agent work or an @jwildfire gate`.
+```bash
+gh search issues --owner jwildfire --state open --limit 100 \
+  --json repository,number,title,updatedAt
+gh search prs --owner jwildfire --state open --limit 100 \
+  --json repository,number,title,isDraft,updatedAt
+gh project item-list 1 --owner jwildfire --format json --limit 80   # board stages
+```
 
-- **Hand-off sweep agent** — what previous sessions left behind: the **two most
-  recent** entries in [`diary/`](../../../obot.roadmap/diary/) (skip `README.md`; their
-  "Next session: loose ends" and "🙋 ToDo" sections are the wrapup's hand-off to
-  this skill), any `.claude/session-notes/*.md` scratchpads with unchecked
-  items, and the `next-session-todo` memory. Digest to return: every still-open
-  carried item, one line each with source and links.
+Filter to the active repos in the parse step (`jq` is not installed — use
+`python3`). Digest to return, one line per item: `repo#N — title — board stage —
+draft/open — updated date`. The sweep runs **unattended** — every command is
+read-only; if something would stall on a permission prompt the agent skips it,
+notes the gap in its digest, and moves on.
 
-Reconcile the two digests so nothing silently drops; where they disagree (a
-diary loose end that GitHub shows already closed), trust GitHub.
+The delta's only jobs: mark carried items that GitHub shows already
+closed/merged/changed, and surface genuinely **new** items the hand-off predates.
+Where the hand-off and GitHub disagree, trust GitHub. Drill into a specific item
+(`gh pr view`, `gh pr checks`) only when its next step is genuinely ambiguous
+from title/state/draft flag — and note that you did.
 
-### 2. Prioritize
+### 3. Prioritize
 
-Order the swept items by what most advances the roadmap, weighing:
+Order the reconciled items by what most advances the roadmap, weighing:
 
 - **Unblocking value** — items that gate other work (reviews holding up merges,
   decisions holding up designs) rank high even when small.
@@ -115,7 +121,7 @@ Order the swept items by what most advances the roadmap, weighing:
 - **Session focus** — if @jwildfire supplied a focus argument, weight matching
   items up without hiding the rest.
 
-### 3. Present the list
+### 4. Present the list
 
 Format exactly as the kickoff prompt asks: a **numbered list** ordered by
 priority, each item with **short bullets** and **links** to the relevant roadmap
@@ -130,7 +136,7 @@ with a "which item should I start?" decision prompt, and do not start on any
 item: @jwildfire reads the list and directs the session from there (his call,
 2026-07-09). The Decision Prompt Convention does not apply to this closing step.
 
-### 4. Persist the list
+### 5. Persist the list
 
 Write the presented list into today's session scratchpad —
 `.claude/session-notes/YYYY-MM-DD.md` in the workspace root (skeleton in
@@ -151,6 +157,20 @@ missing) — replacing the `## Overview` section:
 One checkbox per numbered item, numbering and grouping kept, key links inline —
 condense each item's bullets to a single self-contained line. From here the
 scratchpad owns the state: [`session-todo`](../session-todo/SKILL.md) re-renders
-the list and checks items off as they finish; a later init re-run replaces the
-section with the fresh sweep, preserving the check-state of items that carry
-over.
+the list and checks items off as they finish; the scratchpad heartbeat (spawn
+briefing + workspace Stop hook — see `session-update`) keeps the `## Session
+log` current as the session runs; a later init re-run replaces the section with
+the fresh delta, preserving the check-state of items that carry over.
+
+## Fallback: full sweep
+
+Only when step 1 finds no usable hand-off (first session in a workspace, no
+wrapup ran for days, scratchpad and memory both missing): run the old two-agent
+sweep — launch **in parallel, in one message** a GitHub sweep agent (the three
+batched calls above, digested one line per item with an agent-work vs
+@jwildfire-gate call) and a hand-off sweep agent (the two most recent diary
+entries' hand-off sections, recent scratchpads with unchecked items, and the
+`next-session-todo` memory, digested one line per carried item with source and
+links). Reconcile the two digests so nothing silently drops — where they
+disagree, trust GitHub — then continue from step 3. Note in the presented list
+that the fallback ran and why.

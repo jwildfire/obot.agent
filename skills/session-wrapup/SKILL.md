@@ -1,6 +1,6 @@
 ---
 name: session-wrapup
-description: "Wrap up a working session in three phases: collect a read-only inventory of work across all agents (GitHub, git, session transcripts, scratchpad, memory); discuss findings and clarifying questions with @jwildfire; then apply the agreed changes — issue updates, stage moves, scaffold/memory updates, and the diary entry. Use at the end of any substantive session — 'wrap up', 'session wrapup', 'close out the session'. Do NOT use mid-session or for empty sessions."
+description: "Wrap up a working session by folding the session scratchpad — the as-you-go record kept by session-update, session-note, and the sibling heartbeat — verified by one GitHub delta agent; then discuss findings via the three-question checkpoint and apply the agreed changes: issue updates, stage moves, scaffold/memory updates, and the diary entry. Use at the end of any substantive session — 'wrap up', 'session wrapup', 'close out the session'. Do NOT use mid-session or for empty sessions."
 argument-hint: "Optional: session focus or extra context to fold into the summary"
 ---
 
@@ -18,8 +18,21 @@ done when four things are true:
 4. **Summary posted** — the day's diary entry is committed, the site deploy is
    green, and the deployed URL is shared for review.
 
+**The lean contract** (@jwildfire, 2026-07-12; superseding the collection-sweep
+design): **the scratchpad is the inventory.** During the session,
+[`session-update`](../session-update/SKILL.md) /
+[`session-note`](../session-note/SKILL.md) and the scratchpad heartbeat (every
+sibling's spawn briefing requires tagged key-event lines and a close-out entry;
+a workspace Stop hook nudges any session that goes quiet — see `session-update`)
+keep `.claude/session-notes/{YYYY-MM-DD}.md` current. The wrapup **folds that
+record and verifies it** with one GitHub delta agent — it does not re-derive the
+day from transcript-mining subagents and per-repo sweeps. A thin scratchpad is a
+during-session note-taking failure to fix (tighten the heartbeat, log as you
+go), not a reason for a heavier wrapup. Target: a typical wrapup in **~10
+minutes with a single delta agent**.
+
 The routine is **interactive** (@jwildfire's call, 2026-07-09): first **collect**
-the full picture read-only, then **discuss** — present findings and ask clarifying
+the picture read-only, then **discuss** — present findings and ask clarifying
 questions — and only after the discussion **apply** changes. Standing grants cover
 the mechanics of the apply phase; they do not skip the discussion.
 
@@ -41,72 +54,61 @@ filler diary entries).
 Three phases: **collect** (steps 1–4 — read-only: no issue edits, stage moves,
 posts, or memory writes yet), **discuss** (step 5), **apply** (steps 6–8).
 
-### 1. Inventory the session — all agents, not just this conversation
+### 1. Fold the scratchpad, verify with one delta agent
 
-A session often spans several agents (interactive sessions, background jobs,
-subagents). Sweep the evidence, don't trust recall:
+**The scratchpad first.** Read today's
+`.claude/session-notes/{YYYY-MM-DD}.md` in full: the `## Overview` check-state
+(what the kickoff list says got done), unchecked `## Todo` items, `## Notes`,
+and the `## Session log` — including every sibling (`👯🤖`) and ultracode
+(`⚡️🤖`) line the heartbeat collected. This record, plus the current
+conversation, is the inventory. Group it the way diary entries report it:
+merged / opened / closed / advanced, each with links.
 
-- **This conversation** and any subagent/background-job results in it.
-- **Agent session transcripts** — the wrapup often runs as a fresh session that saw
-  none of the day's work firsthand. The day's transcripts live at
-  `~/.claude/projects/-Users-jwildfire-Documents-obot2/{sessionId}.jsonl` (one file
-  per session; `ls -t` and take today's) with background-job metadata under
-  `~/.claude/jobs/`. They are large — don't read them inline; spawn a subagent per
-  transcript (or one for the batch) to extract what each session did, decisions
-  made, promises to @jwildfire, and anything that never reached GitHub, the
-  scratchpad, or memory.
-- **GitHub activity** since the session started, across the active repos
-  (`obot.roadmap`, `safety.viz`, `gsm.safety`, `safety-histogram`, `obot.agent`,
-  and upstream `gsm.agent` via its local clone — the Gilead-BioStats API is
-  SAML-blocked). Per repo:
-  `gh issue list -R jwildfire/{repo} --state all --search "updated:>={YYYY-MM-DD}"`
-  and the same for `gh pr list`.
-- **Local git state** in each workspace clone *and its `*-worktrees/` siblings*:
-  `git log --all --since={date}` for commits, plus `git status` for uncommitted or
-  unpushed work — unpushed work is a loose end, not a completion.
-- **Session scratchpad** — `.claude/session-notes/{YYYY-MM-DD}.md` in the
-  workspace, written mid-session by the
-  [`session-update`](../session-update/SKILL.md) /
-  [`session-note`](../session-note/SKILL.md) skills: fold unchecked Todo items
-  into the uncaptured-todo sweep (step 2) and Notes into the diary entry
-  (step 7), then check items off as captured — never delete the file.
-- **Memory** (`next-session-todo` and friends) for what the session was *supposed*
-  to do — anything planned but untouched is carried forward in step 4.
+**Then verify, don't trust.** Launch a single read-only subagent to check the
+record against reality — batched calls, not per-repo loops:
 
-Produce a work inventory grouped the way diary entries report it: merged / opened /
-closed / advanced, each with links.
+- `gh search issues` / `gh search prs` across `--owner jwildfire`, filtered to
+  activity since the session started (`--json` fields plus `updatedAt`; parse
+  with `python3`, `jq` is not installed), plus
+  `gh project item-list 1 --owner jwildfire` for board stages.
+- Its two jobs: **verify scratchpad claims** (a "PR posted" line must
+  correspond to a real PR; a "merged" claim to a merged PR) and **catch
+  strays** — GitHub activity in the session window with no scratchpad line.
+
+**Local git, scoped.** Check `git status` / unpushed commits only in the repos
+and worktrees the scratchpad or delta digest name as touched this session —
+unpushed work is a loose end, not a completion. Do not sweep every clone.
+
+**Transcripts are the exception, not the default.** Mine a session transcript
+(`~/.claude/projects/…/{sessionId}.jsonl`, via one scoped subagent) only when
+the fold surfaces a **known gap** — e.g. a sibling job ran but left no
+scratchpad lines, or the delta caught activity nothing accounts for. Name the
+gap in the wrapup summary either way.
 
 ### 2. Roadmap hygiene sweep — build the fix list
 
-For **each requirement or issue touched this session** (from the step 1 inventory),
+For **each issue or PR the inventory says was touched** (not the whole tracker),
 check — and record mismatches as **proposed fixes**, don't edit anything yet:
 
 - **Body accurate?** Re-read the live body (`gh issue view` — Draft Sync
-  Convention); flag it if the session changed scope, design, or status. Verify
-  requirement issues still carry exactly the five template sections (see
+  Convention); flag it if the session changed scope, design, or status.
+  Requirement issues must carry the five template sections (see
   [Creating Requirement issues](../../../obot.roadmap/AGENTS.md)).
-- **Stage correct?** Check the obot Roadmap user project (project 1,
-  `gh project item-list 1 --owner jwildfire`) and flag items whose stage no longer
-  matches reality. Respect done-gates (e.g. a renderer requirement is not Released
-  until its site entry deploys).
+- **Stage correct?** Flag touched items whose board stage no longer matches
+  reality (stages come free with the step 1 delta digest). Respect done-gates
+  (e.g. a renderer requirement is not Released until its site entry deploys).
 - **Links intact?** PRs carry `Closes #X` lines and Development-sidebar links;
-  sub-issues are attached to their parent (use the `sub-issue-linking` skill).
+  sub-issues are attached to their parent (`sub-issue-linking` skill).
 - **Metadata set?** Milestone (lowercase `YYYYqN` or `backlog`) and topic labels.
 
-Then sweep the session itself for **uncaptured todos**: promises made in
-conversation, "we should…" moments, blockers hit, review requests, deferred
-decisions. Propose a durable home for each:
-
-- New scoped work → a Requirement (`requirement-drafting`) or a sub-issue in the
-  implementation repo (`requirement-tasks`).
-- Adjustments to existing work → an edit or comment on the existing issue.
-- Small or not-yet-scoped items → the diary entry's "Next session" /
-  "🙋 ToDo" sections (step 7), which are re-read at the next session's start.
-
-Standing grants make the fixes themselves no-approval-needed mechanically, but they
-are applied in step 6 — after the checkpoint. Anything involving deleting or
-closing what isn't verifiably done needs explicit approval: raise it at the
-checkpoint, never assume it.
+Then sweep the scratchpad and conversation for **uncaptured todos**: promises
+made, "we should…" moments, blockers hit, review requests, deferred decisions.
+Propose a durable home for each — a Requirement (`requirement-drafting`), a
+sub-issue (`requirement-tasks`), an edit/comment on an existing issue, or the
+diary's "Next session" / "🙋 ToDo" sections (step 7). Standing grants make the
+fixes mechanically no-approval-needed, but they are applied in step 6 — after
+the checkpoint. Anything involving deleting or closing what isn't verifiably
+done needs explicit approval: raise it at the checkpoint, never assume it.
 
 ### 3. Scaffold review — collect candidates
 
@@ -114,27 +116,26 @@ Review the session for scaffold updates and list them as candidates to discuss:
 
 - **Repeatable pattern** executed by hand two or more times, or an existing skill
   that gave stale/wrong guidance → a new skill or a skill update. Hub-process
-  skills live in this repo (`.github/skills/` + a symlink from the workspace
-  `.claude/skills/`); shared gsm conventions go upstream as a `gsm.agent` PR.
-- **Convention drift** — a convention changed or was granted in-session (autonomy,
-  formats, gates) → an `AGENTS.md` / workspace `CLAUDE.md` update so the next
-  session starts current.
-- **Memory** — durable facts, preferences, and feedback from the session → memory
-  writes or updates.
-- **Config friction** — repeated permission prompts, broken skill symlinks, stale
-  merged worktrees, out-of-date clones → note what a fix would be; nothing
-  destructive without approval.
+  skills live in this repo (symlinked from the workspace `.claude/skills/`);
+  shared gsm conventions go upstream as a `gsm.agent` PR.
+- **Convention drift** — a convention changed or was granted in-session →
+  an `AGENTS.md` / workspace `CLAUDE.md` update so the next session starts
+  current.
+- **Memory** — durable facts, preferences, and feedback → memory writes or
+  updates.
+- **Config friction** — repeated permission prompts, broken symlinks, stale
+  merged worktrees, heartbeat nudges that misfired → note what a fix would be;
+  nothing destructive without approval.
 
 ### 4. Draft next-session tasks
 
 Draft a prioritized, concrete list of what the next session should pick up:
-
-- Every item traceable — link the issue/PR it advances; propose an issue (step 2)
-  if substantial work has none.
-- Include carried items from previous entries that are still open, marked as
-  carried, so nothing silently drops.
-- The agreed list lands in the diary's **"Next session: loose ends"** section and
-  the memory next-session pointer (step 6).
+every item traceable (link the issue/PR it advances; propose an issue if
+substantial work has none), carried items marked as carried so nothing silently
+drops. The agreed list lands in the diary's **"Next session: loose ends"**
+section, the scratchpad `## Overview` check-state, and the `next-session-todo`
+memory (step 6) — the hand-off [`session-init`](../session-init/SKILL.md) reads
+back.
 
 ### 5. Checkpoint — three questions, content inside the prompt
 
@@ -170,8 +171,9 @@ issues without the checkpoint.
 - Issue-body edits, stage moves, link and metadata fixes from step 2, as agreed.
 - New issues/sub-issues and issue comments that got homes in the discussion.
 - Scaffold updates from step 3 that were approved or fall under standing grants;
-  memory writes, including updating the memory next-session pointer to the agreed
+  memory writes, including updating the `next-session-todo` memory to the agreed
   step-4 list.
+- Check captured scratchpad items off (`- [x]`) — never delete them or the file.
 
 ### 7. Draft and post the session summary
 
@@ -181,18 +183,16 @@ issues without the checkpoint.
   `# Daily diary: YYYY-MM-DD — Session N`. Never append a second session to an
   existing entry — `render_diary.mjs` gives every session file its own page and
   news-index line.
-- **Format** (match recent entries; the diary README and the latest few entries are
-  the exemplars):
-  - Lead `<span class="meta">…</span>` paragraph — the session's story in 2–4
-    sentences.
-  - `## Work completed` — from the step 1 inventory, grouped by lane.
-  - `## PRs / issues touched` — merged / opened / closed / advanced, with links.
-  - `## Blockers / risks`
-  - `## Next session: loose ends` — from step 4, as agreed at the checkpoint.
-  - `## 🙋 ToDo` — items needing @jwildfire (reviews, sign-offs, decisions).
-- **Changelog**: if the session changed what `roadmap.html` shows (stage moves, new
-  requirements), append a `site/roadmap-changelog.json` entry with the semver bump
-  rules in `AGENTS.md`.
+- **Format** (match recent entries; the diary README and the latest few entries
+  are the exemplars): lead `<span class="meta">…</span>` story paragraph, then
+  `## Work completed` (from the step 1 inventory, grouped by lane),
+  `## PRs / issues touched` (merged / opened / closed / advanced, with links),
+  `## Blockers / risks`, `## Next session: loose ends` (from step 4, as agreed),
+  `## 🙋 ToDo` (items needing @jwildfire). The scratchpad `## Notes` lines are
+  raw material for the entry, not verbatim copy.
+- **Changelog**: if the session changed what `roadmap.html` shows (stage moves,
+  new requirements), append a `site/roadmap-changelog.json` entry with the
+  semver bump rules in `AGENTS.md`.
 - **Post**: commit directly to `main` and push (standard-update grant). The site
   deploy triggers on `diary/**` pushes.
 - **Verify the deploy**: `gh run list -R jwildfire/obot.roadmap --workflow=deploy-site.yml --limit 1`
@@ -204,10 +204,12 @@ issues without the checkpoint.
 
 Confirm, and state in the closing response:
 
+- [ ] Scratchpad folded — every line verified, captured, and checked off; gaps
+      (missing sibling logs, stray GitHub activity) named.
 - [ ] Checkpoint held — changes applied only after the step 5 discussion.
 - [ ] Board stages match reality for every touched issue; bodies synced.
 - [ ] No todo exists only in conversation — each has an issue, diary line, or
       memory entry.
 - [ ] Scaffold updates applied or proposed; memory current.
-- [ ] Next-session list recorded (diary + memory).
+- [ ] Next-session list recorded (diary + scratchpad + memory).
 - [ ] Diary entry deployed (workflow green) and the deployed URL shared.
