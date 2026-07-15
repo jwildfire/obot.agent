@@ -21,9 +21,10 @@ root, `## Notes` section.
 - A moment worth the diary happens mid-session — a decision and its why, a
   blocker and what was tried, a surprise worth remembering.
 
-**Do not use** for actionable tasks (`session-update`), for durable facts or
-preferences that outlive the diary (memory), or for anything already captured on
-an issue (comment there instead).
+**Do not use** for actionable tasks (`session-update`), for scaffold/tooling
+improvement candidates (`session-scaffold`), for durable facts or preferences
+that outlive the diary (memory), or for anything already captured on an issue
+(comment there instead).
 
 ## Procedure
 

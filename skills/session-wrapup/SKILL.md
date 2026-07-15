@@ -7,7 +7,7 @@ argument-hint: "Optional: session focus or extra context to fold into the summar
 # Session Wrapup
 
 Close out a working session so nothing lives only in a conversation. The wrapup is
-done when four things are true:
+done when five things are true:
 
 1. **Clean roadmap** — every issue touched this session is accurate (body, stage,
    links) and the board reflects reality.
@@ -17,6 +17,9 @@ done when four things are true:
    applied or proposed scaffold updates (skills, AGENTS.md, memory, config).
 4. **Summary posted** — the day's diary entry is committed, the site deploy is
    green, and the deployed URL is shared for review.
+5. **Next session prepped** — every agreed next-session priority links a hub
+   requirement; any priority without one has its **Business Requirement +
+   Overview** drafted and filed before the session ends.
 
 **The lean contract** (@jwildfire, 2026-07-12; superseding the collection-sweep
 design): **the scratchpad is the inventory.** During the session,
@@ -101,6 +104,10 @@ check — and record mismatches as **proposed fixes**, don't edit anything yet:
 - **Links intact?** PRs carry `Closes #X` lines and Development-sidebar links;
   sub-issues are attached to their parent (`sub-issue-linking` skill).
 - **Metadata set?** Milestone (lowercase `YYYYqN` or `backlog`) and topic labels.
+- **Releases tied?** Any release published this session lists its hub
+  requirement(s) in the release notes — a `Requirements delivered:` line placed
+  before the closing attribution rule. Retro-add via the releases API
+  (`gh api -X PATCH repos/{owner}/{repo}/releases/{id}`) when missing.
 
 Then sweep the scratchpad and conversation for **uncaptured todos**: promises
 made, "we should…" moments, blockers hit, review requests, deferred decisions.
@@ -113,7 +120,10 @@ done needs explicit approval: raise it at the checkpoint, never assume it.
 
 ### 3. Scaffold review — collect candidates
 
-Review the session for scaffold updates and list them as candidates to discuss:
+Start from the scratchpad's `## Scaffold` section — the list
+[`session-scaffold`](../session-scaffold/SKILL.md) built as friction happened;
+those entries are the primary candidates. Then review the session for anything
+the list missed:
 
 - **Repeatable pattern** executed by hand two or more times, or an existing skill
   that gave stale/wrong guidance → a new skill or a skill update. Hub-process
@@ -137,6 +147,17 @@ drops. The agreed list lands in the diary's **"Next session: loose ends"**
 section, the scratchpad `## Overview` check-state, and the `next-session-todo`
 memory (step 6) — the hand-off [`session-init`](../session-init/SKILL.md) reads
 back.
+
+**Roadmap prep — obot.agent orchestration job (1), roadmap-standards enforcement:**
+every priority on the drafted list must link a hub requirement. For any priority
+without one, draft the requirement's **Business Requirement + Overview** sections
+(via `requirement-drafting`; scope questions to @jwildfire are welcome —
+AskUserQuestion) and **file it before the checkpoint**, so the step-5 priorities
+question presents each priority *with* its requirement link. Board-add every new
+requirement with a Status (normally `Requirement Gathering`) and link existing
+implementation issues as sub-issues at filing time (`sub-issue-linking`; note the
+one-parent-per-issue constraint). Later lifecycle sections (Data Requirement,
+Design, Tasks) stay stubbed for their own stages.
 
 ### 5. Checkpoint — three questions, content inside the prompt
 
@@ -194,6 +215,18 @@ issues without the checkpoint.
 - **Changelog**: if the session changed what `roadmap.html` shows (stage moves,
   new requirements), append a `site/roadmap-changelog.json` entry with the
   semver bump rules in `AGENTS.md`.
+- **Session report** (design #24, D2): render the frozen operational record and
+  place it beside the entry —
+
+  ```bash
+  node obot.agent/tools/session-hub/session-hub.mjs --report   # from the workspace root
+  ```
+
+  Output lands at `obot.roadmap/reports/sessions/{slug}.html` (slug mirrors the
+  diary file). Add one line to the entry directly under the `<span class="meta">`
+  paragraph: `📊 [Session report](../reports/sessions/{slug}.html)`. The report
+  commits together with the diary entry. Render it **after** the scratchpad
+  check-states from step 6 are final — the report freezes them.
 - **Post**: commit directly to `main` and push (standard-update grant). The site
   deploy triggers on `diary/**` pushes.
 - **Verify the deploy**: `gh run list -R jwildfire/obot.roadmap --workflow=deploy-site.yml --limit 1`
@@ -212,5 +245,6 @@ Confirm, and state in the closing response:
 - [ ] No todo exists only in conversation — each has an issue, diary line, or
       memory entry.
 - [ ] Scaffold updates applied or proposed; memory current.
+- [ ] Session report rendered and linked from the diary entry.
 - [ ] Next-session list recorded (diary + scratchpad + memory).
 - [ ] Diary entry deployed (workflow green) and the deployed URL shared.

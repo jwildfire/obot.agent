@@ -145,7 +145,7 @@ missing) — replacing the `## Overview` section:
 
 ```markdown
 ## Overview
-<!-- session-init YYYY-MM-DD HH:MM -->
+<!-- session-init YYYY-MM-DD HH:MM session #N (job {id}) -->
 
 ### Agent-actionable
 - [ ] 1. {item, one line} ([#N](url), [PR #N](url))
@@ -154,6 +154,11 @@ missing) — replacing the `## Overview` section:
 - [ ] 5. {ask, one line} ([PR #N](url))
 ```
 
+The marker line is load-bearing: it is the **session-boundary anchor** the
+[session hub](../../tools/session-hub/README.md) uses to scope agents and roadmap
+activity (design #24, D4). Always include the `HH:MM`; add `session #N` on a
+day's second-plus session and `(job {id})` when running as a background job.
+
 One checkbox per numbered item, numbering and grouping kept, key links inline —
 condense each item's bullets to a single self-contained line. From here the
 scratchpad owns the state: [`session-todo`](../session-todo/SKILL.md) re-renders
@@ -161,6 +166,13 @@ the list and checks items off as they finish; the scratchpad heartbeat (spawn
 briefing + workspace Stop hook — see `session-update`) keeps the `## Session
 log` current as the session runs; a later init re-run replaces the section with
 the fresh delta, preserving the check-state of items that carry over.
+
+After persisting, mention in the closing response that the live dashboard is
+available for the session:
+
+```bash
+node obot.agent/tools/session-hub/session-hub.mjs --watch --open   # from the workspace root
+```
 
 ## Fallback: full sweep
 
