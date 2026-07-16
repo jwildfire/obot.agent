@@ -152,41 +152,43 @@ back.
 every priority on the drafted list must link a hub requirement. For any priority
 without one, draft the requirement's **Business Requirement + Overview** sections
 (via `requirement-drafting`; scope questions to @jwildfire are welcome —
-AskUserQuestion) and **file it before the checkpoint**, so the step-5 priorities
-question presents each priority *with* its requirement link. Board-add every new
+AskUserQuestion) and **file it before the checkpoint**, so the draft post's
+next-session list presents each priority *with* its requirement link. Board-add every new
 requirement with a Status (normally `Requirement Gathering`) and link existing
 implementation issues as sub-issues at filing time (`sub-issue-linking`; note the
 one-parent-per-issue constraint). Later lifecycle sections (Data Requirement,
 Design, Tasks) stay stubbed for their own stages.
 
-### 5. Checkpoint — three questions, content inside the prompt
+### 5. Checkpoint — the draft post, reviewed in Chrome
 
-The checkpoint is **one `AskUserQuestion` call with exactly three questions**
-(@jwildfire's format, 2026-07-09). Embed the substance **in each question's own
-text** — @jwildfire sees only the prompt while answering, so content that lives
-in earlier chat messages is invisible at decision time; a preview he can't see
-is no preview:
+The checkpoint is **a draft of the wrapup post presented for review**
+(@jwildfire's format, 2026-07-14, superseding the three-question
+AskUserQuestion checkpoint — "the formatting on the Q&A is hard to follow"):
 
-1. **Accomplishments** — the session's key accomplishments, compact, in the
-   question text; ask *"anything to add?"* Options: `Looks complete` /
-   `Missing something` (freeform Other supplies what).
-2. **Scaffold** — one or more concrete proposed scaffold improvements from
-   step 3, in the question text; ask *"agree?"* Options: `Apply as proposed` /
-   `Adjust` / `Skip this time`.
-3. **Priorities** — the top 3 priorities for the next session from step 4, in
-   the question text; ask *"agree?"* Options: `Agree` / `Reorder or swap`.
+1. **Compose the full diary entry draft** (step 7 format) from the fold —
+   accomplishments, scaffold changes, and next-session priorities all visible
+   in the form they will actually publish. Add a short aside listing what posts
+   alongside the entry (changelog entry, session report) and what was already
+   applied under standing grants before the draft.
+2. **Render it as a local HTML review page and open it in Chrome** —
+   @jwildfire reviews in Chrome, not the CLI. The page shows the entry styled
+   as it will publish, with a comment box and two buttons —
+   `✅ Approve & post` / `✏️ Request changes` — wired to a one-shot localhost
+   listener so the click (with comments) reaches the session directly; a chat
+   reply works as a fallback. Nothing posts until the decision arrives.
+3. **Comments are the discussion**: fold them in — including any new work they
+   direct, which then belongs in the entry — re-render, and re-present until
+   approved. An approval is the go-ahead for the apply phase (Approval
+   Convention satisfied); the diary entry is then posted under the
+   standard-update grant.
 
-The answers are the discussion: fold adjustments back into the plan, re-asking
-only what changed. Affirmative answers to all three are the go-ahead for the
-apply phase (Approval Convention satisfied); the diary entry is then composed
-from the approved content and posted under the standard-update grant. Anything
-beyond standing grants that the sweep surfaced (deletions, closing unverified
-work, upstream PRs) still needs its own explicit ask — raise it separately,
-never bundle it into the three questions.
+Anything beyond standing grants that the sweep surfaced (deletions, closing
+unverified work, upstream PRs) still needs its own explicit ask — raise it in
+the review aside or separately, never bury it in the draft.
 
-If @jwildfire is unavailable (unattended background run, no reply), stop here
-and surface `needs input:` with the full plan — never post the diary or edit
-issues without the checkpoint.
+If @jwildfire is unavailable (unattended background run, no decision), stop
+here and surface `needs input:` with the full draft — never post the diary or
+edit issues without the review.
 
 ### 6. Apply the agreed changes
 
