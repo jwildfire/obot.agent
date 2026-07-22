@@ -61,9 +61,13 @@ Skip anything the agent can rediscover by reading the code.
   only: `obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>` (add `--check`
   to dry-run the policy first). It verifies the base branch against
   [`scripts/merge-policy.json`](../../scripts/merge-policy.json), merges as
-  obotclaw[bot], and verifies the result. Raw `gh pr merge`, REST, and GraphQL
-  merges are denied by the workspace `merge-gate-guard` PreToolUse hook — a
-  denial there means "use obot-merge", not "find another route".
+  obotclaw[bot], and verifies the result. Protected/release branches
+  (`approvalRequired` tier) additionally need
+  `--jeremy-approved '<where/when he approved>'` — pass it ONLY when Jeremy
+  explicitly approved that specific merge in-session; the note is posted on the
+  PR as an audit comment. Raw `gh pr merge`, REST, and GraphQL merges are
+  denied by the workspace `merge-gate-guard` PreToolUse hook — a denial there
+  means "use obot-merge", not "find another route".
 
 ### 3. Pick the spawn parameters deliberately
 
