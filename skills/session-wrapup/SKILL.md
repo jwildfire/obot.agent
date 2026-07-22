@@ -231,8 +231,18 @@ edit issues without the review.
   check-states from step 6 are final — the report freezes them.
 - **Post**: commit directly to `main` and push (standard-update grant). The site
   deploy triggers on `diary/**` pushes.
+- **Refresh package status**: that same deploy re-renders
+  [the Status page](https://jwildfire.github.io/obot.roadmap/status.html) from the
+  live GitHub API, so posting the entry brings the dashboard current — no local R
+  needed. If a session ends without any `obot.roadmap` commit, trigger it directly:
+
+  ```bash
+  gh workflow run deploy-site.yml -R jwildfire/obot.roadmap
+  ```
 - **Verify the deploy**: `gh run list -R jwildfire/obot.roadmap --workflow=deploy-site.yml --limit 1`
   and watch it to a green conclusion — a posted-but-undeployed entry is not posted.
+  The dashboard steps are `continue-on-error`, so also check that the run did not
+  fall back to the "temporarily unavailable" placeholder.
 - **Share the deployed URL** (https://jwildfire.github.io/obot.roadmap/ diary page)
   — @jwildfire reviews in Chrome on the deployed site, not from a local file.
 
