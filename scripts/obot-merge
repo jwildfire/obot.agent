@@ -10,9 +10,16 @@
 # BEFORE invoking this for a real merge. This tool removes the mechanical
 # permission block once that approval exists - it is not the approval.
 #
+# Policy tiers (merge-policy.json):
+#   allowed          - integration lanes; contract-gated approval, no attestation
+#   approvalRequired - protected/release branches; merge ONLY with Jeremy's
+#                      explicit in-session approval, attested via
+#                      --jeremy-approved '<where/when he approved>'. The note is
+#                      posted as an audit comment on the PR before merging.
+#
 # Usage:
 #   obot-merge <pr-number> -R <owner>/<repo> [--merge|--squash|--rebase]
-#              [--delete-branch] [--check]
+#              [--delete-branch] [--check] [--jeremy-approved '<note>']
 #
 #   --check   dry run: evaluate policy and print the verdict, merge nothing
 #
@@ -26,17 +33,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POLICY_FILE="$SCRIPT_DIR/merge-policy.json"
 
-usage() { grep '^#' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' | sed -n '3,20p' >&2; }
+usage() { sed -n 's/^# \{0,1\}//p' "${BASH_SOURCE[0]}" | sed -n '3,27p' >&2; }
 fail()  { printf 'obot-merge: %s\n' "$1" >&2; exit 1; }
 refuse(){ printf 'obot-merge: REFUSED - %s\n' "$1" >&2; exit 2; }
 
-PR="" REPO="" STRATEGY="--merge" DELETE_BRANCH="" CHECK=""
+PR="" REPO="" STRATEGY="--merge" DELETE_BRANCH="" CHECK="" APPROVAL_NOTE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -R) REPO="${2:?-R needs owner/repo}"; shift 2 ;;
     --merge|--squash|--rebase) STRATEGY="$1"; shift ;;
     --delete-branch) DELETE_BRANCH="--delete-branch"; shift ;;
     --check) CHECK=1; shift ;;
+    --jeremy-approved) APPROVAL_NOTE="${2:?--jeremy-approved needs a note describing where/when Jeremy approved}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) fail "unknown flag: $1" ;;
     *) PR="$1"; shift ;;
@@ -54,37 +62,63 @@ import json, sys
 pr = json.load(sys.stdin)
 policy = json.load(open('$POLICY_FILE'))
 repo, base = '$REPO', pr['baseRefName']
-allowed = policy.get(repo)
+entry = policy.get(repo)
+if isinstance(entry, list):  # legacy shape: plain list = allowed lanes
+    entry = {'allowed': entry}
 
 print(f\"PR #$PR {pr['url']}\")
 print(f\"  title: {pr['title']}\")
 print(f\"  base:  {base}   state: {pr['state']}   draft: {pr['isDraft']}   mergeable: {pr['mergeable']}\")
 print(f\"  head:  {pr['headRefOid']}\")
 
-if allowed is None:
+if entry is None:
     print(f'REFUSE:{repo} is not in merge-policy.json - merges in this repo are Jeremy-manual')
-elif base not in allowed:
-    print(f\"REFUSE:base branch '{base}' is not an allowed merge target for {repo} (allowed: {', '.join(allowed)})\")
-elif pr['isDraft']:
-    print('REFUSE:PR is a draft - mark it ready for review first')
-elif pr['state'] != 'OPEN':
-    print(f\"REFUSE:PR state is {pr['state']}, not OPEN\")
 else:
-    print('ALLOW')
+    allowed = entry.get('allowed', [])
+    approval = entry.get('approvalRequired', [])
+    if pr['isDraft']:
+        print('REFUSE:PR is a draft - mark it ready for review first')
+    elif pr['state'] != 'OPEN':
+        print(f\"REFUSE:PR state is {pr['state']}, not OPEN\")
+    elif base in allowed:
+        print('ALLOW:standard')
+    elif base in approval:
+        print('ALLOW:approval')
+    else:
+        lanes = ', '.join(allowed + [b + ' (approval-tier)' for b in approval])
+        print(f\"REFUSE:base branch '{base}' is not an allowed merge target for {repo} (lanes: {lanes})\")
 ")"
 
-printf '%s\n' "$VERDICT" | grep -v '^REFUSE:\|^ALLOW$'
+printf '%s\n' "$VERDICT" | grep -v '^REFUSE:\|^ALLOW:'
 if printf '%s' "$VERDICT" | grep -q '^REFUSE:'; then
-  refuse "$(printf '%s' "$VERDICT" | sed -n 's/^REFUSE://p')"
+  refuse "$(printf '%s' "$VERDICT" | sed -n 's/^REFUSE://p' | head -1)"
 fi
 
+LANE="$(printf '%s' "$VERDICT" | sed -n 's/^ALLOW://p' | head -1)"
+
 if [ -n "$CHECK" ]; then
-  printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s\n' "$PR" "$REPO"
+  if [ "$LANE" = "approval" ]; then
+    printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s on the approval tier (explicit Jeremy approval + --jeremy-approved required)\n' "$PR" "$REPO"
+  else
+    printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s\n' "$PR" "$REPO"
+  fi
   exit 0
 fi
 
-printf 'obot-merge: policy OK - merging PR #%s in %s as obotclaw[bot] (%s)\n' "$PR" "$REPO" "$STRATEGY"
+if [ "$LANE" = "approval" ] && [ -z "$APPROVAL_NOTE" ]; then
+  refuse "base branch is approval-tier for $REPO: merge only with Jeremy's explicit in-session approval, then re-run with --jeremy-approved '<where/when he approved>'. Do not pass the flag without that approval."
+fi
+
+printf 'obot-merge: policy OK (%s lane) - merging PR #%s in %s as obotclaw[bot] (%s)\n' "$LANE" "$PR" "$REPO" "$STRATEGY"
 TOKEN="$("$SCRIPT_DIR/obot-app-token")" || fail "token mint failed"
+
+if [ "$LANE" = "approval" ]; then
+  BASE_BRANCH="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["baseRefName"])')"
+  AUDIT="🔒 Protected-branch merge into \`$BASE_BRANCH\`: explicitly approved by @jwildfire — ${APPROVAL_NOTE}. Executed via obot-merge as obotclaw[bot] on $(date '+%Y-%m-%d %H:%M %Z')."
+  GH_TOKEN="$TOKEN" gh pr comment "$PR" -R "$REPO" --body "$AUDIT" >/dev/null \
+    || fail "could not post the approval audit comment - not merging without the audit trail"
+  printf 'obot-merge: audit comment posted on PR #%s\n' "$PR"
+fi
 
 GH_TOKEN="$TOKEN" gh pr merge "$PR" -R "$REPO" "$STRATEGY" ${DELETE_BRANCH:+"$DELETE_BRANCH"} \
   || fail "merge command failed"
