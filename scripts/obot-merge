@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# obot-merge — policy-gated PR merge, executed as obotclaw[bot].
+#
+# The single mechanical merge lane for agent sessions in the obot workspace.
+# Checks the PR's base branch against scripts/merge-policy.json, refuses drafts
+# and anything outside the policy, mints a fresh obotclaw[bot] installation
+# token (obot-app-token, same directory), merges, and verifies the result.
+#
+# The operating contract is unchanged: Jeremy's explicit approval is required
+# BEFORE invoking this for a real merge. This tool removes the mechanical
+# permission block once that approval exists - it is not the approval.
+#
+# Usage:
+#   obot-merge <pr-number> -R <owner>/<repo> [--merge|--squash|--rebase]
+#              [--delete-branch] [--check]
+#
+#   --check   dry run: evaluate policy and print the verdict, merge nothing
+#
+# Exit codes: 0 merged (or --check passed), 1 operational error, 2 policy refusal.
+#
+# Raw `gh pr merge` / REST / GraphQL merges are denied by the workspace
+# merge-gate-guard PreToolUse hook; this wrapper is allowlisted instead.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+POLICY_FILE="$SCRIPT_DIR/merge-policy.json"
+
+usage() { grep '^#' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' | sed -n '3,20p' >&2; }
+fail()  { printf 'obot-merge: %s\n' "$1" >&2; exit 1; }
+refuse(){ printf 'obot-merge: REFUSED - %s\n' "$1" >&2; exit 2; }
+
+PR="" REPO="" STRATEGY="--merge" DELETE_BRANCH="" CHECK=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -R) REPO="${2:?-R needs owner/repo}"; shift 2 ;;
+    --merge|--squash|--rebase) STRATEGY="$1"; shift ;;
+    --delete-branch) DELETE_BRANCH="--delete-branch"; shift ;;
+    --check) CHECK=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) fail "unknown flag: $1" ;;
+    *) PR="$1"; shift ;;
+  esac
+done
+[ -n "$PR" ] && [ -n "$REPO" ] || { usage; fail "PR number and -R owner/repo are required"; }
+[ -f "$POLICY_FILE" ] || fail "policy file missing: $POLICY_FILE"
+
+PR_JSON="$(gh pr view "$PR" -R "$REPO" --json baseRefName,isDraft,state,mergeable,headRefOid,url,title)" \
+  || fail "could not resolve PR #$PR in $REPO"
+
+VERDICT="$(printf '%s' "$PR_JSON" | python3 -c "
+import json, sys
+
+pr = json.load(sys.stdin)
+policy = json.load(open('$POLICY_FILE'))
+repo, base = '$REPO', pr['baseRefName']
+allowed = policy.get(repo)
+
+print(f\"PR #$PR {pr['url']}\")
+print(f\"  title: {pr['title']}\")
+print(f\"  base:  {base}   state: {pr['state']}   draft: {pr['isDraft']}   mergeable: {pr['mergeable']}\")
+print(f\"  head:  {pr['headRefOid']}\")
+
+if allowed is None:
+    print(f'REFUSE:{repo} is not in merge-policy.json - merges in this repo are Jeremy-manual')
+elif base not in allowed:
+    print(f\"REFUSE:base branch '{base}' is not an allowed merge target for {repo} (allowed: {', '.join(allowed)})\")
+elif pr['isDraft']:
+    print('REFUSE:PR is a draft - mark it ready for review first')
+elif pr['state'] != 'OPEN':
+    print(f\"REFUSE:PR state is {pr['state']}, not OPEN\")
+else:
+    print('ALLOW')
+")"
+
+printf '%s\n' "$VERDICT" | grep -v '^REFUSE:\|^ALLOW$'
+if printf '%s' "$VERDICT" | grep -q '^REFUSE:'; then
+  refuse "$(printf '%s' "$VERDICT" | sed -n 's/^REFUSE://p')"
+fi
+
+if [ -n "$CHECK" ]; then
+  printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s\n' "$PR" "$REPO"
+  exit 0
+fi
+
+printf 'obot-merge: policy OK - merging PR #%s in %s as obotclaw[bot] (%s)\n' "$PR" "$REPO" "$STRATEGY"
+TOKEN="$("$SCRIPT_DIR/obot-app-token")" || fail "token mint failed"
+
+GH_TOKEN="$TOKEN" gh pr merge "$PR" -R "$REPO" "$STRATEGY" ${DELETE_BRANCH:+"$DELETE_BRANCH"} \
+  || fail "merge command failed"
+
+for _ in 1 2 3 4 5 6; do
+  MERGED="$(gh pr view "$PR" -R "$REPO" --json state,mergedAt,mergedBy \
+    --jq 'select(.state == "MERGED") | "MERGED at \(.mergedAt) by \(.mergedBy.login)"')" || true
+  [ -n "$MERGED" ] && { printf 'obot-merge: %s\n' "$MERGED"; exit 0; }
+  sleep 3
+done
+fail "merge submitted but PR #$PR not verified MERGED after 18s - check manually"
