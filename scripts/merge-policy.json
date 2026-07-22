@@ -1,0 +1,8 @@
+{
+  "_comment": "Base branches obot-merge may merge PRs into, per repo. Repos not listed are refused entirely (gsm.safety is deliberately absent: its PRs target main and stay Jeremy-manual). Approved by @jwildfire 2026-07-22. Changing this file changes the guardrail - do not edit without Jeremy's sign-off.",
+  "jwildfire/safety.viz": ["dev"],
+  "jwildfire/open.gismo": ["dev"],
+  "jwildfire/safety-histogram": ["dev"],
+  "jwildfire/obot.roadmap": ["main"],
+  "jwildfire/obot.agent": ["main"]
+}

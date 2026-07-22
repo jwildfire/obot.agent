@@ -56,6 +56,14 @@ Skip anything the agent can rediscover by reading the code.
   unfinished — the wrapup folds the scratchpad, so an unlogged event is
   invisible to it. A workspace Stop hook nudges any session that goes quiet;
   respond by logging, not by ignoring it.
+- **Merging**: never merge without Jeremy's explicit approval (operating
+  contract — unchanged). Once a merge IS approved, use the policy-gated lane
+  only: `obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>` (add `--check`
+  to dry-run the policy first). It verifies the base branch against
+  [`scripts/merge-policy.json`](../../scripts/merge-policy.json), merges as
+  obotclaw[bot], and verifies the result. Raw `gh pr merge`, REST, and GraphQL
+  merges are denied by the workspace `merge-gate-guard` PreToolUse hook — a
+  denial there means "use obot-merge", not "find another route".
 
 ### 3. Pick the spawn parameters deliberately
 
