@@ -1,6 +1,6 @@
 ---
 name: session-init
-description: "Open a working session from the previous wrapup's hand-off: read the carried list (scratchpad Overview, latest diary loose ends, next-session memory), reconcile it with one cheap GitHub delta sweep, then present and persist a prioritized list split into agent-actionable vs @jwildfire-gated items. Use at the start of any coding session — 'session init', 'session overview', 'prioritized list of open tasks', 'what's on deck'. Do NOT use mid-session (session-todo re-renders the persisted list) or for closing out (that is session-wrapup)."
+description: "Open a working session from the previous wrapup's hand-off: read the carried list (scratchpad Overview, latest diary loose ends, next-session memory), reconcile it with one cheap GitHub delta sweep, then present and persist a prioritized list split into agent-actionable vs @jwildfire-gated items. Use at the start of any coding session — 'session init', 'session overview', 'prioritized list of open tasks', 'what's on deck'. With --auto (hub #18, launched via obot-auto), the same init then selects the top eligible increment and proceeds as a fully autonomous dev session instead of stopping at the list. Do NOT use mid-session (session-todo re-renders the persisted list) or for closing out (that is session-wrapup)."
 argument-hint: "Optional: session focus to weight the priorities toward"
 ---
 
@@ -186,3 +186,77 @@ entries' hand-off sections, recent scratchpads with unchecked items, and the
 links). Reconcile the two digests so nothing silently drops — where they
 disagree, trust GitHub — then continue from step 3. Note in the presented list
 that the fallback ran and why.
+
+## `--auto`: the autonomous session
+
+Design and decisions: [hub #18](https://github.com/jwildfire/obot.roadmap/issues/18)
+and its [design doc](https://jwildfire.github.io/obot.roadmap/requirements/design/18_design.html)
+(approved 2026-07-22). With the `--auto` flag the init opens a **fully
+autonomous dev session** at autonomy level **A1**
+([`scripts/autonomy-grants.json`](../../scripts/autonomy-grants.json)): same
+init, then select-and-proceed instead of present-and-stop. Launched via
+[`scripts/obot-auto`](../../scripts/obot-auto), which owns the fail-fast
+pre-flight (halt file, goal active, obotclaw token mintable, no concurrent
+autonomous session). Identity: `🦾🤖 {YYYY-MM-DD} {slug}`, color `purple`, set
+in the job's own `state.json` (step 0 applies otherwise unchanged).
+
+### Mode changes
+
+Steps 1–5 run exactly as above — hand-off, one delta agent, prioritized list
+persisted to the scratchpad. Then, instead of ending the init, **select the
+increment and proceed**:
+
+1. **Directed** — `--increment owner/repo#N` was passed: take it, still subject
+   to the eligibility checks below; if it fails them, refuse and stop with
+   `needs input:` explaining why.
+2. **Resume** — an unchecked agent-actionable item from a previous `--auto`
+   run's hand-off that is still eligible: continue it before starting anything
+   new.
+3. **Implementation-ready** — the highest-priority hand-off item that (a)
+   belongs to an active goal in [`goals/`](../../goals/), (b) traces to a hub
+   requirement whose Design is signed off, (c) has its repo work scoped, and
+   (d) touches only repos its grant profile allows.
+4. **Pipeline-advancement** — nothing implementation-ready: take the goal's
+   next requirement stuck earliest in the lifecycle and advance the *artifact*
+   (draft the requirement/design doc, publish it, end at the review gate).
+
+**Hard skips, never selected:** anything gated on @jwildfire; anything without
+a filed hub requirement (roadmap-first); anything outside the grant matrix;
+release *publishing* (prep is allowed — notes draft + staged promotion PR);
+ultracode launches. **One increment per run.** If selection exhausts, report
+"no eligible increment" with the per-candidate reason — that is itself useful
+roadmap signal — and end.
+
+### Execution contract
+
+- Set the in-session **`/goal`** to the selected increment's exit criteria
+  (e.g. "draft PR on safety.viz implementing sv#85 with CI green, heartbeat
+  close-out logged, wrapup draft written") so doneness is checked
+  independently of the session's own judgment (the built-in evaluates the
+  condition after each turn).
+- Product work goes to **spawned siblings** (`session-spawn`, standard
+  briefing); the `--auto` lead stays thin per the orchestration model. All
+  conventions apply unchanged: TDD, worktrees, draft PRs as obotclaw with the
+  obot PR template, heartbeat lines for every phase transition, push
+  verification by `headRefOid`.
+- **Merges**: standard-tier `obot-merge` only. The approval tier is **never**
+  used unattended — there is no in-session approval to attest. PRs touching
+  the policy-file carve-out (`merge-policy.json`, `autonomy-grants.json`,
+  `goals/`, workspace hooks) are never merged unattended either.
+- **Halt file**: check `{workspace}/.claude/autonomy-halt` at every phase
+  boundary (init → select → execute → wrapup) and between sibling waves; if
+  present, park cleanly (heartbeat line, digest of state so far,
+  `needs input:`).
+- **Budgets**: 4h wall-clock default, one increment; hitting a cap parks the
+  increment with a digest rather than pushing on.
+- **Failures** (guardrail denial, CI red after honest attempts, stall, token
+  expiry): park, log, digest, `needs input:` — never silent, never
+  retry-forever, never route around a denial.
+
+### Ending
+
+Close with the **Unattended variant** of
+[`session-wrapup`](../session-wrapup/SKILL.md): mechanical standing-grant
+applies only, diary as a committed *draft* file, morning digest in the
+scratchpad, session state ending `needs input:`. Nothing publishes without
+@jwildfire's morning review.

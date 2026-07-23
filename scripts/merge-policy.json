@@ -1,8 +1,9 @@
 {
-  "_comment": "Merge lanes for obot-merge, per repo. 'allowed': base branches mergeable once Jeremy has approved the work (contract-gated, no extra attestation). 'approvalRequired': protected/release branches - mergeable ONLY with Jeremy's explicit in-session approval, attested via --jeremy-approved '<note>' (obot-merge posts the note as an audit comment on the PR before merging). Repos absent from this file are refused entirely (gsm.safety deliberately absent: fully Jeremy-manual). Tiers approved by @jwildfire 2026-07-22. Changing this file changes the guardrail - do not edit without Jeremy's sign-off.",
+  "_comment": "Merge lanes for obot-merge, per repo. 'allowed': base branches mergeable once Jeremy has approved the work (contract-gated, no extra attestation). 'approvalRequired': protected/release branches - mergeable ONLY with Jeremy's explicit in-session approval, attested via --jeremy-approved '<note>' (obot-merge posts the note as an audit comment on the PR before merging). Repos absent from this file are refused entirely. Tiers approved by @jwildfire 2026-07-22; gsm.safety added to the standard tier same day per the obot.roadmap#18 design review (branch model adopted in gsm.safety#44). Changing this file changes the guardrail - do not edit without Jeremy's sign-off.",
   "jwildfire/safety.viz": { "allowed": ["dev"], "approvalRequired": ["main"] },
   "jwildfire/open.gismo": { "allowed": ["dev"], "approvalRequired": ["main"] },
   "jwildfire/safety-histogram": { "allowed": ["dev"], "approvalRequired": ["master"] },
+  "jwildfire/gsm.safety": { "allowed": ["dev"], "approvalRequired": ["main"] },
   "jwildfire/obot.roadmap": { "allowed": ["main"] },
   "jwildfire/obot.agent": { "allowed": ["main"] }
 }

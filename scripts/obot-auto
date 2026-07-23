@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# obot-auto — launch a fully autonomous (--auto) dev session, per obot.roadmap#18.
+#
+# Runs a fail-fast pre-flight, then spawns a background claude session that
+# executes `/session-init --auto …`: the lean init, increment selection under
+# the goal + grant rules, execution through spawned agents, and the unattended
+# wrapup (diary draft + morning digest, ending `needs input:`).
+#
+# Usage:
+#   obot-auto [--goal <slug>] [--increment <owner/repo#N>] [--model <model>]
+#             [--dry-run] [--preflight-only]
+#
+#   --goal            goal slug from goals/ (default: charts)
+#   --increment       pin the increment; still subject to eligibility checks
+#   --model           model override for the session (default: inherit)
+#   --dry-run         the spawned session stops after init + selection and
+#                     reports the chosen increment (costs one short session)
+#   --preflight-only  run the local checks and print the launch command
+#                     without spawning anything (zero cost)
+#
+# Kill switches (design §7): `touch <workspace>/.claude/autonomy-halt` parks the
+# session at its next phase boundary; `claude attach <job>` works at any time.
+# Exit codes: 0 launched (or preflight passed), 1 pre-flight failure.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+WORKSPACE="$(dirname "$REPO_DIR")"
+GRANTS="$SCRIPT_DIR/autonomy-grants.json"
+
+GOAL="charts"
+INCREMENT=""
+MODEL=""
+DRY_RUN=0
+PREFLIGHT_ONLY=0
+
+fail() { echo "obot-auto: $*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --goal)           GOAL="$2"; shift 2 ;;
+    --increment)      INCREMENT="$2"; shift 2 ;;
+    --model)          MODEL="$2"; shift 2 ;;
+    --dry-run)        DRY_RUN=1; shift ;;
+    --preflight-only) PREFLIGHT_ONLY=1; shift ;;
+    -h|--help)        sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)                fail "unknown argument: $1" ;;
+  esac
+done
+
+# ---- pre-flight (fail-fast, in dependency order) ----------------------------
+
+command -v claude >/dev/null 2>&1 || fail "claude CLI not on PATH"
+[ -f "$GRANTS" ] || fail "grants file missing: $GRANTS"
+
+# 1. Halt file — the one-command kill switch. Absence is a launch condition.
+HALT="$WORKSPACE/.claude/autonomy-halt"
+[ ! -e "$HALT" ] || fail "halt file present ($HALT) — remove it (with @jwildfire's say-so) to launch"
+
+# 2. Autonomy level — A0 means draft-only observation runs; refuse to launch
+#    a merging session if the level was demoted.
+LEVEL=$(python3 -c "import json; print(json.load(open('$GRANTS'))['level'])")
+[ "$LEVEL" != "A0" ] || echo "obot-auto: NOTE level=A0 (draft-PR-only) — session will not merge" >&2
+
+# 3. Goal file exists and is active.
+GOAL_FILE="$REPO_DIR/goals/$GOAL.md"
+[ -f "$GOAL_FILE" ] || fail "no such goal: $GOAL (expected $GOAL_FILE)"
+grep -q "^status: active" "$GOAL_FILE" || fail "goal '$GOAL' is not active"
+
+# 4. obotclaw token mints — unattended pushes/merges die without it, and the
+#    07-12 login-expiry stall showed a session can't always report the failure.
+TOKEN=$("$SCRIPT_DIR/obot-app-token" 2>/dev/null) && [ -n "$TOKEN" ] || fail "obot-app-token failed — refresh App credentials before launching"
+
+# 5. No concurrent autonomous session — one 🦾🤖 at a time.
+RUNNING=$(python3 - "$HOME/.claude/jobs" <<'PY'
+import json, pathlib, sys
+jobs = pathlib.Path(sys.argv[1])
+for f in jobs.glob("*/state.json") if jobs.is_dir() else []:
+    try:
+        s = json.loads(f.read_text())
+    except Exception:
+        continue
+    if str(s.get("name", "")).startswith("\U0001f9be") and s.get("state") == "working":
+        print(s.get("name"), f.parent.name)
+PY
+)
+[ -z "$RUNNING" ] || fail "an autonomous session is already running: $RUNNING"
+
+echo "obot-auto: pre-flight OK (level=$LEVEL, goal=$GOAL${INCREMENT:+, increment=$INCREMENT})"
+
+# ---- launch -----------------------------------------------------------------
+
+SLUG="${INCREMENT:-$GOAL}"
+SLUG="${SLUG//\//-}"; SLUG="${SLUG//#/-}"
+NAME="🦾🤖 $(date +%F) $SLUG"
+ARGS="--goal $GOAL"
+[ -n "$INCREMENT" ] && ARGS="$ARGS --increment $INCREMENT"
+[ "$DRY_RUN" -eq 1 ] && ARGS="$ARGS --dry-run"
+PROMPT="/session-init --auto $ARGS"
+
+CMD=(claude --bg --permission-mode auto -n "$NAME")
+[ -n "$MODEL" ] && CMD+=(--model "$MODEL")
+CMD+=("$PROMPT")
+
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  printf 'obot-auto: would run:'; printf ' %q' "${CMD[@]}"; printf '\n'
+  exit 0
+fi
+
+exec "${CMD[@]}"
