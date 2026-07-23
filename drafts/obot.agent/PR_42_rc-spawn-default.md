@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-07-23 09:27 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT -->
 <!-- GITHUB_PROPERTIES: Assignee: jwildfire, Base: main, Draft: true -->
 
 # Session framework: siblings spawn with Remote Control active
