@@ -109,6 +109,13 @@ Where the hand-off and GitHub disagree, trust GitHub. Drill into a specific item
 (`gh pr view`, `gh pr checks`) only when its next step is genuinely ambiguous
 from title/state/draft flag — and note that you did.
 
+### 2.5. Ideas inbox sweep
+
+Run [`session-inbox`](../session-inbox/SKILL.md): ingest the Siri/Reminders lane,
+sweep new/updated Ideas discussions on the hub, and triage them — the batch joins
+the kickoff list alongside the delta results (obot.roadmap#48, 2026-07-23). If
+the sweep comes back empty this step costs two script calls and no tokens.
+
 ### 3. Prioritize
 
 Order the reconciled items by what most advances the roadmap, weighing:

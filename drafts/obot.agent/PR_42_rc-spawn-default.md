@@ -1,36 +1,40 @@
-<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT; body updated 2026-07-23 10:15 EDT -->
 <!-- GITHUB_PROPERTIES: Assignee: jwildfire, Base: main, Draft: true -->
 
-# Session framework: siblings spawn with Remote Control active
+# Session framework: Remote Control on every agent + idea-queue intake (session-inbox)
 
 ## Summary
 
-Every sibling spawned via `session-spawn` now starts with Remote Control active: the spawn command gains `--remote-control`, so background agents appear in claude.ai/code and the Claude mobile app with inbound control the moment they start. A new `docs/remote-control.md` runbook captures the activation lanes (including the two one-time human steps agents are correctly blocked from performing), the verification evidence, security notes, and the Claude Tag assessment that led here.
+Two session-framework additions from today's directives. (1) Every sibling spawned via `session-spawn` now starts with Remote Control active (`--remote-control` on the spawn command), so background agents appear in claude.ai/code and the Claude mobile app with inbound control; `docs/remote-control.md` is the runbook. (2) The idea queue ([obot.roadmap#48](https://github.com/jwildfire/obot.roadmap/issues/48)): a new `session-inbox` skill plus two no-LLM scripts turn hub Ideas Discussions + a Siri/Reminders lane into a zero-token capture queue that obot triages at session kickoff.
 
 Closes jwildfire/obot.roadmap#46
 
 ## Roadmap context
 
-Directive from the 2026-07-23 lead session (tracked as [obot.roadmap#46](https://github.com/jwildfire/obot.roadmap/issues/46)): (1) all agents start with Remote Control active; (2) set up Claude Tag on the main obot session. Part (2) is not viable — Claude Tag is Team/Enterprise-only and its Slack threads run in ephemeral Anthropic-hosted sandboxes that cannot attach to local sessions — so Remote Control is the implemented path for the main session and siblings alike. Session-framework home is obot.agent, hence this PR.
+Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap#46](https://github.com/jwildfire/obot.roadmap/issues/46) — Claude Tag was investigated and ruled out (Team/Enterprise-only; sandbox cannot attach to local sessions), Remote Control is the implemented path. Idea queue: requirement [obot.roadmap#48](https://github.com/jwildfire/obot.roadmap/issues/48) (approved in-session) — this PR implements its obot.agent tasks; the requirement stays open through its lifecycle (Siri end-to-end verification pending), so no closing keyword.
 
 ## Evidence
 
-- Verified end-to-end on CLI 2.1.218 (2026-07-23): a probe spawned with `claude --bg --remote-control` registered a bridge (`bridgeSessionId: cse_01Rjoc…`, `bridgeOutboundOnly: false`) and was listed at [claude.ai/code](https://claude.ai/code) (`rc-flag-probe`, `rc-live-probe`); an identical spawn without the flag got no bridge and no listing.
-- The `--bg` + `--remote-control` combination is undocumented (official docs describe Remote Control as interactive-only), so the skill and runbook include a ~15s `bridgeSessionId` health check and instructions to log a regression rather than fail the spawn.
-- Full detail, lanes, and security notes: [`docs/remote-control.md`](https://github.com/jwildfire/obot.agent/blob/rc-spawn-default/docs/remote-control.md).
+- Remote Control verified end-to-end on CLI 2.1.218: probe spawned with `claude --bg --remote-control` registered a bridge (`bridgeSessionId`, `bridgeOutboundOnly: false`) and was listed at [claude.ai/code](https://claude.ai/code); an identical unflagged spawn was not. Undocumented combination — the skill carries a ~15s `bridgeSessionId` health check. Details: [`docs/remote-control.md`](https://github.com/jwildfire/obot.agent/blob/rc-spawn-default/docs/remote-control.md).
+- Idea queue mechanics verified live: Discussions enabled on the hub, Ideas category seeded and explained ([discussion #47](https://github.com/jwildfire/obot.roadmap/discussions/47), posted as obotclaw[bot] — write access proven), `ideas-sweep` run against the live queue (returns empty with only the excluded seed present, exit 0). `reminders-to-ideas` is syntax-checked but deliberately not executed — it would file real pending reminders; first run is a checklist item.
 
 ## Tech briefing
 
-- `skills/session-spawn/SKILL.md`: new Remote Control bullet in step 3 (what the flag does, health check, regression handling) and `--remote-control` added to the step-4 spawn command.
-- `docs/remote-control.md` (new): what Remote Control is; the three activation lanes (spawn flag for siblings — agent-automatic; `/config` global toggle writing `remoteControlAtStartup: true` and per-session `/remote-control` — human steps, since the permission classifier blocks agent writes of remote-control settings at every scope, a guard this design respects); `claude remote-control` server mode as a bonus lane; security notes (`disableRemoteControl` kill switch, `isolatePeerMachines`, outbound-only transport); Claude Tag verdict with doc citations; @jwildfire checklist.
-- `docs/terminology.md`: one sentence on the Spawned agent entry noting siblings start Remote Control-active.
-- `drafts/`: posted hub issue draft (`ISSUE_46`) and this PR draft, per the draft-file convention.
+- `skills/session-spawn/SKILL.md`: Remote Control bullet (health check, regression handling) + `--remote-control` in the spawn command.
+- `docs/remote-control.md` (new): activation lanes, human steps (the permission classifier blocks agent writes of remote-control settings at every scope — respected by design), security notes, Claude Tag verdict.
+- `skills/session-inbox/SKILL.md` (new): the triage pass — Reminders ingest, watermark sweep, classification table (todo / requirement candidate / update / design note), in-thread replies as obotclaw[bot], promotion + `closeDiscussion` on approval, watermark advance only after replies post (idempotent on abort).
+- `scripts/reminders-to-ideas` (new, no LLM): Apple Reminders "obot" list → Ideas discussions via GraphQL as obotclaw[bot]; marks reminders complete only after successful post; `private:` prefix diverts to a local never-posted inbox file (the hub is public). Adapted from the OpenClaw-era `ingest-reminders.sh`.
+- `scripts/ideas-sweep` (new, no LLM, read-only): lists Ideas discussions new/updated since the watermark (`--advance` to move it); seed #47 excluded.
+- `skills/session-init/SKILL.md`: new step 2.5 calling session-inbox (small section; may need a trivial rebase against #40, which also touches this file).
+- `docs/terminology.md`: Spawned agent entry notes siblings start Remote Control-active.
+- `drafts/`: posted hub drafts (`ISSUE_46`, `ISSUE_48`) and this PR draft.
 
 ## Next steps
 
-- @jwildfire: the two one-time steps in the [runbook checklist](https://github.com/jwildfire/obot.agent/blob/rc-spawn-default/docs/remote-control.md#jwildfire-checklist-the-two-human-steps--one-optional) — `/config` → Enable Remote Control for all sessions → `true`, and `/remote-control` in the running lead session — plus optional cleanup of the two probe sessions on claude.ai/code.
-- Review and merge (main is approval-gated; merge via `obot-merge` after explicit approval).
-- Watch for the flag regressing on CLI updates (health check in the skill); revisit if Remote Control for background sessions becomes documented behavior.
+- @jwildfire, Remote Control (from [#46](https://github.com/jwildfire/obot.roadmap/issues/46)): `/config` → **Enable Remote Control for all sessions** → `true`; `/remote-control` in the running lead session; optionally delete the two `rc-*probe` sessions on claude.ai/code.
+- @jwildfire, idea queue: create/keep a Reminders list named **obot** (Siri: "add … to my obot list"); approve the first supervised `reminders-to-ideas` run; optionally pin [discussion #47](https://github.com/jwildfire/obot.roadmap/discussions/47) (API pinning unavailable).
+- Post-merge: add the `session-inbox` symlink in `obot2/.claude/skills/` (same pattern as the other session skills); rebase or re-apply the session-init step 2.5 edit if #40 merges first.
+- Review and merge via `obot-merge` after explicit approval (main is approval-gated).
 
 ---
 
