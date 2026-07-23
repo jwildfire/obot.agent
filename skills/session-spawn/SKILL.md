@@ -86,11 +86,19 @@ than defaulting to your own settings:
   own `~/.claude/jobs/{id}/state.json`).
 - **Permission mode**: siblings always spawn in auto mode — pass
   `--permission-mode auto` explicitly rather than relying on inheritance.
+- **Remote Control**: siblings always spawn with `--remote-control` so the
+  session shows up in claude.ai/code and the Claude mobile app and can be
+  driven from there (@jwildfire directive, 2026-07-23). On success the job's
+  `~/.claude/jobs/{id}/state.json` gains a `bridgeSessionId` within ~15s of
+  spawn. This flag combination is undocumented for `--bg` (verified working on
+  CLI 2.1.218; see [`docs/remote-control.md`](../../docs/remote-control.md)) —
+  if `bridgeSessionId` never appears after a CLI update, log the regression to
+  the scratchpad and keep going; the spawn itself is unaffected.
 
 ### 4. Run it
 
 ```bash
-claude --bg --permission-mode auto --model <model> -n "👯🤖 <date> <slug>" "<briefing>\n\n---\n\nTASK: $ARGUMENTS"
+claude --bg --permission-mode auto --remote-control --model <model> -n "👯🤖 <date> <slug>" "<briefing>\n\n---\n\nTASK: $ARGUMENTS"
 ```
 
 (add `--effort <level>` when deviating from the default)
