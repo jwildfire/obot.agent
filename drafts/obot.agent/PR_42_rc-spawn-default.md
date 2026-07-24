@@ -1,4 +1,4 @@
-<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT; body updated 2026-07-24 06:43 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT; body updated 2026-07-24 06:50 EDT -->
 <!-- GITHUB_PROPERTIES: Assignee: jwildfire, Base: main, Draft: true -->
 
 # Session framework: Remote Control on every agent + idea-queue intake (session-inbox)
@@ -19,6 +19,8 @@ Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap
 - Idea queue mechanics verified live: Discussions enabled on the hub, Ideas category seeded and explained ([discussion #47](https://github.com/jwildfire/obot.roadmap/discussions/47), posted as obotclaw[bot] — write access proven), `ideas-sweep` run against the live queue (returns empty with only the excluded seed present, exit 0). `reminders-to-ideas` is syntax-checked but deliberately not executed — it would file real pending reminders; first run is a checklist item.
 - Auto-pin verified live: a job id appended to `~/.claude/jobs/pins.json` by file edit rendered as pinned in @jwildfire's `claude agents` view ("test worked", 2026-07-24); pins persist across view restarts, and no CLI flag or setting exists for this — the file is the only lane.
 
+- Idea-queue design doc published to the roadmap site: [requirements/design/48_design.html](https://jwildfire.github.io/obot.roadmap/requirements/design/48_design.html) — pipeline, capture lanes, triage table, promotion lifecycle, rollout checklist; linked from #48's Design section (2026-07-24).
+
 ## Tech briefing
 
 - `skills/session-spawn/SKILL.md`: Remote Control bullet (health check, regression handling) + `--remote-control` in the spawn command.
@@ -28,6 +30,7 @@ Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap
 - `scripts/ideas-sweep` (new, no LLM, read-only): lists Ideas discussions new/updated since the watermark (`--advance` to move it); seed #47 excluded.
 - `skills/session-init/SKILL.md`: new step 2.5 calling session-inbox (small section; may need a trivial rebase against #40, which also touches this file); step 0 now has the main session auto-pin itself in the `claude agents` view (append own job id to `~/.claude/jobs/pins.json`, prune ids of deleted jobs; siblings stay unpinned).
 - `docs/terminology.md`: Spawned agent entry notes siblings start Remote Control-active.
+- `README.md`: new "Idea queue (capture → triage → roadmap)" section linking the design doc, plus refreshed repo-layout bullets (scripts list, skill count de-staled).
 - `drafts/`: posted hub drafts (`ISSUE_46`, `ISSUE_48`) and this PR draft.
 
 ## Next steps
