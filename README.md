@@ -71,11 +71,13 @@ full design on the
   list"* — [`scripts/reminders-to-ideas`](scripts/reminders-to-ideas) files pending
   Reminders as discussions posted by obotclaw[bot] (no LLM; items prefixed `private:`
   stay in a local file, never posted).
-- **Triage (one bounded pass).** At session kickoff,
-  [`session-inbox`](skills/session-inbox/SKILL.md) sweeps threads new or updated since
-  the last watermark ([`scripts/ideas-sweep`](scripts/ideas-sweep)), classifies each
-  (todo / requirement candidate / update / design note), and replies in-thread; the
-  batch lands in the kickoff list for @jwildfire.
+- **Triage (continuous + backstop).** The hub's
+  [`ideas-triage` Action](https://github.com/jwildfire/obot.roadmap/blob/main/.github/workflows/ideas-triage.yml)
+  responds to each new post within minutes — confident ideas become issues and the
+  thread closes as resolved; unclear ones get questions for @jwildfire in-thread. At
+  session kickoff, [`session-inbox`](skills/session-inbox/SKILL.md) sweeps whatever is
+  still open since the last watermark ([`scripts/ideas-sweep`](scripts/ideas-sweep))
+  and folds it into the kickoff list; wrapups flag captured-but-unpromoted ideas.
 - **Promotion.** On approval an idea becomes a Requirement issue via the hub lifecycle,
   linked back to its thread, and the discussion is closed as resolved — never deleted.
 

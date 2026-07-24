@@ -15,6 +15,13 @@ only place tokens are spent — one bounded pass per session, not a persistent
 The queue's front door for @jwildfire: the pinned explainer at
 [discussion #47](https://github.com/jwildfire/obot.roadmap/discussions/47).
 
+**This pass is the backstop, not the front line** (2026-07-24): the hub's
+[`ideas-triage` Action](https://github.com/jwildfire/obot.roadmap/blob/main/.github/workflows/ideas-triage.yml)
+triages each new post within minutes — filing issues and closing confident
+threads, or asking @jwildfire questions in-thread. This skill catches whatever
+that lane missed (Action disabled, low-confidence threads still open, the
+Reminders lane, the private inbox). Closed threads need no re-triage.
+
 ## Procedure
 
 ### 1. Ingest the Reminders lane

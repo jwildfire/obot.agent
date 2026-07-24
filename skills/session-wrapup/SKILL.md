@@ -108,6 +108,11 @@ check — and record mismatches as **proposed fixes**, don't edit anything yet:
   requirement(s) in the release notes — a `Requirements delivered:` line placed
   before the closing attribution rule. Retro-add via the releases API
   (`gh api -X PATCH repos/{owner}/{repo}/releases/{id}`) when missing.
+- **Ideas promoted?** List still-open Ideas discussions
+  (`gh api graphql` on the hub's Ideas category, states `OPEN`, excluding the
+  pinned explainer #47) and note each as "captured, not yet promoted" — these
+  are ideas the `ideas-triage` Action and `session-inbox` haven't landed on the
+  roadmap yet (@jwildfire, 2026-07-24). Surface the list; don't force-promote.
 
 Then sweep the scratchpad and conversation for **uncaptured todos**: promises
 made, "we should…" moments, blockers hit, review requests, deferred decisions.
