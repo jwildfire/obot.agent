@@ -1,4 +1,4 @@
-<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT; body updated 2026-07-24 06:50 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT; body updated 2026-07-24 07:15 EDT -->
 <!-- GITHUB_PROPERTIES: Assignee: jwildfire, Base: main, Draft: true -->
 
 # Session framework: Remote Control on every agent + idea-queue intake (session-inbox)
@@ -11,7 +11,7 @@ Closes jwildfire/obot.roadmap#46
 
 ## Roadmap context
 
-Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap#46](https://github.com/jwildfire/obot.roadmap/issues/46) — Claude Tag was investigated and ruled out (Team/Enterprise-only; sandbox cannot attach to local sessions), Remote Control is the implemented path. Idea queue: requirement [obot.roadmap#48](https://github.com/jwildfire/obot.roadmap/issues/48) (approved in-session) — this PR implements its obot.agent tasks; the requirement stays open through its lifecycle (Siri end-to-end verification pending), so no closing keyword.
+Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap#46](https://github.com/jwildfire/obot.roadmap/issues/46) — Claude Tag was investigated and ruled out (Team/Enterprise-only; sandbox cannot attach to local sessions), Remote Control is the implemented path. Idea queue: requirement [obot.roadmap#48](https://github.com/jwildfire/obot.roadmap/issues/48) (approved in-session) — this PR implements its obot.agent tasks; Continuous triage shipped 2026-07-24: the hub's [ideas-triage Action](https://github.com/jwildfire/obot.roadmap/blob/main/.github/workflows/ideas-triage.yml) (claude-code-action prompt mode, gated on a CLAUDE_CODE_OAUTH_TOKEN secret @jwildfire mints) responds to each new Ideas post within minutes — the session-inbox pass is now the backstop. the requirement stays open through its lifecycle (Siri end-to-end verification pending), so no closing keyword.
 
 ## Evidence
 
@@ -29,6 +29,7 @@ Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap
 - `scripts/reminders-to-ideas` (new, no LLM): Apple Reminders "obot" list → Ideas discussions via GraphQL as obotclaw[bot]; marks reminders complete only after successful post; `private:` prefix diverts to a local never-posted inbox file (the hub is public). Adapted from the OpenClaw-era `ingest-reminders.sh`.
 - `scripts/ideas-sweep` (new, no LLM, read-only): lists Ideas discussions new/updated since the watermark (`--advance` to move it); seed #47 excluded.
 - `skills/session-init/SKILL.md`: new step 2.5 calling session-inbox (small section; may need a trivial rebase against #40, which also touches this file); step 0 now has the main session auto-pin itself in the `claude agents` view (append own job id to `~/.claude/jobs/pins.json`, prune ids of deleted jobs; siblings stay unpinned).
+- `skills/session-wrapup/SKILL.md`: roadmap-hygiene sweep now lists still-open Ideas discussions as captured-but-unpromoted; `session-inbox` re-framed as the backstop to the hub's ideas-triage Action.
 - `docs/terminology.md`: Spawned agent entry notes siblings start Remote Control-active.
 - `README.md`: new "Idea queue (capture → triage → roadmap)" section linking the design doc, plus refreshed repo-layout bullets (scripts list, skill count de-staled).
 - `drafts/`: posted hub drafts (`ISSUE_46`, `ISSUE_48`) and this PR draft.
@@ -43,3 +44,4 @@ Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap
 ---
 
 This PR was drafted by Claude Code using Fable 5 and reviewed by @jwildfire
+
