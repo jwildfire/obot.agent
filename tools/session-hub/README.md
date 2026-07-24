@@ -58,14 +58,25 @@ what scale*, not whatever a running agent wrote about itself.
 
 `scripts/obot-session-state` renders the payload and publishes it to the hub's
 orphan `session-state` branch through the contents API (as `obotclaw[bot]`),
-skipping the write when nothing but the timestamp changed. It is not wired to
-the heartbeat yet — run it from the watch loop or a Stop hook once @jwildfire
-decides the cadence:
+skipping the write when nothing but the timestamp changed:
 
 ```bash
 obot.agent/scripts/obot-session-state --dry-run   # print the payload
 obot.agent/scripts/obot-session-state             # publish if changed
 ```
+
+**Cadence: the Stop hook** (@jwildfire, 2026-07-24) — it reuses the heartbeat the
+session framework already runs, so the pill is current within a turn.
+`tools/session-hub/hooks/session-state-publish.sh` is the hook; install it by
+copying to `<workspace>/.claude/hooks/` and adding it to the `Stop` array in the
+workspace `settings.json`, next to `scratchpad-heartbeat.sh`.
+
+Because it fires for every turn of every agent in the workspace, the hook is
+silent (stdout is a Stop *decision*, so it must print nothing), detaches the
+publish so a slow API cannot delay a turn ending, and holds an atomic lock with a
+60-second floor so concurrent siblings produce one publisher and one commit
+rather than a write race. Publishing itself retries once on a 409. Every failure
+is swallowed: a stale pill is cosmetic and must never surface as a session error.
 
 The page reads the file from `raw.githubusercontent.com`, which is CORS-enabled
 and caches for ~5 minutes; the indicator renders the payload's own timestamp so

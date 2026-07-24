@@ -50,15 +50,21 @@ fi
 GH_TOKEN="$("$TOKEN_HELPER")"
 export GH_TOKEN
 
-sha="$(gh api "repos/$REPO/contents/$FILE?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
+put() {
+  local sha
+  sha="$(gh api "repos/$REPO/contents/$FILE?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
+  local args=(--method PUT "repos/$REPO/contents/$FILE"
+    -f "message=session-state: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["detail"])' "$tmp")"
+    -f "branch=$BRANCH"
+    -f "content=$(base64 < "$tmp" | tr -d '\n')")
+  [[ -n "$sha" ]] && args+=(-f "sha=$sha")
+  gh api "${args[@]}" --jq '.commit.sha' >/dev/null
+}
 
-args=(--method PUT "repos/$REPO/contents/$FILE"
-  -f "message=session-state: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["detail"])' "$tmp")"
-  -f "branch=$BRANCH"
-  -f "content=$(base64 < "$tmp" | tr -d '\n')")
-[[ -n "$sha" ]] && args+=(-f "sha=$sha")
-
-gh api "${args[@]}" --jq '.commit.sha' >/dev/null
+# The read-then-write is not atomic, and the Stop hook means several sessions may
+# publish close together; a 409 just means someone else won the race, so re-read
+# the sha and try once more before giving up.
+put || { sleep 2; put; }
 mkdir -p "$(dirname "$CACHE")"
 cp "$tmp" "$CACHE"
 echo "[session-state] published to $REPO@$BRANCH"
