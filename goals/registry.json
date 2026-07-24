@@ -1,0 +1,8 @@
+{
+  "$schema_note": "Policy registry for --auto goal selection (hub #53/#71, supersedes design #18 O2). Maps goal slug -> hub goal issue + policy binding. Direction and membership live in the hub goal issue (anchors/backlog YAML block + sub-issue links); this file holds only what selection policy needs. Inside the policy-file carve-out: PRs touching it are never merged unattended, and only @jwildfire-approved changes land. Adding a goal here is what makes it selectable by --auto.",
+  "hub": "jwildfire/obot.roadmap",
+  "goals": {
+    "charts": { "issue": 78, "status": "active", "grant_profile": "standard" },
+    "app": { "issue": 79, "status": "active", "grant_profile": "standard" }
+  }
+}
