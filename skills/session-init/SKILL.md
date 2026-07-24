@@ -65,6 +65,14 @@ tracked separately as `⚡️🤖 {description}` — description-based, no date
 type them if the session isn't named yet. A background session sets `name` and
 `color` directly in its own `~/.claude/jobs/{id}/state.json`.
 
+The main session also **pins itself to the top of the `claude agents` view**:
+append its own job id to `~/.claude/jobs/pins.json` — the view's persistent pin
+store, a plain JSON array of job ids. Manually-added entries render as pinned
+and survive view restarts (verified live 2026-07-24); while editing, drop ids
+that no longer have a `~/.claude/jobs/{id}` directory (inert pins from deleted
+jobs). Siblings stay unpinned so the pinned group stays the lead-session lane —
+`ctrl+T` in the view remains for ad-hoc pins (@jwildfire, 2026-07-23).
+
 ### 1. Read the hand-off — inline, no subagents
 
 The carried list lives in three small places the wrapup maintains; read them
