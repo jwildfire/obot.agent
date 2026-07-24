@@ -10,7 +10,7 @@
 #   obot-auto [--goal <slug>] [--increment <owner/repo#N>] [--model <model>]
 #             [--dry-run] [--preflight-only]
 #
-#   --goal            goal slug from goals/ (default: charts)
+#   --goal            goal slug from goals/registry.json (default: charts)
 #   --increment       pin the increment; still subject to eligibility checks
 #   --model           model override for the session (default: inherit)
 #   --dry-run         the spawned session stops after init + selection and
@@ -63,10 +63,18 @@ HALT="$WORKSPACE/.claude/autonomy-halt"
 LEVEL=$(python3 -c "import json; print(json.load(open('$GRANTS'))['level'])")
 [ "$LEVEL" != "A0" ] || echo "obot-auto: NOTE level=A0 (draft-PR-only) — session will not merge" >&2
 
-# 3. Goal file exists and is active.
-GOAL_FILE="$REPO_DIR/goals/$GOAL.md"
-[ -f "$GOAL_FILE" ] || fail "no such goal: $GOAL (expected $GOAL_FILE)"
-grep -q "^status: active" "$GOAL_FILE" || fail "goal '$GOAL' is not active"
+# 3. Goal is registered and active. The registry (goals/registry.json, policy
+#    carve-out) is the selectable set; direction/membership live in the hub
+#    goal issue it points to (#53/#71, supersedes #18 O2).
+REGISTRY="$REPO_DIR/goals/registry.json"
+[ -f "$REGISTRY" ] || fail "goals registry missing: $REGISTRY"
+GOAL_ISSUE=$(python3 - "$REGISTRY" "$GOAL" <<'PY'
+import json, sys
+g = json.load(open(sys.argv[1])).get("goals", {}).get(sys.argv[2])
+print(g["issue"] if g and g.get("status") == "active" else "")
+PY
+)
+[ -n "$GOAL_ISSUE" ] || fail "goal '$GOAL' is not in the registry with status: active ($REGISTRY)"
 
 # 4. obotclaw token mints — unattended pushes/merges die without it, and the
 #    07-12 login-expiry stall showed a session can't always report the failure.
@@ -87,7 +95,7 @@ PY
 )
 [ -z "$RUNNING" ] || fail "an autonomous session is already running: $RUNNING"
 
-echo "obot-auto: pre-flight OK (level=$LEVEL, goal=$GOAL${INCREMENT:+, increment=$INCREMENT})"
+echo "obot-auto: pre-flight OK (level=$LEVEL, goal=$GOAL → hub#$GOAL_ISSUE${INCREMENT:+, increment=$INCREMENT})"
 
 # ---- launch -----------------------------------------------------------------
 
