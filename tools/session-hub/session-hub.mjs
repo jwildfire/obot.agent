@@ -18,6 +18,7 @@
 //   --slug <slug>       report slug override (default: derived from the session marker)
 //   --interval <sec>    watch interval (default 60)
 //   --open              print the file:// URL after the first render
+//   --emit-state <file> also write a small session-state JSON (see sessionState below)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,6 +42,7 @@ function parseArgs(argv) {
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--slug') args.slug = argv[++i];
     else if (a === '--interval') args.interval = Number(argv[++i]) || 60;
+    else if (a === '--emit-state') args.emitState = argv[++i];
     else if (a === '--help' || a === '-h') { args.help = true; }
     else { console.error(`unknown option: ${a}`); process.exit(2); }
   }
@@ -50,6 +52,29 @@ function parseArgs(argv) {
 function localDate(d = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Compact, publishable projection of the model for the roadmap page's session
+// indicator (jwildfire/obot.roadmap#57). Deliberately aggregate-only: the hub site
+// is public, and agent-authored `detail` strings are free text, so this publishes
+// counts and the session slug rather than forwarding whatever a running agent
+// happened to write about itself.
+export function sessionState(model) {
+  const byState = model.tiles.agents.byState ?? {};
+  const working = byState.working ?? 0;
+  const needsInput = model.alerts.length;
+  const state = needsInput > 0 ? 'needs-input' : working > 0 ? 'working' : 'idle';
+  const parts = [`${model.tiles.agents.total} agent${model.tiles.agents.total === 1 ? '' : 's'}`];
+  if (working) parts.push(`${working} working`);
+  if (needsInput) parts.push(`${needsInput} needs input`);
+  return {
+    state,
+    name: `obot session ${model.slug}`,
+    detail: parts.join(' · '),
+    agents: { total: model.tiles.agents.total, working, needsInput },
+    slug: model.slug,
+    updatedAt: model.generatedAtIso,
+  };
 }
 
 export function generate({ workspace, hub, slug, mode }) {
@@ -95,6 +120,11 @@ function main() {
     );
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, html);
+    if (args.emitState) {
+      const statePath = path.resolve(args.emitState);
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      fs.writeFileSync(statePath, `${JSON.stringify(sessionState(model), null, 2)}\n`);
+    }
     const notices = Object.entries(model.notices).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`);
     console.log(`[session-hub] ${mode} → ${out}` + (notices.length ? `  (degraded — ${notices.join('; ')})` : ''));
     return out;
