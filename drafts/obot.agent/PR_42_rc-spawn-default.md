@@ -1,11 +1,11 @@
-<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT; body updated 2026-07-24 07:15 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/42 on 2026-07-23 09:30 EDT; body updated 2026-07-24 07:33 EDT -->
 <!-- GITHUB_PROPERTIES: Assignee: jwildfire, Base: main, Draft: true -->
 
 # Session framework: Remote Control on every agent + idea-queue intake (session-inbox)
 
 ## Summary
 
-Two session-framework additions from today's directives. (1) Every sibling spawned via `session-spawn` now starts with Remote Control active (`--remote-control` on the spawn command), so background agents appear in claude.ai/code and the Claude mobile app with inbound control; `docs/remote-control.md` is the runbook. (2) The idea queue ([obot.roadmap#48](https://github.com/jwildfire/obot.roadmap/issues/48)): a new `session-inbox` skill plus two no-LLM scripts turn hub Ideas Discussions + a Siri/Reminders lane into a zero-token capture queue that obot triages at session kickoff. Plus one quality-of-life addition from the same directive set: the main session now pins itself to the top of the `claude agents` view at init, so @jwildfire never reaches for `ctrl+T`.
+Two session-framework additions from today's directives. (1) Every sibling spawned via `session-spawn` now starts with Remote Control active (`--remote-control` on the spawn command), so background agents appear in claude.ai/code and the Claude mobile app with inbound control; `docs/remote-control.md` is the runbook. (2) The idea queue ([obot.roadmap#48](https://github.com/jwildfire/obot.roadmap/issues/48)): a new `session-inbox` skill plus two no-LLM scripts turn hub Ideas Discussions + a Siri/Reminders lane into a zero-token capture queue that obot triages at session kickoff. Plus one quality-of-life addition from the same directive set: the main session now pins itself to the top of the `claude agents` view at init, so @jwildfire never reaches for `ctrl+T`. And from 2026-07-24: `session-wrapup --auto` now posts the wrapup — diary entry, changelog, session report, standing-grant fixes — without review (an unreviewed marker goes on the entry; the grant boundary is unchanged), superseding the draft-only unattended variant #40 landed and closing the loop for `obot-auto` overnight sessions.
 
 Closes jwildfire/obot.roadmap#46
 
@@ -29,7 +29,8 @@ Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap
 - `scripts/reminders-to-ideas` (new, no LLM): Apple Reminders "obot" list → Ideas discussions via GraphQL as obotclaw[bot]; marks reminders complete only after successful post; `private:` prefix diverts to a local never-posted inbox file (the hub is public). Adapted from the OpenClaw-era `ingest-reminders.sh`.
 - `scripts/ideas-sweep` (new, no LLM, read-only): lists Ideas discussions new/updated since the watermark (`--advance` to move it); seed #47 excluded.
 - `skills/session-init/SKILL.md`: new step 2.5 calling session-inbox (small section; may need a trivial rebase against #40, which also touches this file); step 0 now has the main session auto-pin itself in the `claude agents` view (append own job id to `~/.claude/jobs/pins.json`, prune ids of deleted jobs; siblings stay unpinned).
-- `skills/session-wrapup/SKILL.md`: roadmap-hygiene sweep now lists still-open Ideas discussions as captured-but-unpromoted; `session-inbox` re-framed as the backstop to the hub's ideas-triage Action.
+- `skills/session-wrapup/SKILL.md`: roadmap-hygiene sweep now lists still-open Ideas discussions as captured-but-unpromoted; `session-inbox` re-framed as the backstop to the hub's ideas-triage Action; the Unattended (`--auto`) variant rewritten to post without review — steps 1–4 unchanged, checkpoint skipped with an unreviewed marker on the entry, step 7 posts and verifies the deploy, draft-file + `needs input:` fallback on push/deploy failure (@jwildfire directive 2026-07-24, supersedes the #40 draft-only variant).
+- Branch synced with `main` (clean merge, post-#40/#41): the #40 `--auto` session-init/wrapup text and this PR's edits to the same files now compose.
 - `docs/terminology.md`: Spawned agent entry notes siblings start Remote Control-active.
 - `README.md`: new "Idea queue (capture → triage → roadmap)" section linking the design doc, plus refreshed repo-layout bullets (scripts list, skill count de-staled).
 - `drafts/`: posted hub drafts (`ISSUE_46`, `ISSUE_48`) and this PR draft.
@@ -38,7 +39,7 @@ Directives from the 2026-07-23 session. Remote Control: tracked as [obot.roadmap
 
 - @jwildfire, Remote Control (from [#46](https://github.com/jwildfire/obot.roadmap/issues/46)): `/config` → **Enable Remote Control for all sessions** → `true`; `/remote-control` in the running lead session; optionally delete the two `rc-*probe` sessions on claude.ai/code.
 - @jwildfire, idea queue: create/keep a Reminders list named **obot** (Siri: "add … to my obot list"); approve the first supervised `reminders-to-ideas` run; optionally pin [discussion #47](https://github.com/jwildfire/obot.roadmap/discussions/47) (API pinning unavailable).
-- Post-merge: add the `session-inbox` symlink in `obot2/.claude/skills/` (same pattern as the other session skills); rebase or re-apply the session-init step 2.5 edit if #40 merges first.
+- Post-merge: add the `session-inbox` symlink in `obot2/.claude/skills/` (same pattern as the other session skills). (The "#40 merges first" rebase concern is resolved — #40 merged 2026-07-24 and this branch has merged `main`.)
 - Review and merge via `obot-merge` after explicit approval (main is approval-gated).
 
 ---
