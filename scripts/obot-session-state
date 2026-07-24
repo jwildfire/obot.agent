@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# obot-session-state — publish the current session's state to the hub so the
+# roadmap page's session indicator refreshes on the heartbeat rather than only
+# when the site deploys (jwildfire/obot.roadmap#57, decision D5).
+#
+#   obot-session-state              # render state, publish if it changed
+#   obot-session-state --dry-run    # print the payload, publish nothing
+#
+# Why a branch and not site/: every path the site deploy watches triggers a full
+# Pages rebuild (including the R toolchain behind the status dashboard), so a
+# heartbeat-rate commit there would rebuild the world every minute and bury
+# main's history. Instead the payload lives alone on the orphan `session-state`
+# branch and the page fetches it client-side from raw.githubusercontent.com
+# (CORS-enabled, ~5 min CDN cache — the page renders the payload's own timestamp
+# so it never claims to be fresher than it is).
+#
+# Publishing is a no-op when the state is unchanged, so a quiet session costs one
+# render and no commits.
+set -euo pipefail
+
+WORKSPACE="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+REPO="${OBOT_STATE_REPO:-jwildfire/obot.roadmap}"
+BRANCH="${OBOT_STATE_BRANCH:-session-state}"
+FILE="session.json"
+CACHE="$WORKSPACE/.claude/session-hub/cache/published-state.json"
+HUB_SCRIPT="${OBOT_SESSION_HUB:-$WORKSPACE/obot.agent/tools/session-hub/session-hub.mjs}"
+TOKEN_HELPER="$WORKSPACE/obot.agent/scripts/obot-app-token"
+
+dry_run=false
+[[ "${1:-}" == "--dry-run" ]] && dry_run=true
+
+tmp="$(mktemp -t obot-session-state)"
+trap 'rm -f "$tmp"' EXIT
+
+node "$HUB_SCRIPT" --workspace "$WORKSPACE" --emit-state "$tmp" >/dev/null
+
+if $dry_run; then
+  cat "$tmp"
+  exit 0
+fi
+
+# Compare on everything except the timestamp: a session that has not changed
+# should not produce a commit just because a minute passed.
+strip_stamp() { sed 's/"updatedAt": *"[^"]*"/"updatedAt":"-"/' "$1"; }
+if [[ -f "$CACHE" ]] && [[ "$(strip_stamp "$tmp")" == "$(strip_stamp "$CACHE")" ]]; then
+  echo "[session-state] unchanged — nothing published"
+  exit 0
+fi
+
+GH_TOKEN="$("$TOKEN_HELPER")"
+export GH_TOKEN
+
+sha="$(gh api "repos/$REPO/contents/$FILE?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
+
+args=(--method PUT "repos/$REPO/contents/$FILE"
+  -f "message=session-state: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["detail"])' "$tmp")"
+  -f "branch=$BRANCH"
+  -f "content=$(base64 < "$tmp" | tr -d '\n')")
+[[ -n "$sha" ]] && args+=(-f "sha=$sha")
+
+gh api "${args[@]}" --jq '.commit.sha' >/dev/null
+mkdir -p "$(dirname "$CACHE")"
+cp "$tmp" "$CACHE"
+echo "[session-state] published to $REPO@$BRANCH"

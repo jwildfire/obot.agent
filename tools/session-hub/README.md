@@ -28,11 +28,50 @@ node obot.agent/tools/session-hub/session-hub.mjs --report        # frozen wrapu
 | `--out <file>` | override the output path |
 | `--slug <slug>` | override the report slug (default: derived from the session marker) |
 | `--open` | print the `file://` URL after the first render |
+| `--emit-state <file>` | also write the compact session-state JSON (below) |
 
 Outputs: live → `<workspace>/.claude/session-hub/live.html` (open in Chrome from
 `file://`; the page auto-refreshes with scroll restore). Report →
 `<hub>/reports/sessions/<slug>.html`, where the slug mirrors the diary entry
 (`2026-07-11`, `2026-07-11-2`, …) — committed by the `session-wrapup` report step.
+
+## Session state (`--emit-state`)
+
+`--emit-state <file>` writes a small JSON projection of the model beside the
+normal render, for the roadmap page's session indicator
+([obot.roadmap#57](https://github.com/jwildfire/obot.roadmap/issues/57), D5):
+
+```json
+{
+  "state": "working",            // working | needs-input | idle
+  "name": "obot session 2026-07-24-3",
+  "detail": "5 agents · 2 working",
+  "agents": { "total": 5, "working": 2, "needsInput": 0 },
+  "slug": "2026-07-24-3",
+  "updatedAt": "2026-07-24T13:40:18.926Z"
+}
+```
+
+Aggregate counts only — deliberately. The hub site is public and agent-authored
+`detail` strings are free text, so this publishes what a session *is doing at
+what scale*, not whatever a running agent wrote about itself.
+
+`scripts/obot-session-state` renders the payload and publishes it to the hub's
+orphan `session-state` branch through the contents API (as `obotclaw[bot]`),
+skipping the write when nothing but the timestamp changed. It is not wired to
+the heartbeat yet — run it from the watch loop or a Stop hook once @jwildfire
+decides the cadence:
+
+```bash
+obot.agent/scripts/obot-session-state --dry-run   # print the payload
+obot.agent/scripts/obot-session-state             # publish if changed
+```
+
+The page reads the file from `raw.githubusercontent.com`, which is CORS-enabled
+and caches for ~5 minutes; the indicator renders the payload's own timestamp so
+it never claims to be fresher than it is. A path under `site/` was rejected for
+this: every path the site deploy watches triggers a full Pages rebuild, R
+toolchain included.
 
 ## Data contract (pinned)
 
