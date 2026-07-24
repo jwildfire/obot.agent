@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# ideas-sweep — list hub Ideas discussions new/updated since the last sweep (obot.roadmap#48).
+#
+# Read-only, no LLM. Prints one JSON object per line for every discussion in the
+# obot.roadmap Ideas category whose updatedAt is after the stored watermark:
+#   {"number":..,"title":..,"url":..,"author":..,"createdAt":..,"updatedAt":..,"comments":..,"body":..}
+# The pinned inbox explainer (#47) is always excluded.
+#
+# The watermark only advances when asked, so the triage pass can re-run safely
+# until its replies are actually posted:
+#   ideas-sweep             # list pending (watermark untouched)
+#   ideas-sweep --advance   # set the watermark to now (run AFTER triage replies post)
+#
+# Env overrides:
+#   OBOT_IDEAS_WATERMARK  state file (default: $CLAUDE_PROJECT_DIR/.claude/ideas-watermark,
+#                         falling back to ~/Documents/obot2/.claude/ideas-watermark)
+
+set -euo pipefail
+
+WATERMARK_FILE="${OBOT_IDEAS_WATERMARK:-${CLAUDE_PROJECT_DIR:-$HOME/Documents/obot2}/.claude/ideas-watermark}"
+SEED_NUMBER=47
+
+if [ "${1:-}" = "--advance" ]; then
+  mkdir -p "$(dirname "$WATERMARK_FILE")"
+  date -u '+%Y-%m-%dT%H:%M:%SZ' > "$WATERMARK_FILE"
+  echo "watermark -> $(cat "$WATERMARK_FILE")"
+  exit 0
+fi
+
+SINCE="1970-01-01T00:00:00Z"
+[ -f "$WATERMARK_FILE" ] && SINCE="$(cat "$WATERMARK_FILE")"
+
+gh api graphql -f query='query{repository(owner:"jwildfire",name:"obot.roadmap"){discussions(first:50,categoryId:"DIC_kwDOTLuTVs4DBzqe",orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url createdAt updatedAt body author{login} comments{totalCount}}}}}' \
+  --jq ".data.repository.discussions.nodes[] | select(.updatedAt > \"$SINCE\" and .number != $SEED_NUMBER) | {number,title,url,author:.author.login,createdAt,updatedAt,comments:.comments.totalCount,body}"

@@ -1,6 +1,6 @@
 ---
 name: session-wrapup
-description: "Wrap up a working session by folding the session scratchpad — the as-you-go record kept by session-update, session-note, and the sibling heartbeat — verified by one GitHub delta agent; then discuss findings via the three-question checkpoint and apply the agreed changes: issue updates, stage moves, scaffold/memory updates, and the diary entry. Use at the end of any substantive session — 'wrap up', 'session wrapup', 'close out the session'. Do NOT use mid-session or for empty sessions."
+description: "Wrap up a working session by folding the session scratchpad — the as-you-go record kept by session-update, session-note, and the sibling heartbeat — verified by one GitHub delta agent; then discuss findings via the three-question checkpoint and apply the agreed changes: issue updates, stage moves, scaffold/memory updates, and the diary entry. Use at the end of any substantive session — 'wrap up', 'session wrapup', 'close out the session'. With --auto, skip the review checkpoint and post the wrapup directly under standing grants (@jwildfire, 2026-07-24). Do NOT use mid-session or for empty sessions."
 argument-hint: "Optional: session focus or extra context to fold into the summary"
 ---
 
@@ -108,6 +108,11 @@ check — and record mismatches as **proposed fixes**, don't edit anything yet:
   requirement(s) in the release notes — a `Requirements delivered:` line placed
   before the closing attribution rule. Retro-add via the releases API
   (`gh api -X PATCH repos/{owner}/{repo}/releases/{id}`) when missing.
+- **Ideas promoted?** List still-open Ideas discussions
+  (`gh api graphql` on the hub's Ideas category, states `OPEN`, excluding the
+  pinned explainer #47) and note each as "captured, not yet promoted" — these
+  are ideas the `ideas-triage` Action and `session-inbox` haven't landed on the
+  roadmap yet (@jwildfire, 2026-07-24). Surface the list; don't force-promote.
 
 Then sweep the scratchpad and conversation for **uncaptured todos**: promises
 made, "we should…" moments, blockers hit, review requests, deferred decisions.
@@ -188,7 +193,9 @@ the review aside or separately, never bury it in the draft.
 
 If @jwildfire is unavailable (unattended background run, no decision), stop
 here and surface `needs input:` with the full draft — never post the diary or
-edit issues without the review.
+edit issues without the review. This rule is for the *default* interactive
+wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
+(see the [Unattended variant](#unattended---auto-variant)).
 
 ### 6. Apply the agreed changes
 
@@ -263,27 +270,41 @@ Confirm, and state in the closing response:
 
 ## Unattended (`--auto`) variant
 
-For wrapups inside an autonomous session
-([hub #18](https://github.com/jwildfire/obot.roadmap/issues/18), design
-approved 2026-07-22) — the step 5 unavailable-rule, made the designed path
-rather than an exception:
+`/session-wrapup --auto` posts the wrapup **without @jwildfire's review**
+(his directive, 2026-07-24 — superseding the hold-everything-for-morning
+draft-only variant from the hub #18 design). It is the standard close for
+autonomous sessions (`obot-auto`,
+[hub #18](https://github.com/jwildfire/obot.roadmap/issues/18)) and for any
+wrapup he invokes with `--auto`; a bare `/session-wrapup` stays interactive —
+the step 5 checkpoint remains the default contract.
 
 - **Steps 1–4 run unchanged** (fold, verify with the delta agent, hygiene
   sweep, next-session draft).
-- **Step 5 is replaced**: compose the full diary entry draft, but save it as a
-  *draft file* — `{workspace}/.claude/session-notes/{YYYY-MM-DD}-diary-draft.md`
-  — never into `obot.roadmap/diary/` (hub commits deploy the site; a committed
-  entry is a published entry). No Chrome listener, no posting.
-- **Step 6 applies mechanical standing-grant fixes only** (board stages,
-  issue comments, scratchpad check-offs, memory updates). Anything beyond —
-  closes of unverified work, deletions, publishing — goes on the morning list.
-- **Step 7 does not run**: no diary post, no changelog entry, no session
-  report — those freeze after @jwildfire's morning review, in the next
-  interactive session or on his instruction.
-- **Write the morning digest** into the scratchpad as a `## Morning digest`
-  section (ultracode-runbook format): increment attempted, what shipped with
+- **Step 5 is skipped**: no review page, no approval wait. Compose the final
+  entry directly in step 7 format, and open it with an unreviewed marker
+  directly under the session-report line:
+  `*Posted unattended (--auto); not yet reviewed by @jwildfire.*` — the diary
+  publishes to a public site, so the flag keeps the record honest. He reviews
+  after the fact; fold any corrections in by direct commit (standard-update
+  grant) and drop the marker when he signs off.
+- **Step 6 applies standing-grant changes only** (board stages, issue-body
+  fixes and comments, scratchpad check-offs, memory updates — including
+  `next-session-todo`). The grant boundary does not move with `--auto`:
+  merges, deletions, closes beyond the wired grants, releases, and upstream
+  posts still land as `## 🙋 ToDo` asks in the entry, never auto-applied.
+- **Step 7 runs in full**: post the entry plus changelog line and session
+  report under the standard-update grant, verify the deploy to green, and
+  carry the deployed URL into the close-out. If the push or deploy fails,
+  downgrade gracefully: save the entry as
+  `{workspace}/.claude/session-notes/{YYYY-MM-DD}-diary-draft.md` and end with
+  `needs input:` naming the failure — a posted-but-undeployed entry is not
+  posted.
+- **Still write the morning digest** into the scratchpad as a
+  `## Morning digest` section (ultracode-runbook format: what shipped with
   links and CI state, token/cost note per the allocation grant, anything
-  skipped or failed with why, and a numbered morning-actions queue.
-- **End the session** with `needs input:` and the digest headline plus the
-  diary-draft path. The review surface is what @jwildfire already uses: draft
-  PRs on GitHub, the session hub, the digest, the draft entry.
+  skipped or failed with why, and a numbered morning-actions queue) — it stays
+  the fastest skim even with the diary live.
+- **Step 8 adapts one box**: "Checkpoint held" becomes "Unreviewed marker
+  present in the posted entry".
+- **End the session** with `result:` and the deployed diary URL; `needs
+  input:` is reserved for the failure path above.
