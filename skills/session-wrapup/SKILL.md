@@ -265,3 +265,30 @@ Confirm, and state in the closing response:
 - [ ] Session report rendered and linked from the diary entry.
 - [ ] Next-session list recorded (diary + scratchpad + memory).
 - [ ] Diary entry deployed (workflow green) and the deployed URL shared.
+
+## Unattended (`--auto`) variant
+
+For wrapups inside an autonomous session
+([hub #18](https://github.com/jwildfire/obot.roadmap/issues/18), design
+approved 2026-07-22) — the step 5 unavailable-rule, made the designed path
+rather than an exception:
+
+- **Steps 1–4 run unchanged** (fold, verify with the delta agent, hygiene
+  sweep, next-session draft).
+- **Step 5 is replaced**: compose the full diary entry draft, but save it as a
+  *draft file* — `{workspace}/.claude/session-notes/{YYYY-MM-DD}-diary-draft.md`
+  — never into `obot.roadmap/diary/` (hub commits deploy the site; a committed
+  entry is a published entry). No Chrome listener, no posting.
+- **Step 6 applies mechanical standing-grant fixes only** (board stages,
+  issue comments, scratchpad check-offs, memory updates). Anything beyond —
+  closes of unverified work, deletions, publishing — goes on the morning list.
+- **Step 7 does not run**: no diary post, no changelog entry, no session
+  report — those freeze after @jwildfire's morning review, in the next
+  interactive session or on his instruction.
+- **Write the morning digest** into the scratchpad as a `## Morning digest`
+  section (ultracode-runbook format): increment attempted, what shipped with
+  links and CI state, token/cost note per the allocation grant, anything
+  skipped or failed with why, and a numbered morning-actions queue.
+- **End the session** with `needs input:` and the digest headline plus the
+  diary-draft path. The review surface is what @jwildfire already uses: draft
+  PRs on GitHub, the session hub, the digest, the draft entry.
