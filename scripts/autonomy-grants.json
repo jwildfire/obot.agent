@@ -1,0 +1,32 @@
+{
+  "_comment": "Per-repo grants for autonomous (--auto) sessions, per the approved obot.roadmap#18 design (§5, decisions 2026-07-22). SOFT enforcement at v1 (O5): consulted by the --auto session at selection time and citable in refusals; the risky writes (merges) are hard-gated by obot-merge + merge-policy.json + the workspace merge-gate-guard hook. This file sits inside the policy-file carve-out: do not edit without @jwildfire's sign-off. Interactive sessions keep today's rules — this matrix never widens what requires approval; it narrows what autonomy may touch.",
+  "design": "https://jwildfire.github.io/obot.roadmap/requirements/design/18_design.html",
+  "updated": "2026-07-22",
+  "level": "A1",
+  "levels": {
+    "A0": "observed runs — draft-PR-only, no merges anywhere except the obot.roadmap standing grant (demotion target)",
+    "A1": "routine merges — standard-tier obot-merge unattended, minus the policy-file carve-out; approval tier never (entry level, decided 2026-07-22)",
+    "A2": "scheduled — nightly trigger without a human launch (not yet enabled)"
+  },
+  "haltFile": ".claude/autonomy-halt",
+  "budgets": { "wallClockHoursDefault": 4, "incrementsPerRun": 1, "_note": "checked at phase boundaries; hitting a cap parks the increment with a digest" },
+  "issueCloses": {
+    "allowed": true,
+    "except": "hub Requirement issues — those close via release promotion PRs that @jwildfire approves",
+    "requires": "verifiable completion (merged PR by headRefOid, or directly verified repo state) cited in the closing comment"
+  },
+  "releases": { "prep": true, "publish": false, "_note": "notes draft + staged promotion PR allowed; tagging and publishing always human-triggered" },
+  "policyFileCarveOut": {
+    "_note": "PRs touching any of these merge only with @jwildfire's approval, even on standard-tier branches",
+    "paths": ["scripts/merge-policy.json", "scripts/autonomy-grants.json", "goals/", "workspace .claude/hooks/", "workspace .claude/settings.json"]
+  },
+  "repos": {
+    "jwildfire/safety.viz":       { "branch": true, "draftPR": "dev", "mergeStandard": ["dev"], "issues": "full+closes", "never": ["main merge without approval", "tag/publish", "deletes"] },
+    "jwildfire/safety-histogram": { "branch": true, "draftPR": "dev", "mergeStandard": ["dev"], "issues": "full+closes", "never": ["master merge without approval", "tag/publish", "deletes"] },
+    "jwildfire/open.gismo":       { "branch": true, "draftPR": "dev", "mergeStandard": ["dev"], "issues": "full+closes", "never": ["main merge without approval", "tag/publish", "deletes"], "prereq": "obotclaw App install pending — until installed, no pushes/merges; flag in digest" },
+    "jwildfire/gsm.safety":       { "branch": true, "draftPR": "dev", "mergeStandard": ["dev"], "issues": "full+closes", "never": ["main promotion without approval", "tag/publish", "deletes"], "_note": "standard tier per 2026-07-22 decision; branch model mirrors safety.viz (gsm.safety#44)" },
+    "jwildfire/obot.agent":       { "branch": true, "draftPR": "main", "mergeStandard": ["main"], "issues": "full+closes", "never": ["deletes"], "carveOut": "policyFileCarveOut applies" },
+    "jwildfire/obot.roadmap":     { "branch": true, "directCommits": "main (existing standing grant)", "mergeStandard": ["main"], "issues": "full standard updates + non-Requirement closes; Requirement issues never closed directly", "never": ["deletes of any kind (files, issues, releases, history)"] }
+  },
+  "outsideOrg": "read-only, no exceptions — drafts handed to @jwildfire"
+}
