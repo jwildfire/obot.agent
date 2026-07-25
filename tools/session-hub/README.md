@@ -67,9 +67,8 @@ obot.agent/scripts/obot-session-state             # publish if changed
 
 **Cadence: the Stop hook** (@jwildfire, 2026-07-24) — it reuses the heartbeat the
 session framework already runs, so the pill is current within a turn.
-`tools/session-hub/hooks/session-state-publish.sh` is the hook; install it by
-copying to `<workspace>/.claude/hooks/` and adding it to the `Stop` array in the
-workspace `settings.json`, next to `scratchpad-heartbeat.sh`.
+`hooks/session-state-publish.sh` is the hook; `hooks/install.sh` puts it (and the
+workspace's other hooks) in place and registers it — see [hooks/README.md](../../hooks/README.md).
 
 Because it fires for every turn of every agent in the workspace, the hook is
 silent (stdout is a Stop *decision*, so it must print nothing), detaches the
