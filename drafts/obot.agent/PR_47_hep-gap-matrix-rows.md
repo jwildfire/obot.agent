@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-07-24 23:26 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/47 on 2026-07-24 23:30 EDT -->
 <!-- GITHUB_PROPERTIES: Labels: documentation, Assignee: @me -->
 
 ## Summary
