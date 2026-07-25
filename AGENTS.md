@@ -37,8 +37,8 @@ Use `skills/stakeholder-interview/SKILL.md` for any Jeremy input needed through 
 
 ## Required artifacts per renderer
 
-- `docs/requirements/<renderer>-requirements.md`
-- `docs/requirements/<renderer>-traceability.csv` or `.md`
+- `requirements/<renderer>.md` in [safety.viz](https://github.com/jwildfire/safety.viz/tree/HEAD/requirements) — the requirement matrix (moved out of this repo in obot.roadmap#64)
+- requirement-keyed tests and the published evidence page in safety.viz
 - `docs/design/<renderer>-migration-plan.md`
 - baseline example fixture(s)
 - automated test plan

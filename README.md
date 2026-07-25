@@ -41,8 +41,9 @@ For current status — which renderers are live, what's in review, what's next �
 - `AGENTS.md` — the overlay: program rules layered on gsm.agent conventions.
 - `agent.md` — short entrypoint: which skill to reach for.
 - `docs/` — framework docs (test framework, GxP framework, interview framework,
-  terminology, gsm.viz reference) and harvested requirement matrices
-  (`docs/requirements/`).
+  terminology, gsm.viz reference). The harvested requirement matrices moved to
+  safety.viz (`requirements/`) in obot.roadmap#64; `docs/requirements/` keeps the
+  harvest-phase review record and a pointer.
 - `skills/` — the agent skills; grouped index in [`agent.md`](agent.md).
 - `templates/` — starter templates (requirements matrix, interview log/question,
   test-driver prompt).
@@ -93,11 +94,13 @@ For each renderer:
 6. **Add automated tests** at unit, integration, browser, visual, and requirements levels.
 7. **Document traceability** from requirement to test to implementation PR.
 
-Renderer wiki requirements are harvested under `docs/requirements/`. These files are
-source-backed starting matrices and must be reviewed, de-duplicated, and mapped to tests
-before a renderer migration is considered complete.
+Renderer wiki requirements are harvested into
+[safety.viz `requirements/`](https://github.com/jwildfire/safety.viz/tree/HEAD/requirements).
+These files are source-backed starting matrices and must be reviewed, de-duplicated, and
+mapped to tests before a renderer migration is considered complete. They live next to the
+code they specify, so a behavior change and its requirement rows land in one PR.
 
-- [Requirement matrices](docs/requirements/README.md)
+- [Requirement matrices](https://github.com/jwildfire/safety.viz/tree/HEAD/requirements) ([why they moved](docs/requirements/README.md))
 - [Test framework](docs/test-framework.md)
 
 ## Reference implementation
