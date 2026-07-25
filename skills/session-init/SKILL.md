@@ -206,15 +206,18 @@ Steps 1–5 run exactly as above — hand-off, one delta agent, prioritized list
 persisted to the scratchpad. Then, instead of ending the init, resolve the
 goal and **select the increment and proceed**.
 
-**Goal resolution** (hub #53/#71, supersedes #18 O2): look the `--goal` slug up
-in [`goals/registry.json`](../../goals/registry.json) — it must exist with
-`status: active`; the entry gives the hub goal issue number and
-`grant_profile`. Fetch the goal issue live
-(`gh issue view <N> -R jwildfire/obot.roadmap --json title,body`): the first
-fenced `yaml` block gives ordered `anchors` (priority feed) and repo-level
-`backlog` refs; the prose below it is the goal's boundaries and weights —
-binding context for selection. Sub-issue links on the goal issue mirror
-membership for display; the YAML block is authoritative for order.
+**Goal resolution** (hub #53/#71 + v2, supersedes #18 O2): look the `--goal`
+slug up in [`goals/registry.json`](../../goals/registry.json) — it must exist
+with `status: active`; the entry gives the hub goal issue number,
+`grant_profile`, and the repo-level `backlog` feeds. Fetch the goal issue
+live: the body prose is the goal's boundaries and weights — binding context
+for selection — and **membership is the sub-issue links, generated at read
+time** (GraphQL `subIssues`; a newly linked sub-issue is automatically a
+member, requirement-wrapped or not). **Priority among members is this
+session's judgment call**, made at selection time from the boundary prose, the
+#18 eligibility criteria, stages, and labels — sub-issue list order carries no
+priority semantics (@jwildfire, #53 v2; priority labels may come later).
+Registry `backlog` repos are the secondary feed after the goal's members.
 
 Selection order:
 
