@@ -1,0 +1,29 @@
+{
+  "$schema_note": "Policy registry for --auto goal selection (hub #53/#71 + v2 amendment, supersedes design #18 O2). Maps goal slug -> hub goal issue + policy binding: status, grant_profile, and the repo-level backlog feeds that can't be sub-issues. Direction lives in the goal issue's prose; membership is the goal issue's sub-issue links, generated at read time; priority is the selecting session's judgment. Inside the policy-file carve-out: PRs touching this file are never merged unattended. Adding a goal here is what makes it selectable by --auto.",
+  "hub": "jwildfire/obot.roadmap",
+  "goals": {
+    "charts": {
+      "issue": 78,
+      "status": "active",
+      "grant_profile": "standard",
+      "backlog": [
+        "jwildfire/safety.viz"
+      ]
+    },
+    "app": {
+      "issue": 79,
+      "status": "active",
+      "grant_profile": "standard",
+      "backlog": [
+        "jwildfire/open.gismo",
+        "jwildfire/gsm.safety"
+      ]
+    },
+    "autonomy": {
+      "issue": 73,
+      "status": "active",
+      "grant_profile": "standard",
+      "backlog": []
+    }
+  }
+}

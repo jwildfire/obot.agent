@@ -203,8 +203,23 @@ in the job's own `state.json` (step 0 applies otherwise unchanged).
 ### Mode changes
 
 Steps 1–5 run exactly as above — hand-off, one delta agent, prioritized list
-persisted to the scratchpad. Then, instead of ending the init, **select the
-increment and proceed**:
+persisted to the scratchpad. Then, instead of ending the init, resolve the
+goal and **select the increment and proceed**.
+
+**Goal resolution** (hub #53/#71 + v2, supersedes #18 O2): look the `--goal`
+slug up in [`goals/registry.json`](../../goals/registry.json) — it must exist
+with `status: active`; the entry gives the hub goal issue number,
+`grant_profile`, and the repo-level `backlog` feeds. Fetch the goal issue
+live: the body prose is the goal's boundaries and weights — binding context
+for selection — and **membership is the sub-issue links, generated at read
+time** (GraphQL `subIssues`; a newly linked sub-issue is automatically a
+member, requirement-wrapped or not). **Priority among members is this
+session's judgment call**, made at selection time from the boundary prose, the
+#18 eligibility criteria, stages, and labels — sub-issue list order carries no
+priority semantics (@jwildfire, #53 v2; priority labels may come later).
+Registry `backlog` repos are the secondary feed after the goal's members.
+
+Selection order:
 
 1. **Directed** — `--increment owner/repo#N` was passed: take it, still subject
    to the eligibility checks below; if it fails them, refuse and stop with
@@ -213,7 +228,8 @@ increment and proceed**:
    run's hand-off that is still eligible: continue it before starting anything
    new.
 3. **Implementation-ready** — the highest-priority hand-off item that (a)
-   belongs to an active goal in [`goals/`](../../goals/), (b) traces to a hub
+   belongs to an active goal in
+   [`goals/registry.json`](../../goals/registry.json), (b) traces to a hub
    requirement whose Design is signed off, (c) has its repo work scoped, and
    (d) touches only repos its grant profile allows.
 4. **Pipeline-advancement** — nothing implementation-ready: take the goal's
@@ -243,6 +259,10 @@ roadmap signal — and end.
   used unattended — there is no in-session approval to attest. PRs touching
   the policy-file carve-out (`merge-policy.json`, `autonomy-grants.json`,
   `goals/`, workspace hooks) are never merged unattended either.
+- **Goal issues are read-only for autonomous sessions**: never edit a goal
+  issue's body or sub-issue links — membership feeds selection eligibility, so
+  a session must not widen the goal it is selecting from. Propose membership
+  or boundary changes as a comment on the goal issue for @jwildfire to apply.
 - **Halt file**: check `{workspace}/.claude/autonomy-halt` at every phase
   boundary (init → select → execute → wrapup) and between sibling waves; if
   present, park cleanly (heartbeat line, digest of state so far,
