@@ -69,7 +69,7 @@ Use these values consistently in requirement matrices:
 
 A nextgen renderer is not ready for review until:
 
-1. All wiki sources have been harvested into `docs/requirements/<renderer>.md`.
+1. All wiki sources have been harvested into safety.viz `requirements/<renderer>.md`.
 2. The matrix has passed AI review to remove obvious parsing artifacts and flag unclear rows.
 3. Jeremy has reviewed or deferred rows marked `needs-jeremy-review`, usually through the grill-me/interview workflow.
 4. A baseline legacy demo link and nextgen demo link exist.

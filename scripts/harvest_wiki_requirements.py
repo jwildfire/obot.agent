@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
-"""Harvest RhoInc renderer wiki pages into traceable Markdown requirement docs."""
+"""Harvest RhoInc renderer wiki pages into traceable Markdown requirement docs.
+
+Bootstrap tool: it turns a wiki clone into a first-draft matrix. The matrices
+themselves live in safety.viz (`requirements/`) since obot.roadmap#64, so the
+output goes there — set REQUIREMENTS_OUT to point at another checkout.
+
+Existing matrices are never overwritten: they have been reviewed and extended
+well past the raw harvest, and safety.viz CI compares them against committed
+requirement extracts. Pass --force only to re-harvest a matrix you intend to
+lose. After writing, run `npm run requirements` in safety.viz and commit the
+regenerated extract with the matrix.
+"""
 from __future__ import annotations
 
+import argparse
+import os
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT.parent
-OUT = ROOT / "docs" / "requirements"
+OUT = Path(os.environ.get("REQUIREMENTS_OUT", PROJECTS / "safety.viz" / "requirements"))
 
 RENDERERS = [
     ("safety-histogram", "SH"),
@@ -145,13 +158,23 @@ def write_renderer_doc(repo: str, prefix: str) -> None:
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-harvest matrices that already exist, discarding the reviewed content",
+    )
+    args = parser.parse_args()
+
     OUT.mkdir(parents=True, exist_ok=True)
+    print(f"Harvesting into {OUT}")
     for repo, prefix in RENDERERS:
+        target = OUT / f"{repo}.md"
+        if target.exists() and not args.force:
+            print(f"· {repo}: matrix already exists — skipping (use --force to overwrite)")
+            continue
         write_renderer_doc(repo, prefix)
-    index = ["# Renderer requirements", "", "Requirement matrices harvested from RhoInc wiki sources.", ""]
-    for repo, _ in RENDERERS:
-        index.append(f"- [{repo}](./{repo}.md)")
-    (OUT / "README.md").write_text("\n".join(index) + "\n", encoding="utf-8")
+    print("Run `npm run requirements` in safety.viz and commit the regenerated extracts.")
 
 if __name__ == "__main__":
     main()
