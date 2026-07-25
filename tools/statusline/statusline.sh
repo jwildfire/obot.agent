@@ -109,6 +109,7 @@ COLOR_GIT='\033[2;32m'    # dim green
 COLOR_CTX='\033[2;33m'    # dim yellow
 COLOR_COST='\033[2;31m'   # dim red
 COLOR_LINK='\033[2;36m'   # dim cyan
+UNDERLINE='\033[4m'
 RESET='\033[0m'
 
 if [ -n "$model" ]; then
@@ -138,7 +139,8 @@ if [ -n "$link_url" ]; then
     line="${line} ${COLOR_LINK}${link_url}${RESET}"
   else
     # OSC 8, BEL-terminated — the form Claude Code documents and emits itself.
-    line="${line} ${COLOR_LINK}\033]8;;${link_url}\a↗ ${link_label}\033]8;;\a${RESET}"
+    # Underlined so it reads as a link, like the built-in footer badges below it.
+    line="${line} ${COLOR_LINK}${UNDERLINE}\033]8;;${link_url}\a↗ ${link_label}\033]8;;\a${RESET}"
   fi
 fi
 
