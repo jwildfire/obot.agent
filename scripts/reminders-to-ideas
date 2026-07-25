@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# reminders-to-ideas — Siri/Reminders intake lane for the idea queue (obot.roadmap#48).
+#
+# Pulls uncompleted items from the Apple Reminders list named "obot" and files
+# each one as a GitHub Discussion in obot.roadmap's Ideas category, posted as
+# obotclaw[bot]. Items are marked complete only after a successful post, so the
+# script is safe to re-run. No LLM anywhere in this path — capture is zero-token.
+#
+# Privacy lane: an item whose text starts with "private:" is appended to a local
+# inbox file instead (never posted — the hub is public) and then marked complete.
+#
+# Adapted from the OpenClaw-era ~/Documents/obot/scripts/ingest-reminders.sh.
+# First run triggers a one-time macOS Reminders permission prompt.
+#
+# Usage: reminders-to-ideas            # file everything pending
+#
+# Env overrides:
+#   OBOT_IDEAS_REPO_ID      GraphQL node id of the hub repo   (default: jwildfire/obot.roadmap)
+#   OBOT_IDEAS_CATEGORY_ID  GraphQL node id of Ideas category
+#   OBOT_PRIVATE_INBOX      path for private: items (default: $CLAUDE_PROJECT_DIR/.claude/private-inbox.md,
+#                           falling back to ~/Documents/obot2/.claude/private-inbox.md)
+
+set -euo pipefail
+
+REPO_ID="${OBOT_IDEAS_REPO_ID:-R_kgDOTLuTVg}"
+CATEGORY_ID="${OBOT_IDEAS_CATEGORY_ID:-DIC_kwDOTLuTVs4DBzqe}"
+PRIVATE_INBOX="${OBOT_PRIVATE_INBOX:-${CLAUDE_PROJECT_DIR:-$HOME/Documents/obot2}/.claude/private-inbox.md}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+fail() { printf 'reminders-to-ideas: %s\n' "$1" >&2; exit 1; }
+
+# Records separated by \x1e, fields (id \x1f name \x1f body) by \x1f.
+RAW=$(osascript <<'APPLESCRIPT'
+set fieldSep to (ASCII character 31)
+set recSep to (ASCII character 30)
+tell application "Reminders"
+  if not (exists list "obot") then return "__ERROR_NO_LIST__"
+  set out to ""
+  repeat with r in (reminders in list "obot" whose completed is false)
+    set rBody to ""
+    try
+      if body of r is not missing value then set rBody to body of r
+    end try
+    set out to out & (id of r) & fieldSep & (name of r) & fieldSep & rBody & recSep
+  end repeat
+  return out
+end tell
+APPLESCRIPT
+)
+
+[ "$RAW" = "__ERROR_NO_LIST__" ] && fail 'no Reminders list named "obot" — create it once and Siri can target it'
+[ -z "$RAW" ] && { echo "nothing pending"; exit 0; }
+
+mark_done() {
+  osascript -e "tell application \"Reminders\" to set completed of (first reminder whose id is \"$1\") to true" >/dev/null
+}
+
+TOKEN="$("$SCRIPT_DIR/obot-app-token")"
+NOW="$(TZ=America/New_York date '+%Y-%m-%d %H:%M %Z')"
+posted=0 kept=0
+
+while IFS=$'\x1f' read -r rid rname rbody; do
+  [ -z "$rid" ] && continue
+  text="$rname"
+  [ -n "$rbody" ] && text="$rname"$'\n\n'"$rbody"
+
+  if [[ "$text" == private:* ]]; then
+    mkdir -p "$(dirname "$PRIVATE_INBOX")"
+    printf -- '- %s — %s\n' "$NOW" "${text#private:}" >> "$PRIVATE_INBOX"
+    mark_done "$rid"
+    kept=$((kept+1))
+    continue
+  fi
+
+  title="$rname"
+  [ "${#title}" -gt 80 ] && title="${title:0:77}..."
+  body="$text"$'\n\n'"— captured via Siri/Reminders, $NOW"
+
+  url=$(GH_TOKEN="$TOKEN" gh api graphql \
+    -f query='mutation($t:String!,$b:String!,$r:ID!,$c:ID!){createDiscussion(input:{repositoryId:$r,categoryId:$c,title:$t,body:$b}){discussion{url}}}' \
+    -f t="$title" -f b="$body" -f r="$REPO_ID" -f c="$CATEGORY_ID" \
+    --jq '.data.createDiscussion.discussion.url') || { printf 'post failed, leaving reminder pending: %s\n' "$rname" >&2; continue; }
+
+  mark_done "$rid"
+  posted=$((posted+1))
+  printf 'filed: %s -> %s\n' "$rname" "$url"
+done <<< "${RAW//$'\x1e'/$'\n'}"
+
+printf 'done: %d filed, %d kept private\n' "$posted" "$kept"

@@ -19,7 +19,9 @@ release. That conversation is one session, named and colored at kickoff.
 A sibling session launched from another session via `claude --bg` with a context
 briefing. A spawned agent is a **peer, not a child**: it runs its own full session
 lifecycle — identity, scratchpad, wrapup — independent of the session that launched it.
-The briefing is a hand-off, not a leash.
+The briefing is a hand-off, not a leash. Siblings spawn with Remote Control active
+(`--remote-control`), so they appear in claude.ai/code and the Claude mobile app
+alongside the lead session (see [`remote-control.md`](remote-control.md), 2026-07-23).
 
 *Example:* during a planning session, the agent spawns a background "v0.2 renderer"
 session with a briefing on scope and branch; that session works, then wraps up on its own.

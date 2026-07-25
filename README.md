@@ -43,12 +43,13 @@ For current status — which renderers are live, what's in review, what's next �
 - `docs/` — framework docs (test framework, GxP framework, interview framework,
   terminology, gsm.viz reference) and harvested requirement matrices
   (`docs/requirements/`).
-- `skills/` — the 14 agent skills; grouped index in [`agent.md`](agent.md).
+- `skills/` — the agent skills; grouped index in [`agent.md`](agent.md).
 - `templates/` — starter templates (requirements matrix, interview log/question,
   test-driver prompt).
 - `interviews/` — P004 interview records (historical; kept verbatim).
-- `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens) and the wiki
-  requirements-harvest helper.
+- `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens), `obot-merge`
+  (the policy-gated merge lane), the idea-queue intake pair (`reminders-to-ideas`,
+  `ideas-sweep`), and the wiki requirements-harvest helper.
 
 ## Agent identity
 
@@ -56,6 +57,29 @@ Agent-authored commits, pushes, issues, and PRs come from the **`obotclaw[bot]`*
 App — mechanics and token minting in
 [`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md). Jeremy reviews and
 merges as @jwildfire; the bot authors work but never approves or merges it.
+
+## Idea queue (capture → triage → roadmap)
+
+How raw ideas become roadmap items without a persistent Claude session
+(requirement [obot.roadmap#48](https://github.com/jwildfire/obot.roadmap/issues/48);
+full design on the
+[roadmap site](https://jwildfire.github.io/obot.roadmap/requirements/design/48_design.html)):
+
+- **Capture (zero tokens).** Two lanes into the hub's
+  [Ideas discussions](https://github.com/jwildfire/obot.roadmap/discussions/categories/ideas):
+  a new discussion straight from GitHub mobile/web, or *"Hey Siri, add … to my obot
+  list"* — [`scripts/reminders-to-ideas`](scripts/reminders-to-ideas) files pending
+  Reminders as discussions posted by obotclaw[bot] (no LLM; items prefixed `private:`
+  stay in a local file, never posted).
+- **Triage (continuous + backstop).** The hub's
+  [`ideas-triage` Action](https://github.com/jwildfire/obot.roadmap/blob/main/.github/workflows/ideas-triage.yml)
+  responds to each new post within minutes — confident ideas become issues and the
+  thread closes as resolved; unclear ones get questions for @jwildfire in-thread. At
+  session kickoff, [`session-inbox`](skills/session-inbox/SKILL.md) sweeps whatever is
+  still open since the last watermark ([`scripts/ideas-sweep`](scripts/ideas-sweep))
+  and folds it into the kickoff list; wrapups flag captured-but-unpromoted ideas.
+- **Promotion.** On approval an idea becomes a Requirement issue via the hub lifecycle,
+  linked back to its thread, and the discussion is closed as resolved — never deleted.
 
 ## Core workflow (renderer migration)
 
