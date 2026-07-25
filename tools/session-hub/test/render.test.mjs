@@ -120,3 +120,44 @@ test('inline: markdown links, code, bold, bare urls — after escaping', () => {
   assert.ok(s.includes('<strong>hot</strong>'));
   assert.ok(s.includes('>safety.viz#28</a>'), 'bare URL shortened to repo#N');
 });
+
+/* ------------------------------------------------- chat panel (design #77) */
+
+// buildModel takes `chat` separately from the collectors, so the shared
+// liveModel() fixture cannot pass it; rebuild the model with the same inputs.
+function chatModel({ mode = 'live', chat = { port: 4181 } } = {}) {
+  const base = liveModel({ mode });
+  return { ...base, chat: mode === 'live' && chat ? chat : null };
+}
+
+test('chat off by default: no chat markup, meta refresh intact', () => {
+  const html = render(liveModel());
+  assert.ok(!html.includes('chat-panel'), 'no chat panel');
+  assert.ok(!html.includes('/api/send'), 'no chat client');
+  assert.ok(html.includes('<meta http-equiv="refresh" content="60">'), 'plain reload kept');
+});
+
+test('chat on: panel, composer and client render; meta refresh replaced by soft refresh', () => {
+  const html = render(chatModel());
+  assert.ok(html.includes('id="chat-panel"'), 'panel');
+  assert.ok(html.includes('id="chat-target"'), 'target selector');
+  assert.ok(html.includes('id="chat-input"'), 'composer');
+  assert.ok(html.includes("var PORT=4181"), 'port injected');
+  assert.ok(html.includes('/api/events?session='), 'SSE wired');
+  assert.ok(html.includes('hub-tiles') && html.includes('hub-main'), 'swappable data regions');
+  assert.ok(!html.includes('<meta http-equiv="refresh"'), 'no full-page reload while chatting');
+  assert.ok(html.includes('live refresh'), 'stamp says live refresh');
+});
+
+test('chat carries no session data into the markup — the server supplies it all', () => {
+  const html = render(chatModel());
+  const panel = html.slice(html.indexOf('id="chat-panel"'), html.indexOf('class="tiles'));
+  assert.ok(!panel.includes('sib5678'), 'no job id in the shell');
+  assert.ok(!panel.includes('devops-dash'), 'no session name in the shell');
+});
+
+test('report mode never renders chat, even if a chat config is passed', () => {
+  const html = render(chatModel({ mode: 'report', chat: { port: 4181 } }));
+  assert.ok(!html.includes('chat-panel'), 'published pages stay static');
+  assert.ok(!html.includes('/api/send'));
+});

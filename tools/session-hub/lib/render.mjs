@@ -202,7 +202,11 @@ function countItems(sectionData) {
 export function render(model) {
   const m = model;
   const isReport = m.mode === 'report';
-  const stamp = `generated ${fmtTime(m.generatedAtIso)}${isReport ? '' : ' · auto-refresh 60s'}`;
+  // Chat is live-only and server-only (#77 §6). When it is on, the meta refresh is
+  // dropped in favour of a soft refresh that swaps the data regions and leaves the
+  // composer alone; the report/static page keeps the plain reload.
+  const chat = isReport ? null : m.chat;
+  const stamp = `generated ${fmtTime(m.generatedAtIso)}${isReport ? '' : chat ? ' · live refresh' : ' · auto-refresh 60s'}`;
   const stateCounts = Object.entries(m.tiles.agents.byState)
     .map(([k, v]) => `${v} ${k}`)
     .join(' · ');
@@ -257,7 +261,7 @@ export function render(model) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-${isReport ? '' : '<meta http-equiv="refresh" content="60">'}
+${isReport || chat ? '' : '<meta http-equiv="refresh" content="60">'}
 <title>${isReport ? `Session report ${esc(m.slug)}` : `Session hub — ${esc(m.date)}`} · obot</title>
 <style>${CSS}</style>
 </head>
@@ -275,13 +279,16 @@ ${isReport ? '' : '<meta http-equiv="refresh" content="60">'}
   ${banner}
 </header>
 
-<section class="tiles">
+${chat ? CHAT_PANEL : ''}
+
+<section class="tiles hub-live" id="hub-tiles">
   <div class="tile"><span class="label">Priorities</span><span class="value">${m.tiles.priorities.open} <small>open · ${m.tiles.priorities.done} done</small></span><span class="sub">scratchpad kickoff list</span></div>
   <div class="tile"><span class="label">Agents</span><span class="value">${m.tiles.agents.total}</span><span class="sub">${esc(stateCounts) || '—'}</span></div>
   <div class="tile"><span class="label">Tokens</span><span class="value">${fmtTokens(m.tiles.tokens.total)}</span><span class="sub">across ${m.tiles.tokens.reporting} reporting sessions</span></div>
   <div class="tile"><span class="label">Closure</span><span class="value">${m.tiles.closure ?? '—'}</span><span class="sub">${esc(closureSub)}</span></div>
 </section>
 
+<div class="hub-live" id="hub-main">
 ${accomplishmentsPanel(acc, acc ? null : m.notices.ghSweep)}
 
 <div class="grid">
@@ -289,13 +296,198 @@ ${accomplishmentsPanel(acc, acc ? null : m.notices.ghSweep)}
   <div class="col">${right}</div>
 </div>
 
-<div class="foot">${isReport ? `frozen operational record · pairs with diary/${esc(m.slug)}.md` : 'live view · click rows to drill down'} · boundary: ${esc(m.boundary.anchor)} (${fmtTime(m.boundary.startIso)}) · session-hub (obot.agent v0.2 · <a href="https://github.com/jwildfire/obot.roadmap/issues/24">#24</a>)</div>
+<div class="foot">${isReport ? `frozen operational record · pairs with diary/${esc(m.slug)}.md` : 'live view · click rows to drill down'} · boundary: ${esc(m.boundary.anchor)} (${fmtTime(m.boundary.startIso)}) · session-hub (obot.agent v0.2 · <a href="https://github.com/jwildfire/obot.roadmap/issues/24">#24</a>)${chat ? ' · chat <a href="https://github.com/jwildfire/obot.roadmap/issues/77">#77</a>' : ''}</div>
+</div>
 </div>
 ${isReport ? '' : SCROLL_RESTORE}
+${chat ? chatScript(chat) : ''}
 </body>
 </html>
 `;
 }
+
+// Chat panel (#77). Rendered as an empty shell: every value in it comes from the
+// session-chat server at runtime, so the markup carries no session data and the
+// same HTML is inert if the server is gone.
+const CHAT_PANEL = `<section class="panel chat" id="chat-panel">
+  <div class="panel-head">
+    <h2>Chat <span class="chat-dot" id="chat-dot"></span></h2>
+    <span class="src">session-chat server · <a href="https://github.com/jwildfire/obot.roadmap/issues/77">#77</a></span>
+  </div>
+  <div class="panel-body">
+    <div class="chat-bar">
+      <select id="chat-target" aria-label="chat target session"></select>
+      <button type="button" id="chat-arm" hidden>Arm this session</button>
+      <span class="chat-state" id="chat-state">connecting…</span>
+    </div>
+    <div class="chat-log" id="chat-log"><p class="chat-empty">No messages yet. Prompts go to the selected session; its reply streams back here.</p></div>
+    <div class="chat-activity" id="chat-activity" hidden></div>
+    <form class="chat-compose" id="chat-form">
+      <textarea id="chat-input" rows="2" placeholder="Message the orchestrator…  (⌘/Ctrl+Enter to send)"></textarea>
+      <button type="submit" id="chat-send">Send</button>
+    </form>
+  </div>
+</section>`;
+
+// The client half of the chat lane. Talks only to the loopback server: same-origin
+// when the page is served from it, http://127.0.0.1:<port> when the file is opened
+// from file:// (in which case an unreachable server disables the composer with a
+// reason rather than failing silently).
+const chatScript = (chat) => `<script>
+(function(){
+  var PORT=${Number(chat.port) || 4181};
+  var base=location.protocol==='http:'?location.origin:'http://127.0.0.1:'+PORT;
+  var elTarget=document.getElementById('chat-target');
+  var elLog=document.getElementById('chat-log');
+  var elState=document.getElementById('chat-state');
+  var elDot=document.getElementById('chat-dot');
+  var elAct=document.getElementById('chat-activity');
+  var elForm=document.getElementById('chat-form');
+  var elInput=document.getElementById('chat-input');
+  var elSend=document.getElementById('chat-send');
+  var elArm=document.getElementById('chat-arm');
+  var DRAFT='session-hub-chat-draft', PICK='session-hub-chat-target';
+  var es=null, current=null, targets=[], sentAt=0, warned=false;
+
+  function setState(text,cls){ elState.textContent=text; elDot.className='chat-dot'+(cls?' '+cls:''); }
+  function disable(why){ elSend.disabled=true; elInput.disabled=true; setState(why,'off'); }
+  function enable(){ elSend.disabled=false; elInput.disabled=false; }
+
+  function bubble(role,text,meta){
+    var empty=elLog.querySelector('.chat-empty'); if(empty) empty.remove();
+    var last=elLog.lastElementChild;
+    if(role==='agent'&&last&&last.classList.contains('agent')&&!last.dataset.closed){
+      last.querySelector('.chat-text').textContent+='\\n\\n'+text;
+    } else {
+      var d=document.createElement('div');
+      d.className='chat-msg '+role;
+      var who=document.createElement('span'); who.className='chat-who';
+      who.textContent=role==='user'?'@jwildfire':(meta||'agent');
+      var t=document.createElement('div'); t.className='chat-text'; t.textContent=text;
+      d.appendChild(who); d.appendChild(t); elLog.appendChild(d);
+    }
+    elLog.scrollTop=elLog.scrollHeight;
+  }
+  function closeBubbles(){ Array.prototype.forEach.call(elLog.children,function(c){c.dataset.closed='1';}); }
+  function activity(text){
+    if(!text){ elAct.hidden=true; elAct.textContent=''; return; }
+    elAct.hidden=false; elAct.textContent=text;
+  }
+
+  function label(t){
+    return t.name+(t.chatCapable?'':' — not armed')+(t.queued?'  ('+t.queued+' queued)':'');
+  }
+
+  function loadTargets(){
+    return fetch(base+'/api/targets',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      targets=d.targets||[];
+      var want=current||sessionStorage.getItem(PICK)||(targets.find(function(t){return t.lead;})||targets[0]||{}).sessionId;
+      elTarget.innerHTML='';
+      targets.forEach(function(t){
+        var o=document.createElement('option');
+        o.value=t.sessionId; o.textContent=label(t);
+        if(t.sessionId===want) o.selected=true;
+        elTarget.appendChild(o);
+      });
+      if(!targets.length){ disable('no sessions found'); return null; }
+      return want;
+    });
+  }
+
+  function target(){ return targets.find(function(t){return t.sessionId===current;})||{}; }
+
+  function open(sessionId){
+    current=sessionId; sessionStorage.setItem(PICK,sessionId);
+    if(es){ es.close(); es=null; }
+    elLog.innerHTML='<p class="chat-empty">No messages yet. Prompts go to the selected session; its reply streams back here.</p>';
+    activity('');
+    fetch(base+'/api/log?session='+encodeURIComponent(sessionId),{cache:'no-store'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        (d.log||[]).forEach(function(e){ bubble(e.role==='user'?'user':'agent',e.text,target().name); });
+        closeBubbles();
+        elArm.hidden=!!d.chatCapable;
+        enable();
+        setState(d.chatCapable?(d.queued?d.queued+' queued':'ready'):'not armed — arm it, then chat reaches it at its next turn','');
+      })
+      .catch(function(){ disable('session-chat server unreachable on '+base); });
+    es=new EventSource(base+'/api/events?session='+encodeURIComponent(sessionId));
+    es.onmessage=function(ev){
+      var e; try{ e=JSON.parse(ev.data); }catch(_){ return; }
+      if(e.type==='queued'){ if(e.queued) setState(e.queued+' queued — waiting for a turn boundary','wait'); }
+      else if(e.type==='delivered'){ setState('delivered ('+(e.lane||'?')+' lane) — replying','live'); activity('thinking…'); }
+      else if(e.type==='thinking'){ setState('thinking…','live'); activity('thinking…'); }
+      else if(e.type==='activity'){ setState('working','live'); activity(e.name+(e.detail?' · '+e.detail:'')); }
+      else if(e.type==='text'){ bubble('agent',e.text,target().name); activity(''); }
+      else if(e.type==='end_turn'){ closeBubbles(); activity(''); setState('idle',''); }
+      else if(e.type==='notice'){ setState(e.text,'off'); }
+    };
+    es.onerror=function(){ setState('stream lost — retrying','off'); };
+  }
+
+  elTarget.addEventListener('change',function(){ open(elTarget.value); });
+
+  elArm.addEventListener('click',function(){
+    fetch(base+'/api/arm',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({session:current})})
+      .then(function(r){return r.json();})
+      .then(function(){ elArm.hidden=true; setState('armed — chat reaches it at its next turn boundary',''); });
+  });
+
+  elInput.value=sessionStorage.getItem(DRAFT)||'';
+  elInput.addEventListener('input',function(){ sessionStorage.setItem(DRAFT,elInput.value); });
+  elInput.addEventListener('keydown',function(ev){
+    if((ev.metaKey||ev.ctrlKey)&&ev.key==='Enter'){ ev.preventDefault(); elForm.requestSubmit(); }
+  });
+
+  elForm.addEventListener('submit',function(ev){
+    ev.preventDefault();
+    var text=elInput.value.trim(); if(!text||!current) return;
+    elSend.disabled=true;
+    fetch(base+'/api/send',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({session:current,text:text})})
+      .then(function(r){return r.json().then(function(d){ if(!r.ok) throw new Error(d.error||r.status); return d; });})
+      .then(function(){
+        closeBubbles(); bubble('user',text); elInput.value=''; sessionStorage.removeItem(DRAFT);
+        sentAt=Date.now(); warned=false; setState('queued — waiting for a turn boundary','wait');
+      })
+      .catch(function(err){ setState('send failed: '+err.message,'off'); })
+      .then(function(){ elSend.disabled=false; });
+  });
+
+  // A message that has sat unclaimed for a while almost always means the target
+  // started before the chat hook was installed and has no delivery lane armed.
+  setInterval(function(){
+    if(!sentAt||warned) return;
+    if(Date.now()-sentAt>90000){
+      warned=true;
+      setState('still queued after 90s — target may predate the chat hook, or has no monitor armed','off');
+    }
+  },5000);
+
+  // Soft refresh: swap the data regions, leave the chat panel (and a half-typed
+  // prompt) untouched. Falls back to a full reload if the server goes away.
+  var misses=0;
+  setInterval(function(){
+    fetch(base+'/',{cache:'no-store'}).then(function(r){return r.text();}).then(function(html){
+      var doc=new DOMParser().parseFromString(html,'text/html');
+      ['hub-tiles','hub-main'].forEach(function(id){
+        var fresh=doc.getElementById(id), cur=document.getElementById(id);
+        if(fresh&&cur) cur.innerHTML=fresh.innerHTML;
+      });
+      var s=doc.querySelector('.stamp'), c=document.querySelector('.stamp');
+      if(s&&c) c.textContent=s.textContent;
+      if(window.__hubApplyDetails) window.__hubApplyDetails();
+      misses=0;
+      loadTargets();
+    }).catch(function(){ if(++misses>=3) location.reload(); });
+  },60000);
+
+  loadTargets().then(function(want){ if(want) open(want); }).catch(function(){
+    disable('session-chat server unreachable on '+base+' — start it with: node obot.agent/tools/session-hub/session-chat.mjs');
+  });
+})();
+</script>`;
 
 const SCROLL_RESTORE = `<script>
 (function(){
@@ -306,13 +498,20 @@ const SCROLL_RESTORE = `<script>
     addEventListener('scroll',function(){sessionStorage.setItem(k,String(window.scrollY));},{passive:true});
     var o='session-hub-open';
     var open=new Set(JSON.parse(sessionStorage.getItem(o)||'[]'));
-    document.querySelectorAll('details[id]').forEach(function(d){
-      if(open.has(d.id)) d.open=true;
-      d.addEventListener('toggle',function(){
-        if(d.open) open.add(d.id); else open.delete(d.id);
-        sessionStorage.setItem(o, JSON.stringify(Array.from(open)));
+    // Exposed so the chat lane can re-apply it after a soft refresh swaps a data
+    // region and its <details> elements are new nodes (#77 §6).
+    window.__hubApplyDetails=function(){
+      document.querySelectorAll('details[id]').forEach(function(d){
+        if(open.has(d.id)) d.open=true;
+        if(d.__hubBound) return;
+        d.__hubBound=true;
+        d.addEventListener('toggle',function(){
+          if(d.open) open.add(d.id); else open.delete(d.id);
+          sessionStorage.setItem(o, JSON.stringify(Array.from(open)));
+        });
       });
-    });
+    };
+    window.__hubApplyDetails();
   } catch(e){}
 })();
 </script>`;
@@ -465,5 +664,39 @@ const CSS = `
   .prose div { margin-bottom:4px; }
   .notice { font-family:var(--mono); font-size:11.5px; color:var(--warn); margin:0; }
   .foot { font-family:var(--mono); font-size:11px; color:var(--ink-3); text-align:center; }
+
+  /* chat panel (#77) — live mode with the session-chat server only */
+  .chat .panel-body { gap:10px; }
+  .chat-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .chat-bar select { font-family:var(--mono); font-size:11.5px; color:var(--ink); background:var(--panel-2);
+                     border:1px solid var(--line); border-radius:6px; padding:4px 8px; max-width:min(100%,30rem); }
+  .chat-bar button { font:inherit; font-size:11.5px; color:var(--accent-ink); background:var(--accent-tint);
+                     border:1px solid color-mix(in srgb,var(--accent) 30%,transparent); border-radius:6px;
+                     padding:4px 10px; cursor:pointer; }
+  .chat-state { font-family:var(--mono); font-size:11px; color:var(--ink-3); }
+  .chat-dot { width:7px; height:7px; border-radius:50%; background:var(--idle); display:inline-block; }
+  .chat-dot.live { background:var(--good); animation:chatpulse 1.1s ease-in-out infinite; }
+  .chat-dot.wait { background:var(--warn); }
+  .chat-dot.off { background:var(--bad); }
+  @keyframes chatpulse { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+  .chat-log { display:flex; flex-direction:column; gap:8px; max-height:22rem; overflow-y:auto;
+              background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .chat-empty { margin:0; font-size:12.5px; color:var(--ink-3); }
+  .chat-msg { display:flex; flex-direction:column; gap:2px; font-size:13px; }
+  .chat-msg .chat-who { font-family:var(--mono); font-size:10.5px; letter-spacing:.08em;
+                        text-transform:uppercase; color:var(--ink-3); }
+  .chat-msg .chat-text { white-space:pre-wrap; word-break:break-word; }
+  .chat-msg.user .chat-text { border-left:2px solid var(--accent); padding-left:8px; }
+  .chat-msg.agent .chat-text { border-left:2px solid var(--line); padding-left:8px; color:var(--ink); }
+  .chat-activity { font-family:var(--mono); font-size:11px; color:var(--ink-3); white-space:nowrap;
+                   overflow:hidden; text-overflow:ellipsis; }
+  .chat-compose { display:flex; gap:8px; align-items:flex-end; }
+  .chat-compose textarea { flex:1; font:inherit; font-size:13px; color:var(--ink); background:var(--panel);
+                           border:1px solid var(--line); border-radius:8px; padding:8px 10px; resize:vertical; }
+  .chat-compose textarea:focus { outline:2px solid color-mix(in srgb,var(--accent) 45%,transparent); outline-offset:-1px; }
+  .chat-compose button { font:inherit; font-size:13px; font-weight:600; color:#fff; background:var(--accent);
+                         border:none; border-radius:8px; padding:9px 18px; cursor:pointer; }
+  .chat-compose button:disabled { background:var(--idle); cursor:not-allowed; }
+
   @media (max-width:940px) { .grid { grid-template-columns:1fr; } .tiles { grid-template-columns:repeat(2,1fr); } }
 `;

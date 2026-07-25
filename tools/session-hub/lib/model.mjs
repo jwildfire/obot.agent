@@ -165,7 +165,7 @@ export function buildAccomplishments(ghSweep, boundary) {
 }
 
 /** Assemble the full model. All inputs are collector results ({data}|{notice}). */
-export function buildModel({ collected, workspace, date, mode, generatedAtIso, tzOffsetMinutes = 0, slug = null }) {
+export function buildModel({ collected, workspace, date, mode, generatedAtIso, tzOffsetMinutes = 0, slug = null, chat = null }) {
   const { jobs, agentsCli, scratchpad, nextSession, ghSweep } = collected;
   const boundary = resolveBoundary({ scratchpad, jobs, date, tzOffsetMinutes });
   const agents = scopeAgents({ jobs, agentsCli, boundary, workspace });
@@ -201,6 +201,10 @@ export function buildModel({ collected, workspace, date, mode, generatedAtIso, t
     boundary,
     agents,
     alerts,
+    // Chat is opt-in and live-only: set only when the page is being rendered for
+    // the session-chat server (#77). Report/static renders leave it null so no
+    // chat markup ever reaches the public site.
+    chat: mode === 'live' && chat ? chat : null,
     tiles: {
       priorities,
       agents: { total: agents.length, byState },

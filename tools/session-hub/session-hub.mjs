@@ -77,7 +77,7 @@ export function sessionState(model) {
   };
 }
 
-export function generate({ workspace, hub, slug, mode }) {
+export function generate({ workspace, hub, slug, mode, chat = null }) {
   const date = localDate();
   const collected = {
     jobs: collectJobs(),
@@ -93,7 +93,7 @@ export function generate({ workspace, hub, slug, mode }) {
   });
   collected.ghSweep = collectGhSweep({ workspace, sinceIso: probe.boundary.startIso });
   const model = buildModel({
-    collected, workspace, date, mode, slug,
+    collected, workspace, date, mode, slug, chat,
     generatedAtIso: new Date().toISOString(),
     tzOffsetMinutes: new Date().getTimezoneOffset(),
   });

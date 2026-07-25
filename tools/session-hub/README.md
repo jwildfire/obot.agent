@@ -6,7 +6,8 @@ design: [24_design.html](https://jwildfire.github.io/obot.roadmap/requirements/d
 
 Zero dependencies (Node ≥ 18, stdlib only). Read-only over sources the session
 framework already maintains — the only writes are the rendered HTML and a
-gh-sweep cache.
+gh-sweep cache. The optional [chat lane](#chat-obotroadmap77) adds a loopback
+server and one message directory.
 
 ## Usage
 
@@ -83,6 +84,84 @@ it never claims to be fresher than it is. A path under `site/` was rejected for
 this: every path the site deploy watches triggers a full Pages rebuild, R
 toolchain included.
 
+## Chat ([obot.roadmap#77](https://github.com/jwildfire/obot.roadmap/issues/77))
+
+Prototype. The live dashboard can also **send prompts to a running session and
+stream the reply back** — design:
+[77_design.html](https://jwildfire.github.io/obot.roadmap/requirements/design/77_design.html).
+This is the one place the #24 "no server" decision (D1) is superseded, and only
+for this feature: the generated pages are unchanged, and the report/static render
+contains no chat markup at all.
+
+```bash
+node obot.agent/tools/session-hub/session-chat.mjs            # 127.0.0.1:4181
+node obot.agent/tools/session-hub/session-chat.mjs --port 4200 --open
+```
+
+Then open `http://127.0.0.1:4181/` — the server renders the same live page (short
+TTL, no separate `--watch` needed) with a Chat panel on top.
+
+**Security.** A chat lane injects instructions into a live agent session, so the
+inbox is a privilege boundary, not a message queue: the server binds `127.0.0.1`
+with no flag to widen it, requires a JSON content type and a loopback `Origin` on
+writes, holds no credentials, and is not a daemon — run it while you are looking
+at the dashboard, stop it when you are not.
+
+### The protocol
+
+Everything is files under the workspace, keyed by the session's own UUID (the same
+`sessionId` in `state.json` and `session_id` in the hook payload):
+
+```
+<workspace>/.claude/session-chat/<sessionId>/
+  inbox/<epochMs>-<id>.json    # pending:   {id, from, text, createdAt}
+  delivered/<id>.json          # claimed:   + {deliveredAt, lane: "hook"|"monitor"}
+  outbox/<id>.json             # optional explicit reply: {id, text}
+  log.jsonl                    # derived chat log (safe to delete)
+```
+
+Enqueue = write a file into `inbox/`. Claim = atomic `rename()` into `delivered/`,
+so two claimers can never deliver the same message twice. Any producer works —
+the dashboard is the first client, not the only possible one:
+
+```bash
+node obot.agent/scripts/obot-chat-wait --arm --session <sessionId>   # opt a session in
+```
+
+### Two delivery lanes, one inbox
+
+| Lane | Reaches | Cost | How |
+|---|---|---|---|
+| **Stop hook** — [`hooks/chat-inbox-deliver.sh`](../../hooks/chat-inbox-deliver.sh) | a session that is *working* (delivery at its next turn boundary) | nothing; installed once | `{"decision":"block"}` whose reason is the framed message |
+| **Monitor** — [`scripts/obot-chat-wait`](../../scripts/obot-chat-wait) | a session that is *idle* — within a second | one tool call per session | a persistent `Monitor` whose events wake the session |
+
+Messages **queue, they never interrupt**: one per turn boundary, oldest first, with
+queue depth shown on the page.
+
+### How a session adopts chat
+
+The hook is read at session start, so **chat reaches sessions started after
+`hooks/install.sh` ran** — a session already running when it was installed has no
+delivery lane, and the dashboard shows it as *not armed*. For the lead session,
+adoption is two steps at kickoff:
+
+```bash
+obot.agent/hooks/install.sh          # once per workspace — registers the Stop lane
+```
+
+then, in the session, arm the idle lane (this is the line `session-init` should
+carry once #77's D2 is settled):
+
+```
+Monitor({ command: 'node obot.agent/scripts/obot-chat-wait --session <sessionId>',
+          description: 'dashboard chat messages', persistent: true })
+```
+
+The reply half needs no adoption at all: the server tails
+`~/.claude/projects/<slug>/<sessionId>.jsonl` and turns assistant `thinking` /
+`tool_use` / `text` blocks into stream events, ending the turn on
+`stop_reason: "end_turn"`.
+
 ## Data contract (pinned)
 
 Collectors are independent and fallible: each returns data or a degradation
@@ -91,7 +170,8 @@ crash (design §4; `test/` exercises every degradation path).
 
 | Source | Pinned fields / shape |
 |---|---|
-| `~/.claude/jobs/<id>/state.json` | `name`, `color`, `state`, `detail`, `tempo`, `tokens`, `children[] {kind,href,id}`, `output.result`, `createdAt`, `firstTerminalAt`, `updatedAt`, `cwd`, `respawnFlags` (model), `intent` — everything else is ignored as opaque. **Internal Claude Code format, not a documented API**: re-verify after CLI upgrades. |
+| `~/.claude/jobs/<id>/state.json` | `name`, `color`, `state`, `detail`, `tempo`, `tokens`, `children[] {kind,href,id}`, `output.result`, `createdAt`, `firstTerminalAt`, `updatedAt`, `cwd`, `respawnFlags` (model), `intent` — everything else is ignored as opaque. Chat additionally reads `sessionId` and `linkScanPath`. **Internal Claude Code format, not a documented API**: re-verify after CLI upgrades. |
+| `~/.claude/projects/<slug>/<sessionId>.jsonl` (chat only) | `type: "assistant"`, `isSidechain`, `timestamp`, `message.content[] {type: thinking\|tool_use\|text}`, `message.stop_reason === "end_turn"` — unknown block kinds ignored, never fatal. Same harness-internal caveat. |
 | `claude agents --json --cwd <ws>` | `kind`, `name`, `status`, `state`, `startedAt`, `sessionId`, `id`, `cwd` — interactive sessions + liveness of background ones |
 | `.claude/session-notes/YYYY-MM-DD.md` | sections `## Overview` / `## Todo` / `## Notes` / `## Scaffold`; the `<!-- session-init … -->` marker is the session-boundary anchor (D4: marker time → anchor job's `createdAt` → local midnight) |
 | memory + diary | `next-session-todo` memory; newest diary entry's "Next session" section |

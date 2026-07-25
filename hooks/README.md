@@ -16,6 +16,7 @@ workspace copy is still what the harness executes.
 | [`merge-gate-guard.sh`](merge-gate-guard.sh) | `PreToolUse` (Bash) | Denies raw PR-merge commands (`gh pr merge`, the `pulls/N/merge` and `merges` REST endpoints, the `mergePullRequest`/`mergeBranch` GraphQL mutations) so the only mechanical merge lane is `scripts/obot-merge`, which enforces branch policy and merges as `obotclaw[bot]`. Prose mentions in backticks or quotes are ignored. |
 | [`scratchpad-heartbeat.sh`](scratchpad-heartbeat.sh) | `Stop` | Nudges a session to log to the shared session scratchpad when it has gone quiet for 30 minutes. Skips short sessions and rate-limits itself to one nudge per staleness window. Lean-bookends design, obot.agent#29. |
 | [`session-state-publish.sh`](session-state-publish.sh) | `Stop` | Publishes session state to the hub's `session-state` branch, which drives the roadmap page's session indicator ([obot.roadmap#57](https://github.com/jwildfire/obot.roadmap/issues/57) D5). Silent, detached, lock-guarded with a 60s floor. |
+| [`chat-inbox-deliver.sh`](chat-inbox-deliver.sh) | `Stop` | Hands the session the oldest message waiting in its dashboard-chat inbox, as a blocked-stop reason — the delivery lane behind the session hub's chat panel ([obot.roadmap#77](https://github.com/jwildfire/obot.roadmap/issues/77)). One message per stop, silent when the inbox is empty (the normal case). See [tools/session-hub/README.md](../tools/session-hub/README.md#chat-obotroadmap77). |
 
 ## Install
 

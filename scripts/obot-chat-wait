@@ -1,0 +1,92 @@
+#!/usr/bin/env node
+// obot-chat-wait — the idle lane for dashboard chat (obot.roadmap#77, design §3 D′).
+//
+// The Stop hook only fires when a turn ends, so it cannot reach a session that is
+// already idle and waiting for input. This script is the other half: a session
+// arms it once as a persistent Monitor, and every chat message that lands prints
+// as a monitor event, which wakes the session.
+//
+//   Monitor({
+//     command: 'obot.agent/scripts/obot-chat-wait --session $CLAUDE_SESSION_ID',
+//     description: 'dashboard chat messages',
+//     persistent: true,
+//   })
+//
+// Usage:
+//   obot-chat-wait --session <sessionId> [--workspace <dir>] [--interval <ms>]
+//                  [--once] [--arm]
+//
+//   --arm    create the session's chat directory and exit (opts the session in
+//            without waiting) — the dashboard only offers chat to sessions that
+//            have one.
+//   --once   deliver a single message and exit (for one-shot Bash waits).
+//
+// Claims are atomic renames shared with the Stop hook, so having both armed can
+// never deliver the same message twice.
+
+import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+import {
+  claim, ensureSessionDir, frameMessage, pending, sessionDir,
+} from '../tools/session-hub/lib/chat.mjs';
+
+function parseArgs(argv) {
+  const args = { interval: 1000, once: false, arm: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--session') args.session = argv[++i];
+    else if (a === '--workspace') args.workspace = argv[++i];
+    else if (a === '--interval') args.interval = Math.max(200, Number(argv[++i]) || 1000);
+    else if (a === '--once') args.once = true;
+    else if (a === '--arm') args.arm = true;
+    else if (a === '--help' || a === '-h') args.help = true;
+    else { console.error(`unknown option: ${a}`); process.exit(2); }
+  }
+  return args;
+}
+
+const HELP = `obot-chat-wait --session <sessionId> [--workspace <dir>] [--interval <ms>] [--once] [--arm]
+
+Waits for dashboard chat messages (obot.roadmap#77) and prints each one framed for
+the agent. Designed to be armed as a persistent Monitor so an idle session still
+receives chat. --arm just creates the directory and exits; --once delivers one
+message and exits.`;
+
+const args = parseArgs(process.argv.slice(2));
+if (args.help) { console.log(HELP); process.exit(0); }
+
+// Default workspace: the repo's parent (obot.agent lives inside the workspace).
+const here = path.dirname(fileURLToPath(import.meta.url));
+const workspace = path.resolve(
+  args.workspace ?? process.env.CLAUDE_PROJECT_DIR ?? path.resolve(here, '..', '..'),
+);
+const sessionId = args.session ?? process.env.CLAUDE_SESSION_ID;
+if (!sessionId) {
+  console.error('obot-chat-wait: --session <sessionId> is required (or set CLAUDE_SESSION_ID)');
+  process.exit(2);
+}
+
+ensureSessionDir(workspace, sessionId);
+if (args.arm) {
+  console.log(`chat armed: ${sessionDir(workspace, sessionId)}`);
+  process.exit(0);
+}
+
+let stopping = false;
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopping = true; });
+
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+while (!stopping) {
+  if (pending(workspace, sessionId).length) {
+    const msg = claim(workspace, sessionId, { lane: 'monitor' });
+    if (msg) {
+      // One event per message. Monitor batches lines within 200ms, so a
+      // multi-line frame arrives as a single notification.
+      console.log(frameMessage(msg, { sessionId }));
+      if (args.once) break;
+    }
+  }
+  await sleep(args.interval);
+}

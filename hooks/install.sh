@@ -39,6 +39,7 @@ declare -a HOOKS=(
   "merge-gate-guard.sh:PreToolUse:Bash"
   "scratchpad-heartbeat.sh:Stop:"
   "session-state-publish.sh:Stop:"
+  "chat-inbox-deliver.sh:Stop:"
 )
 
 if $CHECK; then
