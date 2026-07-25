@@ -1,4 +1,4 @@
-<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/52 on 2026-07-25 08:39 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/52 on 2026-07-25 08:47 EDT -->
 <!-- GITHUB_PROPERTIES: Assignee: @jwildfire, Reviewers: @jwildfire -->
 
 ## Summary
@@ -38,7 +38,8 @@ It also moves the status line into version control. It had lived only in `~/.cla
 ## Evidence
 
 - **Tests**: `node --test tools/statusline/test/*.test.mjs` → 11/11 pass. They cover in-session vs out-of-session targeting, the workspace root itself, case-insensitive path matching, a sibling directory that only shares a prefix (`obot2-worktrees/…` must *not* count as inside), the missing-live-view fallback, all three link modes, the git-branch fix, malformed stdin, and that the link is appended to the existing segments rather than replacing them.
-- **Rendered output** (`cat -v`, in-workspace): `…$1.20 ^[[2;36m^[]8;;file:///Users/jwildfire/Documents/obot2/.claude/session-hub/live.html^G↗ ops hub^[]8;;^G^[[0m` — a well-formed BEL-terminated OSC 8 pair around the label.
+- **Rendered output** (`cat -v`, in-workspace): `…$1.20 ^[[2;36m^[[4m^[]8;;file:///Users/jwildfire/Documents/obot2/.claude/session-hub/live.html^G↗ ops hub^[]8;;^G^[[0m` — a well-formed BEL-terminated OSC 8 pair around the label.
+- **Live render, confirmed on screen**: your open.csr session's status line during this work read `[bcf4114b] Opus 5 ~/Documents/obot2 75% left $138.99 ↗ ops hub`, one row above the built-in footer badges (`auto mode on · ← 1 agent · PR #51`) — the label renders clean, no stray escape bytes, no layout damage. The link is underlined to match those badges.
 - **Installed state**: `install.sh --check` → `ok: statusline-command.sh` / `ok: settings.json statusLine`; a normalized diff of `settings.json` before vs after is empty.
 - **Terminal support** was verified against Claude Code v2.1.220 itself rather than assumed — details below.
 
