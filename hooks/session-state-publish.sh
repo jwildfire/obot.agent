@@ -17,18 +17,34 @@
 #              file; an atomic lock plus a minimum interval keeps that to one
 #              publisher at a time and one commit per interval, workspace-wide
 #
-# Failures are deliberately swallowed: a stale session pill is a cosmetic problem
-# and must never surface as a session error.
+# Failures are swallowed — a stale session pill is cosmetic and must never surface
+# as a session error — but they are *recorded*. Swallowing them silently is how a
+# stale obot.agent clone (missing --emit-state after #44 merged) went unnoticed
+# through every turn of a session: the hook ran, failed, and said nothing. The log
+# below is the only trace, so read it first when the pill stops moving.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${CLAUDE_PROJECT_DIR:-$(dirname "$(dirname "$SCRIPT_DIR")")}"
 PUBLISHER="$WORKSPACE/obot.agent/scripts/obot-session-state"
 MIN_INTERVAL=60   # seconds between publishes, workspace-wide
 LOCK="/tmp/obot-session-state.lock"
 STAMP="/tmp/obot-session-state.stamp"
+LOG="$WORKSPACE/.claude/session-hub/cache/publish.log"
 
 cat >/dev/null   # consume the hook payload; this hook does not read it
 
-[[ -x "$PUBLISHER" ]] || exit 0
+# One line per event: a node stack trace is many lines of stderr, and a log whose
+# entries wrap is a log nobody greps. Keep the first meaningful line, clipped.
+log() {
+  mkdir -p "$(dirname "$LOG")" 2>/dev/null
+  local msg
+  msg="$(printf '%s' "$*" | tr '\n' ' ' | tr -s ' ' | cut -c1-300)"
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$msg" >>"$LOG" 2>/dev/null
+}
+
+if [[ ! -x "$PUBLISHER" ]]; then
+  log "publisher not executable or missing: $PUBLISHER"
+  exit 0
+fi
 
 # Rate limit before taking the lock, so the common case is two stat calls.
 if [[ -f "$STAMP" ]]; then
@@ -48,7 +64,14 @@ fi
 touch "$STAMP"
 (
   trap 'rmdir "$LOCK" 2>/dev/null' EXIT
-  OBOT_WORKSPACE="$WORKSPACE" "$PUBLISHER" >/dev/null 2>&1
+  err="$(OBOT_WORKSPACE="$WORKSPACE" "$PUBLISHER" 2>&1 >/dev/null)" || {
+    log "publish failed (exit $?): ${err:-no stderr}"
+    exit 0
+  }
+  # Keep the log to the last 200 lines; it is a diagnostic tail, not an archive.
+  if [[ -f "$LOG" ]] && (( $(wc -l <"$LOG") > 200 )); then
+    tail -n 200 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+  fi
 ) &
 
 exit 0
