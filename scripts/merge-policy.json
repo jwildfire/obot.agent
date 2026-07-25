@@ -4,6 +4,7 @@
   "jwildfire/open.gismo": { "allowed": ["dev"], "approvalRequired": ["main"] },
   "jwildfire/safety-histogram": { "allowed": ["dev"], "approvalRequired": ["master"] },
   "jwildfire/gsm.safety": { "allowed": ["dev"], "approvalRequired": ["main"] },
+  "jwildfire/open.csr": { "allowed": ["dev"], "approvalRequired": ["main"] },
   "jwildfire/obot.roadmap": { "allowed": ["main"] },
   "jwildfire/obot.agent": { "allowed": ["main"] }
 }

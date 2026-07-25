@@ -24,6 +24,14 @@
       "status": "active",
       "grant_profile": "standard",
       "backlog": []
+    },
+    "csr": {
+      "issue": 112,
+      "status": "active",
+      "grant_profile": "standard",
+      "backlog": [
+        "jwildfire/open.csr"
+      ]
     }
   }
 }
