@@ -6,13 +6,24 @@
       "issue": 78,
       "status": "active",
       "grant_profile": "standard",
-      "backlog": ["jwildfire/safety.viz"]
+      "backlog": [
+        "jwildfire/safety.viz"
+      ]
     },
     "app": {
       "issue": 79,
       "status": "active",
       "grant_profile": "standard",
-      "backlog": ["jwildfire/open.gismo", "jwildfire/gsm.safety"]
+      "backlog": [
+        "jwildfire/open.gismo",
+        "jwildfire/gsm.safety"
+      ]
+    },
+    "autonomy": {
+      "issue": 73,
+      "status": "active",
+      "grant_profile": "standard",
+      "backlog": []
     }
   }
 }
