@@ -14,26 +14,50 @@ From the **workspace root** (`~/Documents/obot2`):
 
 ```bash
 node obot.agent/tools/session-hub/session-hub.mjs                 # one live render
-node obot.agent/tools/session-hub/session-hub.mjs --watch --open  # live mode: regenerate ~60s, print file:// URL
+node obot.agent/tools/session-hub/session-hub.mjs --watch --serve # live mode: regenerate ~60s, serve on loopback
 node obot.agent/tools/session-hub/session-hub.mjs --report        # frozen wrapup report
 ```
 
 | Option | Meaning |
 |---|---|
 | `--watch` | regenerate on an interval (live mode only) |
+| `--serve` | also serve the live view on `http://127.0.0.1:7325/live.html` (live mode only) |
+| `--port <n>` | serve port, default 7325; rolls forward if the port is taken |
 | `--interval <sec>` | watch interval, default 60 |
 | `--report` | report mode: freeze semantics, output into the hub |
 | `--workspace <dir>` | workspace root (default: cwd) |
 | `--hub <dir>` | obot.roadmap clone (default: `<workspace>/obot.roadmap`) |
 | `--out <file>` | override the output path |
 | `--slug <slug>` | override the report slug (default: derived from the session marker) |
-| `--open` | print the `file://` URL after the first render |
+| `--open` | print the live view's URL after the first render (the served one when `--serve` is on) |
 | `--emit-state <file>` | also write the compact session-state JSON (below) |
 
 Outputs: live → `<workspace>/.claude/session-hub/live.html` (open in Chrome from
 `file://`; the page auto-refreshes with scroll restore). Report →
 `<hub>/reports/sessions/<slug>.html`, where the slug mirrors the diary entry
 (`2026-07-11`, `2026-07-11-2`, …) — committed by the `session-wrapup` report step.
+
+## Serving the live view (`--serve`)
+
+`--serve` publishes the rendered file on **loopback HTTP** — `http://127.0.0.1:7325/live.html`,
+or the next free port — and writes the endpoint to `.claude/session-hub/serve.json`:
+
+```json
+{ "port": 7325, "pid": 42717, "url": "http://127.0.0.1:7325/live.html", "startedAt": "…" }
+```
+
+Why serve a file that is already on disk: terminals disagree about what a `file://`
+hyperlink means. Ghostty hands one to **Finder** rather than the browser, so the
+[status-line link](../statusline/README.md) opened a Finder window instead of the
+dashboard. An `http://` URL always lands in the default browser. The status line reads
+`serve.json`, checks the pid is alive, and uses the URL when it is — falling back to
+`file://` when nothing is serving, so the link never dangles.
+
+The server is deliberately small and closed: loopback bind only (never `0.0.0.0` — the
+live view carries session names, agent intents and scratchpad lines), `GET`/`HEAD` only,
+no directory listings, no path escapes out of `.claude/session-hub/`, and `no-store` so a
+regenerated view is never cached. `serve.json` is removed on exit; a killed process leaves
+it behind, which is why readers check the pid.
 
 ## Session state (`--emit-state`)
 

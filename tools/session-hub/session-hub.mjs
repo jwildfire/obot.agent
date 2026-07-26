@@ -17,7 +17,9 @@
 //                       report → <hub>/reports/sessions/<slug>.html)
 //   --slug <slug>       report slug override (default: derived from the session marker)
 //   --interval <sec>    watch interval (default 60)
-//   --open              print the file:// URL after the first render
+//   --serve             also serve the live view on http://127.0.0.1:7325/live.html
+//   --port <n>          serve port (default 7325; the next free port is used if taken)
+//   --open              print the live view's URL after the first render
 //   --emit-state <file> also write a small session-state JSON (see sessionState below)
 
 import fs from 'node:fs';
@@ -29,9 +31,10 @@ import {
 } from './lib/collect.mjs';
 import { buildModel } from './lib/model.mjs';
 import { render } from './lib/render.mjs';
+import { serveHub, DEFAULT_PORT } from './lib/serve.mjs';
 
 function parseArgs(argv) {
-  const args = { watch: false, report: false, open: false, interval: 60 };
+  const args = { watch: false, report: false, open: false, serve: false, interval: 60, port: DEFAULT_PORT };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--watch') args.watch = true;
@@ -42,6 +45,8 @@ function parseArgs(argv) {
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--slug') args.slug = argv[++i];
     else if (a === '--interval') args.interval = Number(argv[++i]) || 60;
+    else if (a === '--serve') args.serve = true;
+    else if (a === '--port') args.port = Number(argv[++i]) || DEFAULT_PORT;
     else if (a === '--emit-state') args.emitState = argv[++i];
     else if (a === '--help' || a === '-h') { args.help = true; }
     else { console.error(`unknown option: ${a}`); process.exit(2); }
@@ -100,7 +105,7 @@ export function generate({ workspace, hub, slug, mode }) {
   return { model, html: render(model) };
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 23).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
@@ -131,7 +136,18 @@ function main() {
   };
 
   const out = once();
-  if (args.open) console.log(`file://${out}`);
+  let servedUrl = null;
+  if (args.serve && mode === 'live') {
+    // A port collision must not take the watch loop down with it: the live view is
+    // still on disk, and file:// still opens it.
+    try {
+      ({ url: servedUrl } = await serveHub({ dir: path.dirname(out), port: args.port }));
+      console.log(`[session-hub] serving ${servedUrl}`);
+    } catch (err) {
+      console.error(`[session-hub] serve failed (${err.message}) — the file:// view still works`);
+    }
+  }
+  if (args.open) console.log(servedUrl ?? `file://${out}`);
   if (args.watch && mode === 'live') {
     console.log(`[session-hub] watching — regenerating every ${args.interval}s (ctrl-c to stop)`);
     setInterval(() => {

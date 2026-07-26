@@ -12,8 +12,16 @@ The link is context-aware:
 
 | Where the session is working | Link target |
 |---|---|
-| Inside the obot workspace (`~/Documents/obot2`, worktrees included) with a rendered live view | `file://…/.claude/session-hub/live.html` — the [session ops hub](../session-hub/README.md) |
+| Inside the obot workspace (`~/Documents/obot2`, worktrees included), watch loop serving | `http://127.0.0.1:7325/live.html` — the [session ops hub](../session-hub/README.md) |
+| Inside the workspace, nothing serving | `file://…/.claude/session-hub/live.html` — the same view, opened from disk |
 | Anywhere else, or before the live view has ever been rendered | <https://jwildfire.github.io/obot.roadmap/> — the deployed obot hub |
+
+The HTTP endpoint is preferred because **Ghostty hands a `file://` hyperlink to Finder**,
+not to the browser: clicking it revealed the file instead of opening the dashboard. The
+session-hub watch loop publishes `http://127.0.0.1:<port>/live.html` when started with
+`--serve` and advertises it in `.claude/session-hub/serve.json`; this script uses that URL
+when the server's pid is alive, and falls back to `file://` when nothing is serving, so the
+link is never dead. Start the loop with `--serve` (the `/session-dashboard` skill does).
 
 Same script for every agent — lead sessions, spawned siblings, ultracode jobs —
 so the hub is one Cmd+click away from wherever an agent happens to be.
@@ -69,9 +77,8 @@ than second-guessing the detection:
 - **Detection override**: `FORCE_HYPERLINK=1` in the environment *before* launching
   Claude Code forces hyperlink emission on terminals its auto-detection misses.
 
-A `file://` link opens in the default browser — the ops hub live view is a local
-file the [session-hub](../session-hub/README.md) watch loop regenerates about once
-a minute, so what opens is current.
+What opens is always current: the [session-hub](../session-hub/README.md) watch loop
+regenerates the live view about once a minute, and the served page carries `no-store`.
 
 ### The other footer lane
 
@@ -92,6 +99,7 @@ node --test tools/statusline/test/*.test.mjs
 
 The tests drive `statusline.sh` with mock stdin payloads over a temporary
 workspace: in-session vs out-of-session targeting, the prefix-only sibling
-directory that must *not* count as inside, the no-live-view fallback, each link
-mode, and that the link is appended to the existing segments rather than replacing
-them.
+directory that must *not* count as inside, the no-live-view fallback, the served
+endpoint being preferred over `file://` (and a marker left by a dead server being
+ignored), each link mode, and that the link is appended to the existing segments
+rather than replacing them.

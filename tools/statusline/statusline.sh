@@ -67,8 +67,9 @@ if git -C "$raw_dir" --no-optional-locks rev-parse --is-inside-work-tree >/dev/n
 fi
 
 # --- hub link ---------------------------------------------------------------
-# Working inside the obot workspace → the live session ops hub (the session-hub
-# live view); anywhere else → the deployed obot roadmap hub. Emitted as an OSC 8
+# Working inside the obot workspace → the live session ops hub (served over
+# loopback HTTP when the watch loop is serving it, `file://` otherwise); anywhere
+# else → the deployed obot roadmap hub. Emitted as an OSC 8
 # terminal hyperlink: Claude Code decides whether the terminal supports those and
 # drops the escape (keeping the label) when it does not, so this script does not
 # second-guess it. See README.md for the terminal-support notes.
@@ -95,6 +96,20 @@ if [ "$link_mode" != "off" ]; then
      && [ -f "$OPS_HUB_FILE" ]; then
     link_url="file://$OPS_HUB_FILE"
     link_label="ops hub"
+
+    # Prefer the loopback HTTP endpoint when the session-hub watch loop is serving
+    # one: terminals disagree about `file://` hyperlinks — Ghostty hands them to
+    # Finder rather than the browser — while `http://` always opens the browser.
+    # The marker is left behind by a killed server, so check the pid is alive.
+    serve_marker="$OBOT_WORKSPACE/.claude/session-hub/serve.json"
+    if [ -f "$serve_marker" ]; then
+      num() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$serve_marker" | head -1; }
+      serve_port=$(num port)
+      serve_pid=$(num pid)
+      if [ -n "$serve_port" ] && [ -n "$serve_pid" ] && kill -0 "$serve_pid" 2>/dev/null; then
+        link_url="http://127.0.0.1:${serve_port}/live.html"
+      fi
+    fi
   else
     link_url="$OBOT_HUB_URL"
     link_label="obot hub"
