@@ -79,6 +79,30 @@ test('inside the workspace but with no live view yet falls back to the hub', () 
   assert.match(out, /↗ obot hub/);
 });
 
+test('it prefers the loopback HTTP endpoint when the hub is being served', () => {
+  const ws = fakeWorkspace();
+  fs.writeFileSync(
+    path.join(ws, '.claude', 'session-hub', 'serve.json'),
+    JSON.stringify({ port: 7325, pid: process.pid, url: 'http://127.0.0.1:7325/live.html' }, null, 2),
+  );
+  const out = run(payload({ dir: ws }), { OBOT_WORKSPACE: ws });
+  assert.match(out, /http:\/\/127\.0\.0\.1:7325\/live\.html/);
+  assert.doesNotMatch(out, /file:\/\//);
+  assert.match(out, /↗ ops hub/);
+});
+
+test('a marker left behind by a dead server falls back to file://', () => {
+  const ws = fakeWorkspace();
+  fs.writeFileSync(
+    path.join(ws, '.claude', 'session-hub', 'serve.json'),
+    // pid 0x7FFFFFFF: valid shape, no such process
+    JSON.stringify({ port: 7325, pid: 2147483647 }, null, 2),
+  );
+  const out = run(payload({ dir: ws }), { OBOT_WORKSPACE: ws });
+  assert.match(out, /file:\/\/.*live\.html/);
+  assert.doesNotMatch(out, /127\.0\.0\.1/);
+});
+
 test('text mode prints the bare URL and no escape', () => {
   const ws = fakeWorkspace();
   const out = run(payload({ dir: ws }), { OBOT_WORKSPACE: ws, OBOT_STATUSLINE_LINK: 'text' });
