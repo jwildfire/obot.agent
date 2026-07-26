@@ -4,6 +4,7 @@
 #   obot.agent/hooks/install.sh                 # install into ~/Documents/obot2
 #   obot.agent/hooks/install.sh --workspace DIR # somewhere else
 #   obot.agent/hooks/install.sh --check         # report drift, change nothing
+#   obot.agent/hooks/install.sh --with-chat     # also arm the #77 chat delivery lane
 #
 # Copies the hook scripts and registers each in the workspace settings.json under
 # the event it belongs to, merging into whatever is already configured rather
@@ -20,11 +21,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
 CHECK=false
+WITH_CHAT=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --workspace) WORKSPACE="$2"; shift 2 ;;
     --check) CHECK=true; shift ;;
+    --with-chat) WITH_CHAT=true; shift ;;
     -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -39,8 +42,18 @@ declare -a HOOKS=(
   "merge-gate-guard.sh:PreToolUse:Bash"
   "scratchpad-heartbeat.sh:Stop:"
   "session-state-publish.sh:Stop:"
-  "chat-inbox-deliver.sh:Stop:"
 )
+
+# Opt-in only (@jwildfire, 2026-07-26). chat-inbox-deliver.sh is the delivery lane
+# for dashboard chat (obot.roadmap#77), and it hands a running session a prompt
+# from a file anyone local can write — a privilege lane, not another convenience
+# hook. #77 is parked in the backlog, so installing it must be a deliberate act
+# rather than a side effect of running the installer to fix drift on the others.
+# Requires --with-chat; without it the chat hook is neither copied, registered,
+# nor reported as drift by --check.
+if $WITH_CHAT; then
+  HOOKS+=("chat-inbox-deliver.sh:Stop:")
+fi
 
 if $CHECK; then
   status=0

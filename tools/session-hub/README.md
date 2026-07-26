@@ -86,6 +86,13 @@ toolchain included.
 
 ## Chat ([obot.roadmap#77](https://github.com/jwildfire/obot.roadmap/issues/77))
 
+> **Parked (2026-07-26).** #77 is in the backlog for a future obot release:
+> @jwildfire's call that he is unlikely to use chat enough to justify standing up
+> a prompt-injection lane. The code below is merged and works, but **nothing is
+> armed** — the Stop hook installs only under `hooks/install.sh --with-chat`, and
+> the server runs only when started by hand. Leave it that way unless #77 is
+> revived.
+
 Prototype. The live dashboard can also **send prompts to a running session and
 stream the reply back** — design:
 [77_design.html](https://jwildfire.github.io/obot.roadmap/requirements/design/77_design.html).
@@ -146,7 +153,7 @@ delivery lane, and the dashboard shows it as *not armed*. For the lead session,
 adoption is two steps at kickoff:
 
 ```bash
-obot.agent/hooks/install.sh          # once per workspace — registers the Stop lane
+obot.agent/hooks/install.sh --with-chat   # once per workspace — registers the Stop lane
 ```
 
 then, in the session, arm the idle lane (this is the line `session-init` should
