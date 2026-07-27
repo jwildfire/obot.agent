@@ -51,6 +51,10 @@ For current status — which renderers are live, what's in review, what's next �
 - `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens), `obot-merge`
   (the policy-gated merge lane), the idea-queue intake pair (`reminders-to-ideas`,
   `ideas-sweep`), and the wiki requirements-harvest helper.
+- `tools/` — the session [`session-hub`](tools/session-hub/README.md) (live dashboard +
+  wrapup report) and [`statusline`](tools/statusline/README.md) (the status line every
+  agent runs, with its clickable hub link). Each ships an installer where the harness
+  needs a copy outside the repo.
 
 ## Agent identity
 
