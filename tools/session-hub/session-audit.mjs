@@ -75,49 +75,75 @@ function parseArgs(argv) {
 // is refused here rather than quoted later.
 const ID_RE = /^[A-Z0-9_-]{2,60}:[\w.-]+\/[\w.-]+(#\d+)?$/;
 
+// Two payload shapes, one normal form. The original per-decision shape
+// ({decision, findings}) and the queue's batch shape ({batch: [{decision,
+// findings}...]}) both come out as `entries` — at most one accept set and one
+// reject set, every id checked against the audit's own vocabulary.
 export function validateDecision(payload) {
   const p = payload ?? {};
-  if (p.decision !== 'accept' && p.decision !== 'reject') {
-    return { error: 'decision must be "accept" or "reject"' };
+  const raw = Array.isArray(p.batch)
+    ? p.batch
+    : [{ decision: p.decision, findings: p.findings }];
+  if (!raw.length || raw.length > 2) return { error: 'a batch carries one accept set and/or one reject set' };
+  const seen = new Set();
+  const entries = [];
+  let total = 0;
+  for (const b of raw) {
+    const e = b ?? {};
+    if (e.decision !== 'accept' && e.decision !== 'reject') {
+      return { error: 'decision must be "accept" or "reject"' };
+    }
+    if (seen.has(e.decision)) return { error: `two ${e.decision} sets in one batch` };
+    seen.add(e.decision);
+    const list = Array.isArray(e.findings) ? e.findings : [];
+    if (!list.length) return { error: 'at least one finding id is required' };
+    total += list.length;
+    for (const id of list) {
+      if (typeof id !== 'string' || !ID_RE.test(id)) return { error: `not a finding id: ${JSON.stringify(id).slice(0, 80)}` };
+    }
+    entries.push({ decision: e.decision, findings: [...list] });
   }
-  const list = Array.isArray(p.findings) ? p.findings : [];
-  if (!list.length) return { error: 'at least one finding id is required' };
-  if (list.length > MAX_FINDINGS) return { error: `at most ${MAX_FINDINGS} findings per decision` };
-  for (const id of list) {
-    if (typeof id !== 'string' || !ID_RE.test(id)) return { error: `not a finding id: ${JSON.stringify(id).slice(0, 80)}` };
-  }
+  if (total > MAX_FINDINGS) return { error: `at most ${MAX_FINDINGS} findings per submit` };
+  const fallback = entries.map((e) => `${e.decision} ${e.findings.length}`).join(' · ');
   // The label is display text from the page and rides into an agent prompt —
   // strip it to a conservative charset so nothing shell- or markdown-shaped
   // survives, whatever the page (or anything POSTing here) sent.
   const label = (typeof p.label === 'string' && p.label.trim()
     ? p.label.replace(/[^\w\s.,:;#/·—-]/g, '').replace(/\s+/g, ' ').trim()
-    : `${p.decision} ${list.length} finding${list.length === 1 ? '' : 's'}`).slice(0, 120);
-  return { decision: p.decision, findings: [...list], label };
+    : fallback).slice(0, 120);
+  return { entries, label };
 }
 
 /* -------------------------------------------------------------- the agent */
 
 // The whole contract in one prompt: ids only, fresh-audit re-validation, the
-// bounded-agent policy for judgment findings, hub grant limits, and a run
-// token so delegated ledger entries can be finalized by the same lane.
-export function agentPrompt({ decision, findings, hub, runToken, label }) {
+// bounded-agent policy for judgment findings, hub grant limits, a run token so
+// delegated ledger entries can be finalized — and worktree isolation, so
+// several apply agents can run at once without racing the shared checkout.
+export function agentPrompt({ entries, hub, runToken, label }) {
+  const decisions = entries.flatMap((e) => [
+    `Decision: ${e.decision}`,
+    ...e.findings.map((id) => `- ${id}`),
+  ]);
+  const applies = entries.map((e) =>
+    `AUDIT_AGENTIC_PACK="$CLAUDE_JOB_DIR/tmp/audit-agentic.md" GITHUB_TOKEN="$(gh auth token)" node scripts/apply_audit_decision.mjs --decision ${e.decision} --findings ${e.findings.join(',')} --by jwildfire --run-id ${runToken}`);
   return [
-    `You are the local audit apply lane for jwildfire/obot.roadmap. @jwildfire clicked "${label.replace(/"/g, "'")}" on the local hub audit page; you complete that decision. The payload is finding ids only — what runs is derived from a FRESH audit, never from the page.`,
+    `You are one local audit apply lane for jwildfire/obot.roadmap. @jwildfire submitted "${label.replace(/"/g, "'")}" from the local hub audit queue; you complete that batch. The payload is finding ids only — what runs is derived from a FRESH audit, never from the page. Other apply agents may be running in parallel: you own your worktree, and main is shared — take rejected pushes calmly.`,
     '',
-    `Decision: ${decision}`,
-    'Finding ids:',
-    ...findings.map((id) => `- ${id}`),
+    ...decisions,
     '',
     `Hub checkout: ${hub}`,
     'Steps:',
-    `1. cd ${hub} && git pull --ff-only (work on main; the hub standing grant covers standard updates — never delete files, issues or history).`,
-    `2. Run: AUDIT_AGENTIC_PACK="$CLAUDE_JOB_DIR/tmp/audit-agentic.md" GITHUB_TOKEN="$(gh auth token)" node scripts/apply_audit_decision.mjs --decision ${decision} --findings ${findings.join(',')} --by jwildfire --run-id ${runToken}`,
-    '   It re-runs the whole audit, refuses ids the current state no longer reports (stale) or could not check (blocked), applies mechanical ops directly, appends every outcome to site/audit/decisions.json, and writes judgment findings to the pack file.',
-    '3. If the pack file is non-empty, work it one finding at a time. .github/roadmap-audit-policy.md is binding — only the operations the pack asks for, nothing broader. Then finalize the delegated entries: node scripts/apply_audit_decision.mjs --finalize-run ' + runToken + ' --outcome applied (or failed, if a finding could not be completed — never claim applied for work not done).',
-    '4. Commit the ledger and any changed files to main and push; verify the push landed (git ls-remote). The local audit page reads outcomes from this ledger, so the decision is not done until the commit exists.',
-    '5. End with a result: line summarizing the outcome per finding id.',
+    `1. Work in your OWN worktree: cd ${hub} && git fetch origin && git worktree add ../obot.roadmap-worktrees/audit-apply-${runToken} -b audit-apply-${runToken} origin/main, then cd into it. Never edit the shared checkout. The hub standing grant covers standard updates to main — never delete files, issues or history.`,
+    '2. In the worktree, run each apply in order:',
+    ...applies.map((c) => `   ${c}`),
+    '   The script re-runs the whole audit, refuses ids the current state no longer reports (stale) or could not check (blocked), applies mechanical ops directly, appends every outcome to site/audit/decisions.json, and writes judgment findings to the pack file.',
+    `3. If the pack file is non-empty after the accept run, work it one finding at a time. .github/roadmap-audit-policy.md is binding — only the operations the pack asks for, nothing broader. Then finalize the delegated entries: node scripts/apply_audit_decision.mjs --finalize-run ${runToken} --outcome applied (or failed, if a finding could not be completed — never claim applied for work not done).`,
+    '4. Commit in the worktree, then land on main: git push origin HEAD:main. If the push is rejected (another apply agent landed first), git pull --rebase origin main and retry, up to 3 times. A conflict in site/audit/decisions.json is two appends to the same array — keep BOTH sets of entries. A conflict in site/audit/findings.json: keep the other side (theirs) — it is as fresh as yours and the next audit run rewrites it anyway. Verify the push landed (git ls-remote origin main).',
+    `5. Clean up: from ${hub}, git worktree remove ../obot.roadmap-worktrees/audit-apply-${runToken} --force and git branch -D audit-apply-${runToken}.`,
+    '6. End with a result: line summarizing the outcome per finding id.',
     '',
-    'If a step fails honestly (audit cannot run, push rejected), record what happened in the ledger where the script already did, push what is consistent, and say so in the result line — never retry-forever, never force-push.',
+    'If a step fails honestly (audit cannot run, push still rejected after 3 rebases), push nothing inconsistent, leave the worktree for inspection, and say exactly what happened in the result line — never retry-forever, never force-push.',
   ].join('\n');
 }
 
@@ -227,11 +253,10 @@ const json = (res, code, body) => {
 export function createServer({ workspace, hub, port, model = 'opus', dryRun = false, spawn = null }) {
   const pageCache = { html: null, stamp: null };
   let dashCache = { html: null, at: 0 };
-  const runs = new Map(); // runToken → { job, ids, decision, at }
-
-  // One decision at a time: the apply lane serializes on GitHub for the same
-  // reason (board mutations must not interleave), so the local lane does too.
-  let inFlight = null;
+  // Several submits may run at once (@jwildfire, 2026-07-27 follow-up: no
+  // serialization) — each agent gets its own hub worktree, and the ledger
+  // merge is the agents' push-rebase loop, not a server lock.
+  const runs = new Map(); // runToken → { job, ids, at }
 
   const launch = spawn ?? ((args, opts, cb) => {
     const child = execFile('claude', args, { ...opts, timeout: 60_000 }, (err, stdout, stderr) => cb(err, `${stdout}\n${stderr}`));
@@ -299,12 +324,8 @@ export function createServer({ workspace, hub, port, model = 'opus', dryRun = fa
         try { payload = JSON.parse(body); } catch { json(res, 400, { error: 'bad JSON' }); return; }
         const v = validateDecision(payload);
         if (v.error) { json(res, 400, { error: v.error }); return; }
-        if (inFlight && !jobState(inFlight).terminal) {
-          json(res, 409, { error: `a decision is already being applied (job ${inFlight}) — wait for it to land` });
-          return;
-        }
         const runToken = `local-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-        const name = `👯🤖 ${localDate()} audit-apply`;
+        const name = `👯🤖 ${localDate()} audit-apply ${runToken.slice(-4)}`;
         const prompt = agentPrompt({ ...v, hub, runToken });
         const args = spawnArgs({ name, prompt, model });
         if (dryRun) {
@@ -322,9 +343,9 @@ export function createServer({ workspace, hub, port, model = 'opus', dryRun = fa
         const wait = () => {
           const job = findJobByToken(runToken);
           if (job) {
-            inFlight = job;
-            runs.set(runToken, { job, ids: v.findings, decision: v.decision, at: started });
-            console.log(`[session-audit] ${v.decision} ${v.findings.length} finding(s) → job ${job} (${runToken})`);
+            const ids = v.entries.flatMap((e) => e.findings);
+            runs.set(runToken, { job, ids, at: started });
+            console.log(`[session-audit] ${v.label} → job ${job} (${runToken})`);
             json(res, 200, { job, runToken });
           } else if (Date.now() - started > 8000) {
             console.warn(`[session-audit] spawned but no job with token ${runToken} found yet`);

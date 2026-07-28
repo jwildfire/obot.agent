@@ -17,11 +17,27 @@ function tmp() {
 }
 
 // ------------------------------------------------------------- validation
-test('validateDecision accepts a well-formed accept', () => {
+test('validateDecision accepts the single-decision shape', () => {
   const v = validateDecision({ decision: 'accept', findings: ['ASSIGNEE-MISSING:jwildfire/obot.roadmap#9'], label: 'accept roadmap#9' });
   assert.equal(v.error, undefined);
-  assert.equal(v.decision, 'accept');
-  assert.deepEqual(v.findings, ['ASSIGNEE-MISSING:jwildfire/obot.roadmap#9']);
+  assert.deepEqual(v.entries, [{ decision: 'accept', findings: ['ASSIGNEE-MISSING:jwildfire/obot.roadmap#9'] }]);
+});
+
+test('validateDecision accepts the queue batch shape — one accept set, one reject set', () => {
+  const v = validateDecision({
+    batch: [
+      { decision: 'accept', findings: ['A-RULE:jwildfire/x#1', 'A-RULE:jwildfire/x#2'] },
+      { decision: 'reject', findings: ['B-RULE:jwildfire/y#3'] },
+    ],
+    label: 'submit 3 decisions',
+  });
+  assert.equal(v.error, undefined);
+  assert.equal(v.entries.length, 2);
+  assert.deepEqual(v.entries[1], { decision: 'reject', findings: ['B-RULE:jwildfire/y#3'] });
+  assert.match(validateDecision({ batch: [
+    { decision: 'accept', findings: ['AA:j/x#1'] },
+    { decision: 'accept', findings: ['AA:j/x#2'] },
+  ] }).error, /two accept sets/);
 });
 
 test('validateDecision refuses unknown decisions, empty and oversized batches, junk ids', () => {
@@ -30,6 +46,11 @@ test('validateDecision refuses unknown decisions, empty and oversized batches, j
   assert.match(validateDecision({ decision: 'accept' }).error, /finding/);
   const over = Array.from({ length: MAX_FINDINGS + 1 }, (_, i) => `RULE:jwildfire/x#${i}`);
   assert.match(validateDecision({ decision: 'accept', findings: over }).error, /at most/);
+  // the cap is per submit, across both sets
+  assert.match(validateDecision({ batch: [
+    { decision: 'accept', findings: over.slice(0, MAX_FINDINGS) },
+    { decision: 'reject', findings: ['RR:j/x#999'] },
+  ] }).error, /at most/);
   assert.match(validateDecision({ decision: 'accept', findings: ['no colon here'] }).error, /id/);
   assert.match(validateDecision({ decision: 'accept', findings: [42] }).error, /id/);
   // shell metacharacters must never reach a spawned command line
@@ -37,19 +58,23 @@ test('validateDecision refuses unknown decisions, empty and oversized batches, j
 });
 
 // ------------------------------------------------------------- the prompt
-test('agentPrompt carries ids, decision, hub path and run token', () => {
+test('agentPrompt runs one apply per entry, isolates in a worktree, and lands with a rebase-retry', () => {
   const p = agentPrompt({
-    decision: 'accept',
-    findings: ['CLOSED-NOT-RELEASED:jwildfire/safety.viz#45', 'ASSIGNEE-MISSING:jwildfire/obot.roadmap#9'],
+    entries: [
+      { decision: 'accept', findings: ['CLOSED-NOT-RELEASED:jwildfire/safety.viz#45', 'ASSIGNEE-MISSING:jwildfire/obot.roadmap#9'] },
+      { decision: 'reject', findings: ['NOISY-RULE:jwildfire/obot.roadmap#5'] },
+    ],
     hub: '/ws/obot.roadmap',
     runToken: 'local-abc123',
-    label: 'accept 2 findings',
+    label: 'submit 3 decisions',
   });
-  assert.match(p, /--decision accept/);
-  assert.match(p, /CLOSED-NOT-RELEASED:jwildfire\/safety\.viz#45,ASSIGNEE-MISSING:jwildfire\/obot\.roadmap#9/);
+  assert.match(p, /--decision accept --findings CLOSED-NOT-RELEASED:jwildfire\/safety\.viz#45,ASSIGNEE-MISSING:jwildfire\/obot\.roadmap#9/);
+  assert.match(p, /--decision reject --findings NOISY-RULE:jwildfire\/obot\.roadmap#5/);
   assert.match(p, /--run-id local-abc123/);
-  assert.match(p, /\/ws\/obot\.roadmap/);
+  assert.match(p, /worktree add \.\.\/obot\.roadmap-worktrees\/audit-apply-local-abc123/);
+  assert.match(p, /pull --rebase/);
   assert.match(p, /never delete/i);
+  assert.match(p, /never force-push/i);
 });
 
 test('the page-supplied label is stripped to inert text before it reaches the prompt', () => {

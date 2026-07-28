@@ -41,25 +41,27 @@ Outputs: live → `<workspace>/.claude/session-hub/live.html` (open in Chrome fr
 The local half of the roadmap audit's no-token design (@jwildfire, 2026-07-27):
 the deployed audit page is read-only, and deciding happens here. A loopback
 server (port 4182, `127.0.0.1` only) that serves the live dashboard at `/`,
-builds the hub's audit page with `AUDIT_MODE=local` and serves it at `/audit`
-with ✓/✗ live, and — on click — spawns a local Claude Code agent
-(`claude --bg --permission-mode auto`, sibling identity `👯🤖 <date>
-audit-apply`) that runs `scripts/apply_audit_decision.mjs` in the hub checkout:
-fresh-audit re-validation, mechanical ops, judgment findings per
-`roadmap-audit-policy.md`, ledger committed and pushed. The page polls
-`/api/audit/state` and re-reads outcomes from `site/audit/decisions.json` — the
-#109 D7 contract, with the browser PAT replaced by the machine's own `gh` auth.
+builds the hub's audit page with `AUDIT_MODE=local` and serves it at `/audit`.
+There ✓/✗ **stage** decisions into a queue (toggle to unstage; survives
+reloads) and an explicit **submit** hands the batch to one spawned Claude Code
+agent (`claude --bg --permission-mode auto`, sibling identity `👯🤖 <date>
+audit-apply <token>`) that runs `scripts/apply_audit_decision.mjs` in its own
+hub worktree: fresh-audit re-validation, mechanical ops, judgment findings per
+`roadmap-audit-policy.md`, ledger committed and landed on main with a
+push-rebase retry. The page polls `/api/audit/state` and re-reads outcomes from
+`site/audit/decisions.json` — the #109 D7 contract, with the browser PAT
+replaced by the machine's own `gh` auth.
 
 ```bash
 node obot.agent/tools/session-hub/session-audit.mjs --open        # http://127.0.0.1:4182/audit
 node obot.agent/tools/session-hub/session-audit.mjs --dry-run     # log the spawn instead of launching it
 ```
 
-One decision runs at a time (the lane serializes, like the Actions lane it
-replaces for clicks); a second click while an agent is working gets a 409.
-Writes require a loopback `Origin` and JSON, the payload is finding ids only,
-and the server holds no credentials. The `audit-decision` issue remains the
-documented fallback lane for deciding without this server.
+Submits run in parallel — each agent owns a throwaway worktree, so nothing
+races the shared checkout, and the ledger merges by rebase, not by a server
+lock. Writes require a loopback `Origin` and JSON, the payload is finding ids
+only, and the server holds no credentials. The `audit-decision` issue remains
+the documented fallback lane for deciding without this server.
 
 ## Session state (`--emit-state`)
 
