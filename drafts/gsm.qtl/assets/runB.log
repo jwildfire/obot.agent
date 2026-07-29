@@ -1,0 +1,166 @@
+[INFO] Running 1 Workflows
+[INFO] Initializing `Report_report_qtl` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = Mapped_EXCLUSION: Passing lData$Mapped_EXCLUSION.
+[INFO] strQuery = SELECT * FROM df: No matching data found. Passing 'SELECT * FROM df' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 760 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 760x12 data.frame saved as `lData$qtl0001`.
+[INFO] Workflow Step 2 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = qtl0001: Passing lData$qtl0001.
+[INFO] strQuery = SELECT * FROM df WHERE Source != 'Neither': No matching data found. Passing 'SELECT * FROM df WHERE Source != 'Neither'' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 259 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 259x12 data.frame saved as `lData$qtl0001_num`.
+[INFO] Workflow Step 3 of 15: `dplyr::left_join`
+[INFO] Evaluating 3 parameter(s) for `dplyr::left_join`
+[INFO] x = Mapped_SUBJ: Passing lData$Mapped_SUBJ.
+[INFO] y = Mapped_STUDCOMP: Passing lData$Mapped_STUDCOMP.
+[INFO] by is of length 2: Parameter is a vector. Passing as is.
+[INFO] Calling `dplyr::left_join`
+[INFO] 760x18 data.frame saved as `lData$qtl0002_preprocess`.
+[INFO] Workflow Step 4 of 15: `dplyr::mutate`
+[INFO] Evaluating 2 parameter(s) for `dplyr::mutate`
+[INFO] .data = qtl0002_preprocess: Passing lData$qtl0002_preprocess.
+[INFO] compreas = rlang::expr(ifelse(is.na(.data[["compreas"]]), "Completed/Ongoing", .data[["compreas"]])): Parsed expression parameter.
+[INFO] Calling `dplyr::mutate`
+[INFO] 760x18 data.frame saved as `lData$qtl0002`.
+[INFO] Workflow Step 5 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = qtl0002: Passing lData$qtl0002.
+[INFO] strQuery = SELECT * FROM df WHERE compreas != 'Completed/Ongoing': No matching data found. Passing 'SELECT * FROM df WHERE compreas != 'Completed/Ongoing'' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 78 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 78x18 data.frame saved as `lData$qtl0002_num`.
+[INFO] Workflow Step 6 of 15: `list`
+[INFO] Evaluating 4 parameter(s) for `list`
+[INFO] qtl0001 = qtl0001: Passing lData$qtl0001.
+[INFO] qtl0001_num = qtl0001_num: Passing lData$qtl0001_num.
+[INFO] qtl0002 = qtl0002: Passing lData$qtl0002.
+[INFO] qtl0002_num = qtl0002_num: Passing lData$qtl0002_num.
+[INFO] Calling `list`
+[INFO] list of length 4 saved as `lData$reporting_listings`.
+[INFO] Workflow Step 7 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = Reporting_Results_Longitudinal: Passing lData$Reporting_Results_Longitudinal.
+[INFO] strQuery = SELECT *
+FROM df
+WHERE GroupLevel = 'Study'
+ORDER BY MetricID
+: No matching data found. Passing 'SELECT *
+FROM df
+WHERE GroupLevel = 'Study'
+ORDER BY MetricID
+' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 2 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 2x10 data.frame saved as `lData$all_reportingResults`.
+[INFO] Workflow Step 8 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = Reporting_Groups: Passing lData$Reporting_Groups.
+[INFO] strQuery = SELECT *
+FROM df
+WHERE GroupLevel IN ('Site', 'Study')
+: No matching data found. Passing 'SELECT *
+FROM df
+WHERE GroupLevel IN ('Site', 'Study')
+' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 1669 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 1669x4 data.frame saved as `lData$all_reportingGroups`.
+[INFO] Workflow Step 9 of 15: `pull`
+[INFO] Evaluating 2 parameter(s) for `pull`
+[INFO] .data = Reporting_Results_Longitudinal: Passing lData$Reporting_Results_Longitudinal.
+[INFO] var = SnapshotDate: No matching data found. Passing 'SnapshotDate' as a string.
+[INFO] Calling `pull`
+[INFO] double of length 2 saved as `lData$strSnapshotDate`.
+[INFO] Workflow Step 10 of 15: `max`
+[INFO] Evaluating 1 parameter(s) for `max`
+[INFO] ... = strSnapshotDate: Passing lData$strSnapshotDate.
+[INFO] Calling `max`
+[INFO] double of length 1 saved as `lData$strSnapshotDate`.
+[INFO] Workflow Step 11 of 15: `file.path`
+[INFO] Evaluating 2 parameter(s) for `file.path`
+[INFO] outputs = outputs: No matching data found. Passing 'outputs' as a string.
+[INFO] SnapshotDate = strSnapshotDate: Passing lData$strSnapshotDate.
+[INFO] Calling `file.path`
+[INFO] character of length 1 saved as `lData$strOutputDir`.
+[INFO] Workflow Step 12 of 15: `normalizePath`
+[INFO] Evaluating 1 parameter(s) for `normalizePath`
+[INFO] path = strOutputDir: Passing lData$strOutputDir.
+[INFO] Calling `normalizePath`
+[INFO] character of length 1 saved as `lData$strOutputDir`.
+[INFO] Workflow Step 13 of 15: `system.file`
+[INFO] Evaluating 2 parameter(s) for `system.file`
+[INFO] ... = report/Report_QTL.Rmd: No matching data found. Passing 'report/Report_QTL.Rmd' as a string.
+[INFO] package = gsm.qtl: No matching data found. Passing 'gsm.qtl' as a string.
+[INFO] Calling `system.file`
+[INFO] character of length 1 saved as `lData$strInputPath`.
+[INFO] Workflow Step 14 of 15: `list`
+[INFO] Evaluating 4 parameter(s) for `list`
+[INFO] dfResults = all_reportingResults: Passing lData$all_reportingResults.
+[INFO] dfMetrics = Reporting_Metrics: Passing lData$Reporting_Metrics.
+[INFO] dfGroups = all_reportingGroups: Passing lData$all_reportingGroups.
+[INFO] lListings = reporting_listings: Passing lData$reporting_listings.
+[INFO] Calling `list`
+[INFO] list of length 4 saved as `lData$lParams`.
+[INFO] Workflow Step 15 of 15: `gsm.kri::RenderRmd`
+[INFO] Evaluating 4 parameter(s) for `gsm.kri::RenderRmd`
+[INFO] lParams = lParams: Passing lData$lParams.
+[INFO] strOutputDir = strOutputDir: Passing lData$strOutputDir.
+[INFO] strOutputFile = ID: Passing lMeta$ID.
+[INFO] strInputPath = strInputPath: Passing lData$strInputPath.
+[INFO] Calling `gsm.kri::RenderRmd`
+You do not have permission to write to outputs/2012-03-29. Report will be saved
+to /var/folders/_9/_l3b4x016gjbd376c37kpp580000gn/T//RtmplwIX8B
+
+
+processing file: Report_QTL.Rmd
+1/10                                          
+2/10 [setup]                                  
+3/10                                          
+4/10 [QTL0001 Eligibility]                    
+5/10                                          
+6/10 [QTL0002 Premature Study Discontinuation]
+
+Quitting from Report_QTL.Rmd:57-78 [QTL0002 Premature Study Discontinuation]
+Error in pull(., !!enexpr(varGroupID)) : 
+Caused by error:
+! object 'invid' not found
+In addition: Warning message:
+In (function (path, winslash = "\\", mustWork = NA)  :
+  path[1]="outputs/2012-03-29": No such file or directory
+
+
+=== POST-MORTEM ===
+qtl0002_preprocess columns:
+ [1] "studyid"              "invid.x"              "country"             
+ [4] "subjid"               "subject_nsv"          "enrollyn"            
+ [7] "timeonstudy"          "firstparticipantdate" "firstdosedate"       
+[10] "timeontreatment"      "agerep"               "sex"                 
+[13] "race"                 "mincreated_dts.x"     "invid.y"             
+[16] "compyn"               "compreas"             "mincreated_dts.y"    
+
+'invid' present as a bare column? FALSE 
+
+compreas value counts after the shipped fill:
+
+                  Completed/Ongoing             Death Lost to Follow-Up 
+               70               682                 1                 2 
+ Withdrew Consent 
+                5 
+Error: strQuery must be a query
+Execution halted
