@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-07-29 06:50 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/64 on 2026-07-29 06:52 EDT -->
 <!-- GITHUB_PROPERTIES: Assignee: @me, Draft: true -->
 
 ## Summary
@@ -57,7 +57,7 @@ Filed from a direct ask: *"I want two new session commands /session-idea … and
 - **Install after merge, from the main clone** (not a worktree — the symlinks point at whatever copy they were made from): `obot.agent/scripts/session-aliases`. It writes `.claude/commands`, links the two new skills into `.claude/skills/`, and is idempotent. Nothing was installed into the live workspace from this branch.
 - New session commands are one command away from an alias: add `skills/session-foo/`, run `scripts/session-aliases`, and `/s-foo` exists. `--check` catches the case where someone forgets.
 - **Try `/session-reviews` on the current queue** — there are four PRs waiting on you right now, and this branch makes five.
-- Merge is your gate as always; when you give it, `obot.agent/scripts/obot-merge 63 -R jwildfire/obot.agent` (`--check` first).
+- Merge is your gate as always; when you give it, `obot.agent/scripts/obot-merge 64 -R jwildfire/obot.agent` (`--check` first).
 
 ---
 
