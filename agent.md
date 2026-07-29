@@ -15,8 +15,14 @@ for the relevant skill in `skills/`:
 
 - `session-init` — open: sweep the evidence, persist the prioritized list
 - `session-note` / `session-todo` / `session-update` / `session-scaffold` — mid-session: notes, the running list, additions, scaffold candidates
+- `session-idea` — file an idea to the hub's Ideas queue for triage (capture; `session-inbox` triages)
+- `session-reviews` — spawn a reviewer that walks @jwildfire through the PRs waiting on his decision
 - `session-dashboard` — open the live session dashboard in Chrome (starts the watch loop if needed)
 - `session-wrapup` — close: collect → discuss → apply, ending in the diary entry + session report
+
+Every `session-*` skill answers to a short `/s-*` alias as well — `/s-init`,
+`/s-todo`, `/s-idea`, `/s-reviews`, … Both forms load the same skill; see
+[`commands/`](commands/) and [`scripts/session-aliases`](scripts/session-aliases).
 
 **Tools**
 

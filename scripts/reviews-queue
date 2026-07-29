@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""reviews-queue — the open PRs that need @jwildfire's decision, classified.
+
+Read-only, no LLM. Feeds the `session-reviews` skill: one sweep across every repo
+he owns, filtered down to what is actually worth his attention and split by who
+is blocking.
+
+Usage:
+  reviews-queue                  # the table
+  reviews-queue --json           # one JSON object per PR, for the reviewing agent
+  reviews-queue --all            # skip the staleness filter (include dormant repos)
+  reviews-queue --owner NAME     # default: jwildfire
+  reviews-queue --stale-days N   # default: 60
+
+Buckets:
+  you     — mergeable, checks green, nothing sent back: your call
+  waiting — checks still running; ask again in a few minutes
+  agent   — conflicts, failing checks, or changes you already requested;
+            an agent has work to do before this is worth your time
+
+Two deliberate scoping choices, both measured against the live queue (2026-07-29):
+
+  - DRAFTS ARE INCLUDED. In this workspace agents ship `gh pr create --draft` by
+    default, so draft is the normal shipping state, not a signal of unreadiness —
+    4 of the 5 live program PRs were drafts, including ones already on his review
+    list. `obot-merge` refuses drafts, so the walkthrough marks a PR ready
+    (`gh pr ready`) as part of executing an approval.
+  - STALENESS, NOT AN ALLOWLIST. Filtering on last-updated instead of a
+    hand-maintained repo list drops the four 2021-2022 dependabot PRs on the
+    dormant forest-plot fork, and needs no list that rots. Dependency-bot PRs are
+    dropped by author as well.
+"""
+
+import argparse
+import datetime
+import json
+import subprocess
+import sys
+
+FIELDS = (
+    "number,title,isDraft,mergeable,mergeStateStatus,baseRefName,reviewDecision,"
+    "statusCheckRollup,additions,deletions,changedFiles,url,author,updatedAt,createdAt,body"
+)
+BOTS = {"dependabot[bot]", "renovate[bot]", "github-actions[bot]"}
+FAIL = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR"}
+PENDING = {"PENDING", "IN_PROGRESS", "QUEUED", "WAITING", "REQUESTED"}
+BUCKET_ORDER = {"you": 0, "waiting": 1, "agent": 2}
+BUCKET_LABEL = {
+    "you": "AWAITING YOU",
+    "waiting": "CHECKS RUNNING",
+    "agent": "BACK TO THE AGENT",
+}
+SKIP_PREFIXES = ("#", "<!--", "---", "|", "```", "> ")
+
+
+def gh(args):
+    out = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    return json.loads(out.stdout) if out.stdout.strip() else None
+
+
+def lead_line(body):
+    """First real sentence of the PR body — the obot PR template opens with a summary."""
+    for line in (body or "").splitlines():
+        text = line.strip()
+        if not text or text.startswith(SKIP_PREFIXES):
+            continue
+        if text.startswith("This PR was drafted") or text.startswith("Closes #"):
+            continue
+        return text
+    return "(no summary in the body)"
+
+
+def classify(pr):
+    checks = pr.get("statusCheckRollup") or []
+    states = [c.get("conclusion") or c.get("state") for c in checks]
+    failing = [s for s in states if s in FAIL]
+    pending = [s for s in states if s in PENDING]
+
+    if pr["mergeable"] == "CONFLICTING":
+        return "agent", "conflicts with the base branch"
+    if failing:
+        return "agent", f"{len(failing)} failing check(s)"
+    if pr.get("reviewDecision") == "CHANGES_REQUESTED":
+        return "agent", "changes you requested are unaddressed"
+    if pending:
+        return "waiting", f"{len(pending)} check(s) still running"
+    return "you", "mergeable, checks green"
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--json", action="store_true", dest="as_json")
+    ap.add_argument("--all", action="store_true")
+    ap.add_argument("--owner", default="jwildfire")
+    ap.add_argument("--stale-days", type=int, default=60)
+    ap.add_argument("-h", "--help", action="store_true", dest="want_help")
+    args = ap.parse_args()
+
+    if args.want_help:
+        print(__doc__.strip())
+        return 0
+
+    found = gh([
+        "search", "prs", "--owner", args.owner, "--state", "open", "--limit", "100",
+        "--json", "number,repository,author,updatedAt",
+    ])
+    if found is None:
+        print("reviews-queue: gh search failed — is `gh` authenticated?", file=sys.stderr)
+        return 1
+
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=args.stale_days)
+    rows = []
+    for pr in found:
+        if pr["author"]["login"] in BOTS:
+            continue
+        if not args.all:
+            updated = datetime.datetime.fromisoformat(pr["updatedAt"].replace("Z", "+00:00"))
+            if updated < cutoff:
+                continue
+
+        repo = pr["repository"]["nameWithOwner"]
+        detail = gh(["pr", "view", str(pr["number"]), "-R", repo, "--json", FIELDS])
+        if detail is None:
+            print(f"reviews-queue: could not read {repo}#{pr['number']}", file=sys.stderr)
+            continue
+
+        bucket, why = classify(detail)
+        rows.append({
+            "bucket": bucket,
+            "why": why,
+            "repo": repo,
+            "number": detail["number"],
+            "title": detail["title"],
+            "url": detail["url"],
+            "draft": detail["isDraft"],
+            "base": detail["baseRefName"],
+            "author": detail["author"]["login"],
+            "created": detail["createdAt"][:10],
+            "updated": detail["updatedAt"][:10],
+            "size": "+{}/-{} in {} files".format(
+                detail["additions"], detail["deletions"], detail["changedFiles"]
+            ),
+            "lead": lead_line(detail.get("body")),
+        })
+
+    rows.sort(key=lambda r: (BUCKET_ORDER[r["bucket"]], r["updated"]))
+
+    if args.as_json:
+        for row in rows:
+            print(json.dumps(row))
+        return 0
+
+    if not rows:
+        print("nothing open that needs a decision")
+        return 0
+
+    current = None
+    for row in rows:
+        if row["bucket"] != current:
+            current = row["bucket"]
+            print("\n{}".format(BUCKET_LABEL[current]))
+        flag = " [draft]" if row["draft"] else ""
+        print("  {}#{}{} -> {}  ({})".format(
+            row["repo"], row["number"], flag, row["base"], row["why"]))
+        print("    {}".format(row["title"]))
+        print("    {} · by {} · updated {}".format(row["size"], row["author"], row["updated"]))
+        print("    {}".format(row["url"]))
+    print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -12,6 +12,10 @@ Discussions** on the hub (typed directly, or filed by the Siri → Reminders →
 only place tokens are spent — one bounded pass per session, not a persistent
 "ideas" session.
 
+The third capture door is [`session-idea`](../session-idea/SKILL.md), for an idea
+that surfaces mid-session; it posts the same shape, so a thread reads the same
+here whichever door it came through.
+
 The queue's front door for @jwildfire: the pinned explainer at
 [discussion #47](https://github.com/jwildfire/obot.roadmap/discussions/47).
 
