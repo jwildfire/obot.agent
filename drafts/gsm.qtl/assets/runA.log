@@ -1,0 +1,94 @@
+attached packages: .GlobalEnv package:stats package:graphics package:grDevices package:utils package:datasets package:methods Autoloads package:base 
+
+[INFO] Running 1 Workflows
+[INFO] Initializing `Report_report_qtl` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = Mapped_EXCLUSION: Passing lData$Mapped_EXCLUSION.
+[INFO] strQuery = SELECT * FROM df: No matching data found. Passing 'SELECT * FROM df' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 760 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 760x12 data.frame saved as `lData$qtl0001`.
+[INFO] Workflow Step 2 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = qtl0001: Passing lData$qtl0001.
+[INFO] strQuery = SELECT * FROM df WHERE Source != 'Neither': No matching data found. Passing 'SELECT * FROM df WHERE Source != 'Neither'' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 259 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 259x12 data.frame saved as `lData$qtl0001_num`.
+[INFO] Workflow Step 3 of 15: `dplyr::left_join`
+[INFO] Evaluating 3 parameter(s) for `dplyr::left_join`
+[INFO] x = Mapped_SUBJ: Passing lData$Mapped_SUBJ.
+[INFO] y = Mapped_STUDCOMP: Passing lData$Mapped_STUDCOMP.
+[INFO] by is of length 2: Parameter is a vector. Passing as is.
+[INFO] Calling `dplyr::left_join`
+[INFO] 760x18 data.frame saved as `lData$qtl0002_preprocess`.
+[INFO] Workflow Step 4 of 15: `dplyr::mutate`
+[INFO] Evaluating 2 parameter(s) for `dplyr::mutate`
+[INFO] .data = qtl0002_preprocess: Passing lData$qtl0002_preprocess.
+[INFO] compreas = rlang::expr(ifelse(is.na(.data[["compreas"]]), "Completed/Ongoing", .data[["compreas"]])): Parsed expression parameter.
+[INFO] Calling `dplyr::mutate`
+[INFO] 760x18 data.frame saved as `lData$qtl0002`.
+[INFO] Workflow Step 5 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = qtl0002: Passing lData$qtl0002.
+[INFO] strQuery = SELECT * FROM df WHERE compreas != 'Completed/Ongoing': No matching data found. Passing 'SELECT * FROM df WHERE compreas != 'Completed/Ongoing'' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 78 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 78x18 data.frame saved as `lData$qtl0002_num`.
+[INFO] Workflow Step 6 of 15: `list`
+[INFO] Evaluating 4 parameter(s) for `list`
+[INFO] qtl0001 = qtl0001: Passing lData$qtl0001.
+[INFO] qtl0001_num = qtl0001_num: Passing lData$qtl0001_num.
+[INFO] qtl0002 = qtl0002: Passing lData$qtl0002.
+[INFO] qtl0002_num = qtl0002_num: Passing lData$qtl0002_num.
+[INFO] Calling `list`
+[INFO] list of length 4 saved as `lData$reporting_listings`.
+[INFO] Workflow Step 7 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = Reporting_Results_Longitudinal: Passing lData$Reporting_Results_Longitudinal.
+[INFO] strQuery = SELECT *
+FROM df
+WHERE GroupLevel = 'Study'
+ORDER BY MetricID
+: No matching data found. Passing 'SELECT *
+FROM df
+WHERE GroupLevel = 'Study'
+ORDER BY MetricID
+' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 2 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 2x10 data.frame saved as `lData$all_reportingResults`.
+[INFO] Workflow Step 8 of 15: `workr::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `workr::RunQuery`
+[INFO] df = Reporting_Groups: Passing lData$Reporting_Groups.
+[INFO] strQuery = SELECT *
+FROM df
+WHERE GroupLevel IN ('Site', 'Study')
+: No matching data found. Passing 'SELECT *
+FROM df
+WHERE GroupLevel IN ('Site', 'Study')
+' as a string.
+[INFO] Calling `workr::RunQuery`
+[INFO] Creating a new temporary DuckDB connection.
+[INFO] SQL Query complete: 1669 rows returned.
+[INFO] Disconnected from temporary DuckDB connection.
+[INFO] 1669x4 data.frame saved as `lData$all_reportingGroups`.
+[INFO] Workflow Step 9 of 15: `pull`
+[INFO] Evaluating 2 parameter(s) for `pull`
+[INFO] .data = Reporting_Results_Longitudinal: Passing lData$Reporting_Results_Longitudinal.
+[INFO] var = SnapshotDate: No matching data found. Passing 'SnapshotDate' as a string.
+[INFO] Calling `pull`
+Error in GetStrFunctionIfNamespaced(lStep$name) : 
+  Function 'pull' not found.
+Calls: <Anonymous> ... RunWorkflow -> RunStep -> do.call -> GetStrFunctionIfNamespaced
+Execution halted

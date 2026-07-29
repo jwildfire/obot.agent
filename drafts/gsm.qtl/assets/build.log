@@ -1,0 +1,309 @@
+mapping workflows: ENROLL, IE, PD, STUDCOMP, SUBJ, EXCLUSION, COUNTRY, SITE, STUDY 
+ℹ Ingesting data for ENROLL.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1000 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for IE.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 254 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for PD.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 3000 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for STUDCOMP.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 100 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for SUBJ.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1000 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for IE.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 254 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for ENROLL.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1000 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for PD.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 3000 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for SUBJ.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1000 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for SITE.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 150 rows returned.
+Disconnected from temporary DuckDB connection.
+ℹ Ingesting data for STUDY.
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] Running 9 Workflows
+[INFO] Initializing `Mapped_ENROLL` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 1: `=`
+[INFO] Evaluating 2 parameter(s) for `=`
+[INFO] lhs = Mapped_ENROLL: No matching data found. Passing 'Mapped_ENROLL' as a string.
+[INFO] rhs = Raw_ENROLL: Passing lData$Raw_ENROLL.
+[INFO] Calling `=`
+[INFO] 1000x7 data.frame saved as `lData$Mapped_ENROLL`.
+[INFO] Returning results from final step: 1000x7 data.frame`.
+[INFO] Completed `Mapped_ENROLL` Workflow
+[INFO] Initializing `Mapped_IE` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 3: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Raw_IE: Passing lData$Raw_IE.
+[INFO] strQuery = SELECT *, CASE WHEN ietestcd ILIKE '%EXC%' THEN 'EX' WHEN ietestcd ILIKE '%INC%' THEN 'IN' END as iecat_custom FROM df: No matching data found. Passing 'SELECT *, CASE WHEN ietestcd ILIKE '%EXC%' THEN 'EX' WHEN ietestcd ILIKE '%INC%' THEN 'IN' END as iecat_custom FROM df' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 254 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 254x8 data.frame saved as `lData$iecat_custom`.
+[INFO] Workflow Step 2 of 3: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = iecat_custom: Passing lData$iecat_custom.
+[INFO] strQuery = SELECT * , CASE WHEN iecat_custom = 'EX' AND ieorres = 'Yes' then 'Y' WHEN iecat_custom = 'IN' AND ieorres = 'No' then 'Y' END as ie_violation FROM df: No matching data found. Passing 'SELECT * , CASE WHEN iecat_custom = 'EX' AND ieorres = 'Yes' then 'Y' WHEN iecat_custom = 'IN' AND ieorres = 'No' then 'Y' END as ie_violation FROM df' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 254 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 254x9 data.frame saved as `lData$ie_violation`.
+[INFO] Workflow Step 3 of 3: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = ie_violation: Passing lData$ie_violation.
+[INFO] strQuery = SELECT * FROM df WHERE subjid IS NOT NULL AND ie_violation = 'Y': No matching data found. Passing 'SELECT * FROM df WHERE subjid IS NOT NULL AND ie_violation = 'Y'' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 116 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 116x9 data.frame saved as `lData$Mapped_IE`.
+[INFO] Returning results from final step: 116x9 data.frame`.
+[INFO] Completed `Mapped_IE` Workflow
+[INFO] Initializing `Mapped_PD` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 1: `=`
+[INFO] Evaluating 2 parameter(s) for `=`
+[INFO] lhs = Mapped_PD: No matching data found. Passing 'Mapped_PD' as a string.
+[INFO] rhs = Raw_PD: Passing lData$Raw_PD.
+[INFO] Calling `=`
+[INFO] 3000x6 data.frame saved as `lData$Mapped_PD`.
+[INFO] Returning results from final step: 3000x6 data.frame`.
+[INFO] Completed `Mapped_PD` Workflow
+[INFO] Initializing `Mapped_STUDCOMP` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 1: `=`
+[INFO] Evaluating 2 parameter(s) for `=`
+[INFO] lhs = Mapped_STUDCOMP: No matching data found. Passing 'Mapped_STUDCOMP' as a string.
+[INFO] rhs = Raw_STUDCOMP: Passing lData$Raw_STUDCOMP.
+[INFO] Calling `=`
+[INFO] 100x6 data.frame saved as `lData$Mapped_STUDCOMP`.
+[INFO] Returning results from final step: 100x6 data.frame`.
+[INFO] Completed `Mapped_STUDCOMP` Workflow
+[INFO] Initializing `Mapped_SUBJ` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 1: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Raw_SUBJ: Passing lData$Raw_SUBJ.
+[INFO] strQuery = SELECT * FROM df WHERE enrollyn == 'Y': No matching data found. Passing 'SELECT * FROM df WHERE enrollyn == 'Y'' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 760 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 760x14 data.frame saved as `lData$Mapped_SUBJ`.
+[INFO] Returning results from final step: 760x14 data.frame`.
+[INFO] Completed `Mapped_SUBJ` Workflow
+[INFO] Initializing `Mapped_EXCLUSION` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 5: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Mapped_IE: Passing lData$Mapped_IE.
+[INFO] strQuery = SELECT subjid, studyid, array_to_string(array_agg(ietestcd), ',') AS ietestcd_concat, ie_violation FROM df GROUP BY studyid, subjid, ie_violation: No matching data found. Passing 'SELECT subjid, studyid, array_to_string(array_agg(ietestcd), ',') AS ietestcd_concat, ie_violation FROM df GROUP BY studyid, subjid, ie_violation' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 116 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 116x4 data.frame saved as `lData$pivot_ie`.
+[INFO] Workflow Step 2 of 5: `dplyr::left_join`
+[INFO] Evaluating 3 parameter(s) for `dplyr::left_join`
+[INFO] x = Mapped_ENROLL: Passing lData$Mapped_ENROLL.
+[INFO] y = pivot_ie: Passing lData$pivot_ie.
+[INFO] by is of length 2: Parameter is a vector. Passing as is.
+[INFO] Calling `dplyr::left_join`
+[INFO] 1000x9 data.frame saved as `lData$add_ie`.
+[INFO] Workflow Step 3 of 5: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Mapped_PD: Passing lData$Mapped_PD.
+[INFO] strQuery = SELECT studyid, subjid, array_to_string(array_agg(dvdtm), ';;;') AS dvdtm, array_to_string(array_agg(dvterm), ';;;') AS eligibility_criteria FROM df WHERE dvdecod IN ('Exclusion Criteria', 'Inclusion Criteria') GROUP BY studyid, subjid: No matching data found. Passing 'SELECT studyid, subjid, array_to_string(array_agg(dvdtm), ';;;') AS dvdtm, array_to_string(array_agg(dvterm), ';;;') AS eligibility_criteria FROM df WHERE dvdecod IN ('Exclusion Criteria', 'Inclusion Criteria') GROUP BY studyid, subjid' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 231 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 231x4 data.frame saved as `lData$pivot_pd`.
+[INFO] Workflow Step 4 of 5: `dplyr::left_join`
+[INFO] Evaluating 3 parameter(s) for `dplyr::left_join`
+[INFO] x = add_ie: Passing lData$add_ie.
+[INFO] y = pivot_pd: Passing lData$pivot_pd.
+[INFO] by is of length 2: Parameter is a vector. Passing as is.
+[INFO] Calling `dplyr::left_join`
+[INFO] 1000x11 data.frame saved as `lData$premapped`.
+[INFO] Workflow Step 5 of 5: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = premapped: Passing lData$premapped.
+[INFO] strQuery = SELECT *, CASE WHEN ie_violation = 'Y' AND eligibility_criteria IS NULL THEN 'EDC I/E only' WHEN ie_violation IS NULL AND eligibility_criteria IS NOT NULL THEN 'Eligibility PD only' WHEN ie_violation = 'Y' AND eligibility_criteria IS NOT NULL THEN 'Ineligible, Both Criteria' ELSE 'Neither' END AS Source  FROM df WHERE enrollyn = 'Y': No matching data found. Passing 'SELECT *, CASE WHEN ie_violation = 'Y' AND eligibility_criteria IS NULL THEN 'EDC I/E only' WHEN ie_violation IS NULL AND eligibility_criteria IS NOT NULL THEN 'Eligibility PD only' WHEN ie_violation = 'Y' AND eligibility_criteria IS NOT NULL THEN 'Ineligible, Both Criteria' ELSE 'Neither' END AS Source  FROM df WHERE enrollyn = 'Y'' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 760 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 760x12 data.frame saved as `lData$Mapped_EXCLUSION`.
+[INFO] Returning results from final step: 760x12 data.frame`.
+[INFO] Completed `Mapped_EXCLUSION` Workflow
+[INFO] Initializing `Mapped_COUNTRY` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 2: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Mapped_SUBJ: Passing lData$Mapped_SUBJ.
+[INFO] strQuery = SELECT country as GroupID, COUNT(DISTINCT subjid) as ParticipantCount, COUNT(DISTINCT invid) as SiteCount FROM df GROUP BY country: No matching data found. Passing 'SELECT country as GroupID, COUNT(DISTINCT subjid) as ParticipantCount, COUNT(DISTINCT invid) as SiteCount FROM df GROUP BY country' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 3 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 3x3 data.frame saved as `lData$Temp_CountryCountsWide`.
+[INFO] Workflow Step 2 of 2: `gsm.mapping::MakeLongMeta`
+[INFO] Evaluating 2 parameter(s) for `gsm.mapping::MakeLongMeta`
+[INFO] data = Temp_CountryCountsWide: Passing lData$Temp_CountryCountsWide.
+[INFO] strGroupLevel = Country: No matching data found. Passing 'Country' as a string.
+[INFO] Calling `gsm.mapping::MakeLongMeta`
+[INFO] 6x4 data.frame saved as `lData$Mapped_COUNTRY`.
+[INFO] Returning results from final step: 6x4 data.frame`.
+[INFO] Completed `Mapped_COUNTRY` Workflow
+[INFO] Initializing `Mapped_SITE` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 5: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Raw_SITE: Passing lData$Raw_SITE.
+[INFO] strQuery = SELECT invid as GroupID, * FROM df: No matching data found. Passing 'SELECT invid as GroupID, * FROM df' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 150 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 150x10 data.frame saved as `lData$Temp_CTMSSiteWide`.
+[INFO] Workflow Step 2 of 5: `gsm.mapping::MakeLongMeta`
+[INFO] Evaluating 2 parameter(s) for `gsm.mapping::MakeLongMeta`
+[INFO] data = Temp_CTMSSiteWide: Passing lData$Temp_CTMSSiteWide.
+[INFO] strGroupLevel = Site: No matching data found. Passing 'Site' as a string.
+[INFO] Calling `gsm.mapping::MakeLongMeta`
+[INFO] 1350x4 data.frame saved as `lData$Temp_CTMSSite`.
+[INFO] Workflow Step 3 of 5: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Mapped_SUBJ: Passing lData$Mapped_SUBJ.
+[INFO] strQuery = SELECT invid as GroupID, COUNT(DISTINCT subjid) as ParticipantCount, COUNT(DISTINCT invid) as SiteCount FROM df GROUP BY invid: No matching data found. Passing 'SELECT invid as GroupID, COUNT(DISTINCT subjid) as ParticipantCount, COUNT(DISTINCT invid) as SiteCount FROM df GROUP BY invid' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 148 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 148x3 data.frame saved as `lData$Temp_SiteCountsWide`.
+[INFO] Workflow Step 4 of 5: `gsm.mapping::MakeLongMeta`
+[INFO] Evaluating 2 parameter(s) for `gsm.mapping::MakeLongMeta`
+[INFO] data = Temp_SiteCountsWide: Passing lData$Temp_SiteCountsWide.
+[INFO] strGroupLevel = Site: No matching data found. Passing 'Site' as a string.
+[INFO] Calling `gsm.mapping::MakeLongMeta`
+[INFO] 296x4 data.frame saved as `lData$Temp_SiteCounts`.
+[INFO] Workflow Step 5 of 5: `dplyr::bind_rows`
+[INFO] Evaluating 2 parameter(s) for `dplyr::bind_rows`
+[INFO] Temp_CTMSSite = Temp_CTMSSite: Passing lData$Temp_CTMSSite.
+[INFO] Temp_SiteCounts = Temp_SiteCounts: Passing lData$Temp_SiteCounts.
+[INFO] Calling `dplyr::bind_rows`
+[INFO] 1646x4 data.frame saved as `lData$Mapped_SITE`.
+[INFO] Returning results from final step: 1646x4 data.frame`.
+[INFO] Completed `Mapped_SITE` Workflow
+[INFO] Initializing `Mapped_STUDY` Workflow
+[INFO] Checking data against spec
+[INFO] Workflow Step 1 of 9: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Raw_STUDY: Passing lData$Raw_STUDY.
+[INFO] strQuery = SELECT studyid as GroupID, * FROM df: No matching data found. Passing 'SELECT studyid as GroupID, * FROM df' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 1x16 data.frame saved as `lData$Temp_CTMSStudyWide`.
+[INFO] Workflow Step 2 of 9: `gsm.mapping::MakeLongMeta`
+[INFO] Evaluating 2 parameter(s) for `gsm.mapping::MakeLongMeta`
+[INFO] data = Temp_CTMSStudyWide: Passing lData$Temp_CTMSStudyWide.
+[INFO] strGroupLevel = Study: No matching data found. Passing 'Study' as a string.
+[INFO] Calling `gsm.mapping::MakeLongMeta`
+[INFO] 15x4 data.frame saved as `lData$Temp_CTMSStudy`.
+[INFO] Workflow Step 3 of 9: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Raw_STUDY: Passing lData$Raw_STUDY.
+[INFO] strQuery = SELECT studyid as GroupID, num_plan_site as SiteTarget, num_plan_subj as ParticipantTarget FROM df: No matching data found. Passing 'SELECT studyid as GroupID, num_plan_site as SiteTarget, num_plan_subj as ParticipantTarget FROM df' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 1x3 data.frame saved as `lData$Temp_CTMSplanned`.
+[INFO] Workflow Step 4 of 9: `gsm.core::RunQuery`
+[INFO] Evaluating 2 parameter(s) for `gsm.core::RunQuery`
+[INFO] df = Raw_SUBJ: Passing lData$Raw_SUBJ.
+[INFO] strQuery = SELECT studyid as GroupID, COUNT(DISTINCT subjid) as ParticipantCount, COUNT(DISTINCT invid) as SiteCount FROM df WHERE enrollyn == 'Y' GROUP BY studyid: No matching data found. Passing 'SELECT studyid as GroupID, COUNT(DISTINCT subjid) as ParticipantCount, COUNT(DISTINCT invid) as SiteCount FROM df WHERE enrollyn == 'Y' GROUP BY studyid' as a string.
+[INFO] Calling `gsm.core::RunQuery`
+Creating a new temporary DuckDB connection.
+✔ SQL Query complete: 1 rows returned.
+Disconnected from temporary DuckDB connection.
+[INFO] 1x3 data.frame saved as `lData$Temp_StudyCountsWide`.
+[INFO] Workflow Step 5 of 9: `dplyr::left_join`
+[INFO] Evaluating 3 parameter(s) for `dplyr::left_join`
+[INFO] x = Temp_CTMSplanned: Passing lData$Temp_CTMSplanned.
+[INFO] y = Temp_StudyCountsWide: Passing lData$Temp_StudyCountsWide.
+[INFO] by = GroupID: No matching data found. Passing 'GroupID' as a string.
+[INFO] Calling `dplyr::left_join`
+[INFO] 1x5 data.frame saved as `lData$Temp_CountTargetsWide`.
+[INFO] Workflow Step 6 of 9: `gsm.mapping::CalculatePercentage`
+[INFO] Evaluating 5 parameter(s) for `gsm.mapping::CalculatePercentage`
+[INFO] data = Temp_CountTargetsWide: Passing lData$Temp_CountTargetsWide.
+[INFO] strCurrentCol = SiteCount: No matching data found. Passing 'SiteCount' as a string.
+[INFO] strTargetCol = SiteTarget: No matching data found. Passing 'SiteTarget' as a string.
+[INFO] strPercVal = PercentSitesActivated: No matching data found. Passing 'PercentSitesActivated' as a string.
+[INFO] strPercStrVal = SiteActivation: No matching data found. Passing 'SiteActivation' as a string.
+[INFO] Calling `gsm.mapping::CalculatePercentage`
+[INFO] 1x7 data.frame saved as `lData$Temp_CountTargetsWide_addsite`.
+[INFO] Workflow Step 7 of 9: `gsm.mapping::CalculatePercentage`
+[INFO] Evaluating 5 parameter(s) for `gsm.mapping::CalculatePercentage`
+[INFO] data = Temp_CountTargetsWide_addsite: Passing lData$Temp_CountTargetsWide_addsite.
+[INFO] strCurrentCol = ParticipantCount: No matching data found. Passing 'ParticipantCount' as a string.
+[INFO] strTargetCol = ParticipantTarget: No matching data found. Passing 'ParticipantTarget' as a string.
+[INFO] strPercVal = PercentParticipantsEnrolled: No matching data found. Passing 'PercentParticipantsEnrolled' as a string.
+[INFO] strPercStrVal = ParticipantEnrollment: No matching data found. Passing 'ParticipantEnrollment' as a string.
+[INFO] Calling `gsm.mapping::CalculatePercentage`
+[INFO] 1x9 data.frame saved as `lData$Temp_CountTargetsWide_addsitepts`.
+[INFO] Workflow Step 8 of 9: `gsm.mapping::MakeLongMeta`
+[INFO] Evaluating 2 parameter(s) for `gsm.mapping::MakeLongMeta`
+[INFO] data = Temp_CountTargetsWide_addsitepts: Passing lData$Temp_CountTargetsWide_addsitepts.
+[INFO] strGroupLevel = Study: No matching data found. Passing 'Study' as a string.
+[INFO] Calling `gsm.mapping::MakeLongMeta`
+[INFO] 8x4 data.frame saved as `lData$Temp_CountTargetsPercs`.
+[INFO] Workflow Step 9 of 9: `dplyr::bind_rows`
+[INFO] Evaluating 2 parameter(s) for `dplyr::bind_rows`
+[INFO] Temp_CTMSStudy = Temp_CTMSStudy: Passing lData$Temp_CTMSStudy.
+[INFO] Temp_CountTargetsPercs = Temp_CountTargetsPercs: Passing lData$Temp_CountTargetsPercs.
+[INFO] Calling `dplyr::bind_rows`
+[INFO] 23x4 data.frame saved as `lData$Mapped_STUDY`.
+[INFO] Returning results from final step: 23x4 data.frame`.
+[INFO] Completed `Mapped_STUDY` Workflow
+
+mapped domains: Mapped_ENROLL, Mapped_IE, Mapped_PD, Mapped_STUDCOMP, Mapped_SUBJ, Mapped_EXCLUSION, Mapped_COUNTRY, Mapped_SITE, Mapped_STUDY 
+
+Mapped_SUBJ cols: studyid, invid, country, subjid, subject_nsv, enrollyn, timeonstudy, firstparticipantdate, firstdosedate, timeontreatment, agerep, sex, race, mincreated_dts 
+Mapped_STUDCOMP cols: studyid, invid, subjid, compyn, compreas, mincreated_dts 
+Mapped_EXCLUSION cols: studyid, invid, country, subjid, subjectid, enrollyn, enroll_dt, ietestcd_concat, ie_violation, dvdtm, eligibility_criteria, Source 
+
+compreas table:
+
+                              Death Lost to Follow-Up  Withdrew Consent 
+               87                 1                 5                 7 
