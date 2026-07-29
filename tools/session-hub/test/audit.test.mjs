@@ -71,7 +71,7 @@ test('agentPrompt runs one apply per entry, isolates in a worktree, and lands wi
   assert.match(p, /--decision accept --findings CLOSED-NOT-RELEASED:jwildfire\/safety\.viz#45,ASSIGNEE-MISSING:jwildfire\/obot\.roadmap#9/);
   assert.match(p, /--decision reject --findings NOISY-RULE:jwildfire\/obot\.roadmap#5/);
   assert.match(p, /--run-id local-abc123/);
-  assert.match(p, /worktree add \.\.\/obot\.roadmap-worktrees\/audit-apply-local-abc123/);
+  assert.match(p, /worktree add \.claude\/worktrees\/audit-apply-local-abc123/);
   assert.match(p, /pull --rebase/);
   assert.match(p, /never delete/i);
   assert.match(p, /never force-push/i);

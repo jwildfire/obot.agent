@@ -7,9 +7,10 @@ This repo is an **overlay** on the
 in the obot2 workspace). gsm.agent's AGENTS.md conventions — drafts, attribution,
 approval gates, worktrees, TDD — apply here **in full**. This file adds only the obot
 program layer; it does not restate what upstream owns, and where the two appear to
-conflict, upstream wins unless the divergence is documented explicitly. The one
-documented divergence is commit attribution mechanics — see
-[`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md).
+conflict, upstream wins unless the divergence is documented explicitly. The two
+documented divergences are commit attribution mechanics — see
+[`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md) — and worktree
+location, below.
 
 The tiers of agent execution used in this program (*session* / *spawned agent* /
 *subagent*) are defined in [`docs/terminology.md`](docs/terminology.md), and which tier may
@@ -25,6 +26,34 @@ sit in the lead's response path is set by
 - Read it before touching any session skill, command file, or briefing template. This
   file deliberately does not restate its clauses, so there is only ever one copy to keep
   current.
+
+## Worktree location (documented divergence)
+
+Upstream's Parallel Worktree Convention places linked worktrees in a sibling
+`../{repo}-worktrees/` directory. In this program, place them **inside the repo** at
+`{repo}/.claude/worktrees/{branch}` instead:
+
+```bash
+# From the repo root; base off the repo's integration branch as upstream directs
+git fetch origin
+git worktree add .claude/worktrees/{branch} -b {branch} origin/{base}
+# Once per repo, keep git status clean (covers all current and future worktrees):
+grep -qxF '.claude/worktrees/' .git/info/exclude 2>/dev/null || echo '.claude/worktrees/' >> .git/info/exclude
+```
+
+**Why:** Claude Code auto-approves worktrees under `.claude/worktrees/` and treats any
+other location as a "permission-root relocation" that requires a manual click from
+@jwildfire — which stalls every unattended session that isolates work the upstream way.
+In an interactive Claude Code session, prefer the built-in EnterWorktree tool (it
+creates worktrees under `.claude/worktrees/` automatically); the manual commands above
+are for scripted lanes and spawned agents.
+
+Everything else in the upstream convention still applies: one branch per worktree, all
+commands run from inside the worktree, push and `gh pr create` from the worktree, and
+cleanup after merge (`git worktree remove .claude/worktrees/{branch}` from the repo
+root, then delete the branch). Do not remove other agents' in-flight worktrees, in
+either layout. Repo-wide searches from the main checkout may want
+`--exclude-dir=.claude` now that worktrees live inside the repo.
 
 ## Mission
 
