@@ -123,6 +123,30 @@ fixes mechanically no-approval-needed, but they are applied in step 6 — after
 the checkpoint. Anything involving deleting or closing what isn't verifiably
 done needs explicit approval: raise it at the checkpoint, never assume it.
 
+**Blockers and risks get issues, not just prose** (@jwildfire, 2026-07-29). A risk
+named only in a diary entry is a risk nobody is tracking — the entry scrolls off
+the news page and the concern goes with it. So for every item heading into the
+entry's `## Blockers / risks` section, decide: is it **actionable** — is there
+something a future session or @jwildfire could actually do about it? If yes, it
+gets a tracking issue. Purely descriptive context (a constraint that simply *is*,
+with no action available) stays prose.
+
+File them **as obotclaw**, in the repo that owns the fix (the hub for
+product/roadmap concerns, `obot.agent` for harness and scaffold ones), and open
+each body with a provenance line naming where it came from — so the issue carries
+its own history:
+
+> Filed from the **blockers and risks** identified in session 😺🤖 {date} (job
+> {id}) — the wrapup files actionable risks rather than leaving them in a diary
+> entry. Session record: [diary {date}]({deployed diary URL}).
+
+Write the body as the risk, not the anecdote: what happened, why it matters, and
+two to four candidate fixes with a recommendation where there is one. Board each
+new hub issue (normally `Backlog`) and give it a milestone. Then **link the issue
+from the entry's blocker bullet**, so the diary points at the tracker rather than
+replacing it. Filing happens in step 6 with the other applied changes — the
+checkpoint draft should already show the bullets carrying their links.
+
 ### 3. Scaffold review — collect candidates
 
 Start from the scratchpad's `## Scaffold` section — the list
@@ -218,7 +242,8 @@ wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
   are the exemplars): lead `<span class="meta">…</span>` story paragraph, then
   `## Work completed` (from the step 1 inventory, grouped by lane),
   `## PRs / issues touched` (merged / opened / closed / advanced, with links),
-  `## Blockers / risks`, `## Next session: loose ends` (from step 4, as agreed),
+  `## Blockers / risks` (each actionable item linking the issue filed for it in
+  step 2), `## Next session: loose ends` (from step 4, as agreed),
   `## 🙋 ToDo` (items needing @jwildfire). The scratchpad `## Notes` lines are
   raw material for the entry, not verbatim copy.
 - **Changelog**: if the session changed what `roadmap.html` shows (stage moves,
