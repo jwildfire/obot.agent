@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+"""obot-policy — read, explain and maintain scripts/policy.json, the single
+per-repo guardrail for agent writes in the obot workspace.
+
+policy.json replaced the merge-policy.json + autonomy-grants.json pair: one
+decision per repo (its *profile*) instead of two files to keep in sync. This
+tool is the only place the resolution rules live — obot-merge calls
+`resolve`, the --auto session reads `explain`, and `validate` runs in CI.
+
+Subcommands
+  resolve <owner/repo> <base-branch> [--json]
+      The merge lane for a base branch: standard | attested | refused.
+      Exit 0 if mergeable (standard or attested), 2 if refused.
+
+  explain [<owner/repo>]
+      Effective permissions for a repo (or every repo) in plain text —
+      merge lanes per branch plus what an unattended --auto session may do.
+
+  matrix
+      One row per repo × declared branch: profile, role, lane, autonomy.
+
+  validate
+      Structural + policy consistency checks. Exit 1 on any error.
+
+  diff-legacy [--legacy-dir DIR]
+      Compare this file's verdicts against the legacy merge-policy.json /
+      autonomy-grants.json pair, for every repo × branch either side knows.
+      Flags every change as WIDENED / narrowed / unchanged. WIDENED is a
+      defect in a migration — never merge one silently.
+
+  add <owner/repo> [--integration BR] [--release BR ...]
+      Scaffold a new repo entry at the DEFAULT profile ('protected'). With no
+      branch flags the integration branch is read from GitHub via `gh`.
+      Promotion to 'auto' is a separate, approval-stamped step.
+
+  promote <owner/repo> --jeremy-approved '<where/when he approved>'
+      Flip a repo to the 'auto' profile and stamp the approval. Pass the flag
+      ONLY when @jwildfire explicitly approved that promotion — same contract
+      as obot-merge --jeremy-approved. The resulting PR still needs his
+      sign-off: policy.json is inside its own carve-out.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+POLICY_FILE = os.environ.get("OBOT_POLICY_FILE", os.path.join(HERE, "policy.json"))
+
+
+# ---------------------------------------------------------------- loading ---
+
+def load(path=None):
+    path = path or POLICY_FILE
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        die(f"policy file missing: {path}")
+    except json.JSONDecodeError as exc:
+        die(f"policy file is not valid JSON ({path}): {exc}")
+
+
+def die(msg, code=1):
+    print(f"obot-policy: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# --------------------------------------------------------------- resolving ---
+
+def repo_entry(policy, repo):
+    return policy.get("repos", {}).get(repo)
+
+
+def profile_of(policy, entry):
+    """The repo's profile, falling back to the file's declared default."""
+    name = entry.get("profile") or policy.get("defaultProfile", "protected")
+    prof = policy.get("profiles", {}).get(name)
+    if prof is None:
+        die(f"repo declares unknown profile '{name}' — profiles are {sorted(policy.get('profiles', {}))}")
+    return name, prof
+
+
+def role_of(entry, base):
+    """Which role a base branch plays in this repo: integration | release | None."""
+    branches = entry.get("branches", {})
+    if base == branches.get("integration"):
+        return "integration"
+    if base in (branches.get("release") or []):
+        return "release"
+    return None
+
+
+def resolve(policy, repo, base):
+    """-> (lane, reason, detail-dict). lane in standard|attested|refused."""
+    entry = repo_entry(policy, repo)
+    if entry is None:
+        return ("refused",
+                f"{repo} is not in {os.path.basename(POLICY_FILE)} - merges in this repo are Jeremy-manual",
+                {})
+    pname, prof = profile_of(policy, entry)
+    role = role_of(entry, base)
+    if role is None:
+        declared = declared_branches(entry)
+        return ("refused",
+                f"base branch '{base}' has no role for {repo} "
+                f"(declared: {', '.join(declared) or 'none'})",
+                {"profile": pname})
+    lane = prof["merge"].get(role, "refused")
+    detail = {"profile": pname, "role": role}
+    if lane == "refused":
+        return ("refused",
+                f"role '{role}' is not a merge target under profile '{pname}' for {repo}",
+                detail)
+    if lane == "attested":
+        return ("attested",
+                f"'{base}' is the {role} branch of {repo} under profile '{pname}' - "
+                f"explicit @jwildfire approval required, attested via --jeremy-approved",
+                detail)
+    return ("standard",
+            f"'{base}' is the {role} branch of {repo} under profile '{pname}'",
+            detail)
+
+
+def declared_branches(entry):
+    b = entry.get("branches", {})
+    out = []
+    if b.get("integration"):
+        out.append(f"{b['integration']} (integration)")
+    for r in b.get("release") or []:
+        out.append(f"{r} (release)")
+    return out
+
+
+def autonomy_of(policy, repo):
+    """What an unattended --auto session may do in this repo."""
+    entry = repo_entry(policy, repo)
+    if entry is None:
+        return {"branch": False, "draftPR": False, "mergeStandard": [], "issues": "none",
+                "_reason": "repo is not in the policy file"}
+    pname, prof = profile_of(policy, entry)
+    a = dict(prof.get("autonomy", {}))
+    integration = entry.get("branches", {}).get("integration")
+    # profiles speak in roles; expand to branch names for the session
+    if a.get("draftPR") == "integration":
+        a["draftPR"] = integration
+    a["mergeStandard"] = [integration] if "integration" in (prof.get("autonomy", {}).get("mergeStandard") or []) else []
+    custom = entry.get("custom") or {}
+    if custom.get("blocked", {}).get("value"):
+        a = {"branch": False, "draftPR": False, "mergeStandard": [], "issues": "read-only",
+             "_reason": "custom.blocked — " + custom["blocked"].get("why", "")}
+    for key, spec in custom.items():
+        if key != "blocked":
+            a.setdefault("_custom", {})[key] = spec.get("value")
+    return a
+
+
+# ------------------------------------------------------------- subcommands ---
+
+def cmd_resolve(args):
+    policy = load()
+    lane, reason, detail = resolve(policy, args.repo, args.base)
+    if args.json:
+        print(json.dumps({"repo": args.repo, "base": args.base, "lane": lane,
+                          "reason": reason, **detail}))
+    else:
+        print(f"{lane}: {reason}")
+    sys.exit(0 if lane in ("standard", "attested") else 2)
+
+
+def cmd_explain(args):
+    policy = load()
+    repos = [args.repo] if args.repo else sorted(policy.get("repos", {}))
+    if args.repo and args.repo not in policy.get("repos", {}):
+        print(f"{args.repo}: NOT IN POLICY — every merge refused, no agent writes.")
+        sys.exit(0)
+    for repo in repos:
+        entry = policy["repos"][repo]
+        pname, _ = profile_of(policy, entry)
+        appr = entry.get("approved", {})
+        print(f"\n{repo}   profile: {pname}")
+        print(f"  approved: {appr.get('by','?')} on {appr.get('date','?')} — {appr.get('where','(no record)')}")
+        for label in declared_branches(entry):
+            base = label.split(" ")[0]
+            lane, reason, _ = resolve(policy, repo, base)
+            print(f"  merge {label:<26} -> {lane}")
+        print(f"  merge {'<any other branch>':<26} -> refused")
+        a = autonomy_of(policy, repo)
+        if a.get("_reason"):
+            print(f"  --auto: BLOCKED — {a['_reason']}")
+        else:
+            print(f"  --auto: branch={a.get('branch')}  draftPR={a.get('draftPR')}  "
+                  f"mergeStandard={a.get('mergeStandard')}  issues={a.get('issues')}")
+        for key, spec in (entry.get("custom") or {}).items():
+            ca = spec.get("approved", {})
+            print(f"  custom.{key} = {spec.get('value')!r}  "
+                  f"[approved {ca.get('by','?')} {ca.get('date','?')}]")
+
+
+def cmd_matrix(args):
+    policy = load()
+    print(f"{'repo':<28} {'profile':<10} {'branch':<18} {'role':<12} {'lane':<10} unattended-merge")
+    print("-" * 96)
+    for repo in sorted(policy.get("repos", {})):
+        entry = policy["repos"][repo]
+        pname, _ = profile_of(policy, entry)
+        a = autonomy_of(policy, repo)
+        for label in declared_branches(entry):
+            base, role = label.split(" ")[0], label.split("(")[1].rstrip(")")
+            lane, _, _ = resolve(policy, repo, base)
+            unattended = "yes" if base in (a.get("mergeStandard") or []) else "no"
+            print(f"{repo:<28} {pname:<10} {base:<18} {role:<12} {lane:<10} {unattended}")
+
+
+def cmd_validate(args):
+    policy = load()
+    errors, warnings = [], []
+
+    for key in ("profiles", "repos", "defaultProfile", "roles", "invariants", "carveOut"):
+        if key not in policy:
+            errors.append(f"missing top-level key: {key}")
+    if policy.get("defaultProfile") not in policy.get("profiles", {}):
+        errors.append(f"defaultProfile '{policy.get('defaultProfile')}' is not a defined profile")
+    if policy.get("defaultProfile") != "protected":
+        errors.append("defaultProfile must be 'protected' — a new repo is never auto by default")
+
+    for pname, prof in policy.get("profiles", {}).items():
+        for role in ("integration", "release", "unroled"):
+            if role not in prof.get("merge", {}):
+                errors.append(f"profile '{pname}' does not define a merge lane for role '{role}'")
+        for role, lane in prof.get("merge", {}).items():
+            if lane not in ("standard", "attested", "refused"):
+                errors.append(f"profile '{pname}' role '{role}' has unknown lane '{lane}'")
+        if prof.get("merge", {}).get("unroled") != "refused":
+            errors.append(f"profile '{pname}' must refuse unroled branches")
+        if prof.get("merge", {}).get("release") != "attested":
+            errors.append(f"profile '{pname}' must keep release branches on the attested lane")
+    if policy.get("profiles", {}).get("protected", {}).get("merge", {}).get("integration") != "attested":
+        errors.append("the 'protected' profile must not put any branch on the standard lane")
+    if policy.get("profiles", {}).get("protected", {}).get("autonomy", {}).get("mergeStandard"):
+        errors.append("the 'protected' profile must grant no unattended merges")
+
+    for repo, entry in policy.get("repos", {}).items():
+        if "/" not in repo:
+            errors.append(f"repo key '{repo}' is not owner/repo")
+        owner = repo.split("/")[0]
+        if owner != "jwildfire":
+            errors.append(f"{repo}: outside the jwildfire org — writes there are refused, it must not be listed")
+        pname = entry.get("profile")
+        if pname not in policy.get("profiles", {}):
+            errors.append(f"{repo}: unknown profile '{pname}'")
+        branches = entry.get("branches", {})
+        if not branches.get("integration"):
+            errors.append(f"{repo}: no integration branch declared")
+        rel = branches.get("release")
+        if rel is None or not isinstance(rel, list):
+            errors.append(f"{repo}: 'release' must be a list (use [] for none)")
+        elif branches.get("integration") in rel:
+            errors.append(f"{repo}: '{branches['integration']}' is declared as both integration and release")
+        appr = entry.get("approved") or {}
+        if pname == "auto" and not (appr.get("by") and appr.get("date") and appr.get("where")):
+            errors.append(f"{repo}: profile 'auto' needs a complete approved block (by/date/where)")
+        for key, spec in (entry.get("custom") or {}).items():
+            ca = spec.get("approved") or {}
+            if not (ca.get("by") and ca.get("date") and ca.get("where")):
+                errors.append(f"{repo}: custom.{key} has no complete approval record — customizations need @jwildfire's sign-off")
+            if not spec.get("why"):
+                warnings.append(f"{repo}: custom.{key} has no 'why'")
+
+    if policy.get("autonomy", {}).get("releases", {}).get("publish"):
+        errors.append("autonomy.releases.publish must stay false — publishing is always human-triggered")
+    if "scripts/policy.json" not in policy.get("carveOut", {}).get("paths", []):
+        errors.append("carveOut.paths must include scripts/policy.json — the guardrail must guard itself")
+
+    for w in warnings:
+        print(f"WARN  {w}")
+    for e in errors:
+        print(f"ERROR {e}")
+    if errors:
+        print(f"\nobot-policy: validation FAILED ({len(errors)} error(s))")
+        sys.exit(1)
+    print(f"obot-policy: validation passed ({len(policy.get('repos', {}))} repos, "
+          f"{len(policy.get('profiles', {}))} profiles, {len(warnings)} warning(s))")
+
+
+def cmd_diff_legacy(args):
+    """Prove the migration never widens: compare every verdict against the old pair."""
+    policy = load()
+    legacy_dir = args.legacy_dir or HERE
+    try:
+        with open(os.path.join(legacy_dir, "merge-policy.json")) as fh:
+            legacy_merge = json.load(fh)
+    except FileNotFoundError:
+        die(f"legacy merge-policy.json not found in {legacy_dir} "
+            f"(pass --legacy-dir pointing at a checkout that still has it)")
+    try:
+        with open(os.path.join(legacy_dir, "autonomy-grants.json")) as fh:
+            legacy_grants = json.load(fh)
+    except FileNotFoundError:
+        legacy_grants = {"repos": {}}
+
+    # rank: higher = more authority. Comparing ranks is how "widened" is detected.
+    rank = {"refused": 0, "attested": 1, "standard": 2}
+
+    repos = sorted(set(k for k in legacy_merge if not k.startswith("_")) |
+                   set(policy.get("repos", {})))
+    rows, widened, narrowed = [], [], []
+    for repo in repos:
+        old_entry = legacy_merge.get(repo)
+        if isinstance(old_entry, list):
+            old_entry = {"allowed": old_entry}
+        old_allowed = (old_entry or {}).get("allowed", [])
+        old_appr = (old_entry or {}).get("approvalRequired", [])
+        new_entry = policy.get("repos", {}).get(repo, {})
+        new_branches = [b for b in [new_entry.get("branches", {}).get("integration")] if b]
+        new_branches += list(new_entry.get("branches", {}).get("release") or [])
+        for base in sorted(set(old_allowed) | set(old_appr) | set(new_branches)):
+            old_lane = "standard" if base in old_allowed else ("attested" if base in old_appr else "refused")
+            new_lane = resolve(policy, repo, base)[0]
+            # autonomy axis
+            old_auto = base in ((legacy_grants.get("repos", {}).get(repo) or {}).get("mergeStandard") or [])
+            new_auto = base in (autonomy_of(policy, repo).get("mergeStandard") or [])
+            delta = "unchanged"
+            if rank[new_lane] > rank[old_lane] or (new_auto and not old_auto):
+                delta = "WIDENED"
+                widened.append((repo, base, old_lane, new_lane, old_auto, new_auto))
+            elif rank[new_lane] < rank[old_lane] or (old_auto and not new_auto):
+                delta = "narrowed"
+                narrowed.append((repo, base, old_lane, new_lane, old_auto, new_auto))
+            rows.append((repo, base, old_lane, new_lane,
+                         "yes" if old_auto else "no", "yes" if new_auto else "no", delta))
+
+    print(f"{'repo':<28} {'branch':<16} {'merge:before':<13} {'merge:after':<12} "
+          f"{'--auto:before':<14} {'--auto:after':<13} delta")
+    print("-" * 116)
+    for r in rows:
+        print(f"{r[0]:<28} {r[1]:<16} {r[2]:<13} {r[3]:<12} {r[4]:<14} {r[5]:<13} {r[6]}")
+    print()
+    print(f"{len(rows)} branch verdicts compared: "
+          f"{sum(1 for r in rows if r[6]=='unchanged')} unchanged, "
+          f"{len(narrowed)} narrowed, {len(widened)} WIDENED")
+    if widened:
+        print("\nWIDENED rows are migration defects — a repo must never gain authority it did not have:")
+        for w in widened:
+            print(f"  {w[0]} {w[1]}: merge {w[2]}->{w[3]}, unattended {w[4]}->{w[5]}")
+        sys.exit(1)
+
+
+def cmd_add(args):
+    policy = load()
+    if args.repo in policy.get("repos", {}):
+        die(f"{args.repo} is already in the policy — use `explain` to see it, `promote` to change its profile")
+    if not args.repo.startswith("jwildfire/"):
+        die(f"{args.repo} is outside the jwildfire org — writes there are read-only, no policy entry applies")
+    integration = args.integration
+    if not integration:
+        try:
+            integration = subprocess.run(
+                ["gh", "repo", "view", args.repo, "--json", "defaultBranchRef",
+                 "--jq", ".defaultBranchRef.name"],
+                capture_output=True, text=True, check=True).stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            die(f"could not read the default branch for {args.repo}; pass --integration ({exc})")
+        if not integration:
+            die(f"could not read the default branch for {args.repo}; pass --integration")
+    entry = {
+        "profile": policy.get("defaultProfile", "protected"),
+        "branches": {"integration": integration, "release": list(args.release or [])},
+        "approved": {"by": "(default profile — no promotion approved)",
+                     "date": args.date, "where": "added at the default profile; nothing was granted"},
+    }
+    policy["repos"][args.repo] = entry
+    policy["updated"] = args.date
+    write(policy)
+    print(f"obot-policy: added {args.repo} at profile "
+          f"'{policy.get('defaultProfile')}' (integration={integration}, "
+          f"release={entry['branches']['release']}).")
+    print("Nothing merges there without @jwildfire's attestation and no unattended session may write to it.")
+    print(f"To grant the standard lane: obot-policy promote {args.repo} --jeremy-approved '<where/when>'")
+
+
+def cmd_promote(args):
+    policy = load()
+    entry = repo_entry(policy, args.repo)
+    if entry is None:
+        die(f"{args.repo} is not in the policy — run `obot-policy add {args.repo}` first")
+    if entry.get("profile") == "auto":
+        die(f"{args.repo} is already on the 'auto' profile")
+    entry["profile"] = "auto"
+    entry["approved"] = {"by": "@jwildfire", "date": args.date, "where": args.jeremy_approved}
+    policy["updated"] = args.date
+    write(policy)
+    print(f"obot-policy: {args.repo} promoted to 'auto', approval recorded "
+          f"(@jwildfire, {args.date}, {args.jeremy_approved!r}).")
+    print("policy.json is inside its own carve-out: the PR carrying this change still needs his sign-off to merge.")
+
+
+def write(policy, path=None):
+    path = path or POLICY_FILE
+    with open(path, "w") as fh:
+        json.dump(policy, fh, indent=2)
+        fh.write("\n")
+
+
+# -------------------------------------------------------------------- main ---
+
+def main():
+    p = argparse.ArgumentParser(prog="obot-policy", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    r = sub.add_parser("resolve", help="merge lane for a repo + base branch")
+    r.add_argument("repo"); r.add_argument("base")
+    r.add_argument("--json", action="store_true")
+    r.set_defaults(func=cmd_resolve)
+
+    e = sub.add_parser("explain", help="effective permissions for a repo")
+    e.add_argument("repo", nargs="?")
+    e.set_defaults(func=cmd_explain)
+
+    m = sub.add_parser("matrix", help="one row per repo x branch")
+    m.set_defaults(func=cmd_matrix)
+
+    v = sub.add_parser("validate", help="structural + policy consistency checks")
+    v.set_defaults(func=cmd_validate)
+
+    d = sub.add_parser("diff-legacy", help="compare verdicts against the pre-migration pair")
+    d.add_argument("--legacy-dir")
+    d.set_defaults(func=cmd_diff_legacy)
+
+    a = sub.add_parser("add", help="scaffold a repo entry at the default profile")
+    a.add_argument("repo")
+    a.add_argument("--integration")
+    a.add_argument("--release", action="append")
+    a.add_argument("--date", default=None)
+    a.set_defaults(func=cmd_add)
+
+    pr = sub.add_parser("promote", help="promote a repo to the 'auto' profile")
+    pr.add_argument("repo")
+    pr.add_argument("--jeremy-approved", required=True, dest="jeremy_approved",
+                    help="where/when @jwildfire approved this promotion — pass ONLY if he did")
+    pr.add_argument("--date", default=None)
+    pr.set_defaults(func=cmd_promote)
+
+    args = p.parse_args()
+    if getattr(args, "date", None) is None and hasattr(args, "date"):
+        import datetime
+        args.date = datetime.date.today().isoformat()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
