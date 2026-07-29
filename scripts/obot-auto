@@ -107,7 +107,11 @@ ARGS="--goal $GOAL"
 [ "$DRY_RUN" -eq 1 ] && ARGS="$ARGS --dry-run"
 PROMPT="/session-init --auto $ARGS"
 
-CMD=(claude --bg --permission-mode auto -n "$NAME")
+# --remote-control: the autonomous lead must be drivable from claude.ai/code and
+# the phone, same as its siblings (oa#54). The global `remoteControlAtStartup`
+# setting also covers this now, but the flag is explicit and survives the setting
+# being reset — see docs/remote-control.md.
+CMD=(claude --bg --permission-mode auto --remote-control -n "$NAME")
 [ -n "$MODEL" ] && CMD+=(--model "$MODEL")
 CMD+=("$PROMPT")
 
