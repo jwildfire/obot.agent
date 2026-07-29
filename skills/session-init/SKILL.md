@@ -208,7 +208,7 @@ Design and decisions: [hub #18](https://github.com/jwildfire/obot.roadmap/issues
 and its [design doc](https://jwildfire.github.io/obot.roadmap/requirements/design/18_design.html)
 (approved 2026-07-22). With the `--auto` flag the init opens a **fully
 autonomous dev session** at autonomy level **A1**
-([`scripts/autonomy-grants.json`](../../scripts/autonomy-grants.json)): same
+([`scripts/policy.json`](../../scripts/policy.json) → `autonomy.level`): same
 init, then select-and-proceed instead of present-and-stop. Launched via
 [`scripts/obot-auto`](../../scripts/obot-auto), which owns the fail-fast
 pre-flight (halt file, goal active, obotclaw token mintable, no concurrent
@@ -270,10 +270,15 @@ roadmap signal — and end.
   conventions apply unchanged: TDD, worktrees, draft PRs as obotclaw with the
   obot PR template, heartbeat lines for every phase transition, push
   verification by `headRefOid`.
-- **Merges**: standard-tier `obot-merge` only. The approval tier is **never**
-  used unattended — there is no in-session approval to attest. PRs touching
-  the policy-file carve-out (`merge-policy.json`, `autonomy-grants.json`,
-  `goals/`, workspace hooks) are never merged unattended either.
+- **Merges**: standard-lane `obot-merge` only — that is the **integration**
+  branch of a repo whose [`scripts/policy.json`](../../scripts/policy.json)
+  profile is **`auto`**. The *attested* lane is **never** used unattended —
+  there is no in-session approval to attest — which means a `protected`-profile
+  repo is entirely off-limits to an unattended session (no branch, no draft PR,
+  no merge, issues read-only). PRs touching the carve-out (`scripts/policy.json`,
+  `goals/`, workspace hooks and settings) are never merged unattended either.
+  `scripts/obot-policy explain <owner/repo>` is the authority on what a repo
+  permits; cite it verbatim when refusing.
 - **Goal issues are read-only for autonomous sessions**: never edit a goal
   issue's body or sub-issue links — membership feeds selection eligibility, so
   a session must not widen the goal it is selecting from. Propose membership

@@ -45,14 +45,19 @@ that `--auto` selection reads first:
   one is closing its hub issue plus removing the registry entry (removal needs
   @jwildfire's approval, as everywhere).
 - The registry sits inside the policy-file carve-out (with
-  `autonomy-grants.json`, `merge-policy.json`): **PRs touching `goals/` always
-  wait for @jwildfire**, even at autonomy level A1.
+  [`scripts/policy.json`](../scripts/policy.json)): **PRs touching `goals/`
+  always wait for @jwildfire**, even at autonomy level A1.
 - **Autonomous sessions never edit goal issues** — not the body, not the
   sub-issue links. Membership changes are proposed as comments on the goal
   issue for @jwildfire to apply (the weekly goal review, hub #87, formalizes
   this). This keeps `--auto` from consuming a goal it widened itself; the
-  mechanical backstops remain the grant matrix, the merge policy, and this
-  carve-out.
+  mechanical backstops remain the per-repo profiles in
+  [`scripts/policy.json`](../scripts/policy.json) and this carve-out.
+- The registry's per-goal **`grant_profile`** is a *goal*-level field and is
+  distinct from a *repo*-level profile (`auto` / `protected`) in
+  `scripts/policy.json`. Nothing reads `grant_profile` today; a repo's
+  authority comes from its own policy entry, never from the goal that selected
+  it.
 
 ---
 
