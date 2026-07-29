@@ -1,6 +1,6 @@
 ---
 name: session-update
-description: "Add an item to the running session todo list. Use mid-session when @jwildfire says 'session update: …', 'add that to the session todo', or work surfaces a task to pick up later — the item lands in the session scratchpad that session-wrapup sweeps and session-init re-reads. Do NOT use for already-scoped roadmap work (file/edit the issue directly) or for prose observations (that is session-note)."
+description: "Add an item to the running session todo list. Use mid-session when @jwildfire says 'session update: …', 'add that to the session todo', or work surfaces a task to pick up later — the item lands in the session scratchpad that session-wrapup sweeps and session-init re-reads. Do NOT use for already-scoped roadmap work (file/edit the issue directly), for prose observations (that is session-note), or for an idea aimed at the roadmap rather than this session (that is session-idea)."
 argument-hint: "The todo item to add"
 ---
 
@@ -79,7 +79,9 @@ skeleton above.
 
 **Do not use** for work that already has (or clearly deserves) an issue — file or
 edit the issue directly instead; the scratchpad is for items too small or too raw
-to scope yet. For non-task observations, use `session-note`.
+to scope yet. For non-task observations, use `session-note`; for something nobody
+is committing to do this session, use [`session-idea`](../session-idea/SKILL.md) —
+the test is whether it belongs to this session or to the roadmap.
 
 ## Procedure
 

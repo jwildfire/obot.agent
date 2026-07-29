@@ -1,6 +1,6 @@
 ---
 name: session-scaffold
-description: "Capture a continuous-improvement candidate (skill gap, convention drift, config friction, tooling idea) to the scratchpad's ## Scaffold list the moment the friction happens. Use when @jwildfire says 'scaffold: …', 'add that to the scaffold list', or the agent hits friction a scaffold change would fix. Do NOT use for tasks (that is session-update), diary color (that is session-note), or durable facts (that is memory)."
+description: "Capture a continuous-improvement candidate (skill gap, convention drift, config friction, tooling idea) to the scratchpad's ## Scaffold list the moment the friction happens. Use when @jwildfire says 'scaffold: …', 'add that to the scaffold list', or the agent hits friction a scaffold change would fix. Do NOT use for tasks (that is session-update), diary color (that is session-note), durable facts (that is memory), or a product idea for the roadmap (that is session-idea)."
 argument-hint: "The scaffold candidate"
 ---
 
@@ -24,8 +24,11 @@ root, `## Scaffold` section.
   a pattern was executed by hand for the second time.
 
 **Do not use** for actionable project tasks (`session-update`), for observations
-worth the diary (`session-note`), or for durable facts and preferences (memory —
-though a scaffold entry often *becomes* a memory or skill update at wrapup).
+worth the diary (`session-note`), for durable facts and preferences (memory —
+though a scaffold entry often *becomes* a memory or skill update at wrapup), or
+for product ideas about what the program should build
+([`session-idea`](../session-idea/SKILL.md) — scaffold is about how we work, ideas
+are about what we make).
 
 ## Procedure
 

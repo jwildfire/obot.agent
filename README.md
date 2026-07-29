@@ -45,13 +45,18 @@ For current status — which renderers are live, what's in review, what's next �
   safety.viz (`requirements/`) in obot.roadmap#64; `docs/requirements/` keeps the
   harvest-phase review record and a pointer.
 - `skills/` — the agent skills; grouped index in [`agent.md`](agent.md).
+- `commands/` — the short `/s-*` aliases for the session-command family (`/s-init`
+  is `/session-init`); generated and installed by
+  [`scripts/session-aliases`](scripts/session-aliases).
 - `templates/` — starter templates (requirements matrix, interview log/question,
   test-driver prompt).
 - `interviews/` — P004 interview records (historical; kept verbatim).
 - `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens), `obot-merge`
   (the policy-gated merge lane), `obot-auto` (launches an unattended `--auto` session),
-  `policy.json` + `obot-policy` (see below), the idea-queue intake pair
-  (`reminders-to-ideas`, `ideas-sweep`), and the wiki requirements-harvest helper.
+  `policy.json` + `obot-policy` (see below), the idea-queue intake trio
+  (`reminders-to-ideas`, `ideas-file`, `ideas-sweep`), `reviews-queue` (the classified
+  PR queue behind `session-reviews`), `session-aliases` (generates and installs the
+  `/s-*` aliases), and the wiki requirements-harvest helper.
 
 ## Write policy: one decision per repo
 
@@ -97,12 +102,14 @@ How raw ideas become roadmap items without a persistent Claude session
 full design on the
 [roadmap site](https://jwildfire.github.io/obot.roadmap/requirements/design/48_design.html)):
 
-- **Capture (zero tokens).** Two lanes into the hub's
+- **Capture (zero tokens).** Three lanes into the hub's
   [Ideas discussions](https://github.com/jwildfire/obot.roadmap/discussions/categories/ideas):
-  a new discussion straight from GitHub mobile/web, or *"Hey Siri, add … to my obot
+  a new discussion straight from GitHub mobile/web; *"Hey Siri, add … to my obot
   list"* — [`scripts/reminders-to-ideas`](scripts/reminders-to-ideas) files pending
-  Reminders as discussions posted by obotclaw[bot] (no LLM; items prefixed `private:`
-  stay in a local file, never posted).
+  Reminders as discussions posted by obotclaw[bot] (no LLM); or, from inside a
+  session, [`session-idea`](skills/session-idea/SKILL.md) →
+  [`scripts/ideas-file`](scripts/ideas-file). All three post the same shape, and all
+  three honour the `private:` prefix that keeps an item in a local file, never posted.
 - **Triage (continuous + backstop).** The hub's
   [`ideas-triage` Action](https://github.com/jwildfire/obot.roadmap/blob/main/.github/workflows/ideas-triage.yml)
   responds to each new post within minutes — confident ideas become issues and the

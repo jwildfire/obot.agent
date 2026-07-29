@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# ideas-file — file one idea to the hub's Ideas discussions from inside a session.
+#
+# The in-session sibling of `reminders-to-ideas` (the Siri/Reminders lane) and the
+# capture half of the idea queue (obot.roadmap#48); `ideas-sweep` + the
+# `session-inbox` skill are the triage half. Posts the same shape the Reminders
+# lane posts — title, body, one provenance line — as obotclaw[bot], so a
+# triaged thread reads the same whichever door it came through.
+#
+# Usage:
+#   ideas-file "<title>"                       # title only
+#   ideas-file "<title>" --body "<text>"       # title + body
+#   ideas-file "<title>" --body-file <path>    # body from a file
+#   ideas-file "<title>" --stdin               # body from stdin
+#   ideas-file "<title>" --print               # dry run: show what would post, post nothing
+#
+# Privacy lane (same convention as reminders-to-ideas): a title starting with
+# "private:" is appended to the local inbox file and never posted — the hub is
+# public. The prefix is stripped from the stored line.
+#
+# Env overrides:
+#   OBOT_IDEAS_REPO_ID      GraphQL node id of the hub repo   (default: jwildfire/obot.roadmap)
+#   OBOT_IDEAS_CATEGORY_ID  GraphQL node id of Ideas category
+#   OBOT_PRIVATE_INBOX      path for private: items (default: $CLAUDE_PROJECT_DIR/.claude/private-inbox.md,
+#                           falling back to ~/Documents/obot2/.claude/private-inbox.md)
+#   OBOT_IDEA_SOURCE        provenance wording (default: "in session")
+
+set -euo pipefail
+
+REPO_ID="${OBOT_IDEAS_REPO_ID:-R_kgDOTLuTVg}"
+CATEGORY_ID="${OBOT_IDEAS_CATEGORY_ID:-DIC_kwDOTLuTVs4DBzqe}"
+PRIVATE_INBOX="${OBOT_PRIVATE_INBOX:-${CLAUDE_PROJECT_DIR:-$HOME/Documents/obot2}/.claude/private-inbox.md}"
+SOURCE="${OBOT_IDEA_SOURCE:-in session}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+fail() { printf 'ideas-file: %s\n' "$1" >&2; exit 1; }
+
+TITLE="" BODY="" PRINT=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --body) BODY="$2"; shift 2 ;;
+    --body-file) [ -f "$2" ] || fail "no such file: $2"; BODY="$(cat "$2")"; shift 2 ;;
+    --stdin) BODY="$(cat)"; shift ;;
+    --print) PRINT=true; shift ;;
+    -h|--help) sed -n 's/^# \{0,1\}//p' "${BASH_SOURCE[0]}" | sed -n '9,16p'; exit 0 ;;
+    -*) fail "unknown argument $1" ;;
+    *) [ -z "$TITLE" ] && TITLE="$1" || fail "unexpected argument: $1"; shift ;;
+  esac
+done
+
+[ -n "$TITLE" ] || fail 'a title is required — ideas-file "<title>" [--body ...]'
+
+NOW="$(TZ=America/New_York date '+%Y-%m-%d %H:%M %Z')"
+
+# Privacy lane: never posts, mirrors reminders-to-ideas' local-inbox format.
+if [[ "$TITLE" == private:* ]]; then
+  text="${TITLE#private:}"
+  [ -n "$BODY" ] && text="$text"$'\n\n'"$BODY"
+  if $PRINT; then
+    printf 'would keep private (not posted):\n- %s — %s\n' "$NOW" "${text# }"
+    exit 0
+  fi
+  mkdir -p "$(dirname "$PRIVATE_INBOX")"
+  # Continuation lines are indented so a multi-line idea stays one Markdown bullet;
+  # single-line items come out byte-identical to the Reminders lane's format.
+  printf -- '- %s — %s\n' "$NOW" "$(printf '%s' "${text# }" | sed '2,$s/^/  /')" >> "$PRIVATE_INBOX"
+  printf 'kept private: %s\n' "$PRIVATE_INBOX"
+  exit 0
+fi
+
+# GitHub titles stay short; the full text always survives in the body.
+title="$TITLE"
+[ "${#title}" -gt 80 ] && title="${title:0:77}..."
+
+# With no body the title carries the whole idea, so repeat it in full — the title
+# field may have been truncated. With a body, the title already stands above it.
+body="${BODY:-$TITLE}"
+body="$body"$'\n\n'"— captured $SOURCE, $NOW"
+
+if $PRINT; then
+  printf 'would post to the hub Ideas category:\n\n--- title ---\n%s\n\n--- body ---\n%s\n' "$title" "$body"
+  exit 0
+fi
+
+TOKEN="$("$SCRIPT_DIR/obot-app-token")"
+
+url=$(GH_TOKEN="$TOKEN" gh api graphql \
+  -f query='mutation($t:String!,$b:String!,$r:ID!,$c:ID!){createDiscussion(input:{repositoryId:$r,categoryId:$c,title:$t,body:$b}){discussion{url}}}' \
+  -f t="$title" -f b="$body" -f r="$REPO_ID" -f c="$CATEGORY_ID" \
+  --jq '.data.createDiscussion.discussion.url') || fail 'post failed — nothing was filed'
+
+printf 'filed: %s\n' "$url"
