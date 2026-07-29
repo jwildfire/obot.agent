@@ -140,12 +140,24 @@ its own history:
 > {id}) — the wrapup files actionable risks rather than leaving them in a diary
 > entry. Session record: [diary {date}]({deployed diary URL}).
 
-Write the body as the risk, not the anecdote: what happened, why it matters, and
-two to four candidate fixes with a recommendation where there is one. Board each
-new hub issue (normally `Backlog`) and give it a milestone. Then **link the issue
-from the entry's blocker bullet**, so the diary points at the tracker rather than
-replacing it. Filing happens in step 6 with the other applied changes — the
-checkpoint draft should already show the bullets carrying their links.
+Write the body as the risk, not the anecdote. **Every documented risk carries a
+nested `## Proposed mitigation` section** (@jwildfire, 2026-07-29) — a risk
+without one is a complaint, and it puts the burden of inventing the fix on
+whoever picks the issue up cold. So each body is two halves:
+
+- **`## Risk`** — what happened, and why it matters. Concrete: the mechanism, not
+  the vibe.
+- **`## Proposed mitigation`** — two to four numbered candidate fixes, each a real
+  option someone could choose, ending with a one-line **recommendation** naming
+  which to take and why. Where a fix is cheap and a structural change is not, say
+  which is which; where the honest answer is "accept it and revisit at X", that is
+  a legitimate option to list.
+
+Board each new hub issue (normally `Backlog`) and give it a milestone. Then **link
+the issue from the entry's blocker bullet**, so the diary points at the tracker
+rather than replacing it. Filing happens in step 6 with the other applied
+changes — the checkpoint draft should already show the bullets carrying their
+links.
 
 ### 3. Scaffold review — collect candidates
 
