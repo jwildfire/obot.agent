@@ -236,6 +236,18 @@ wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
   paragraph: `📊 [Session report](../reports/sessions/{slug}.html)`. The report
   commits together with the diary entry. Render it **after** the scratchpad
   check-states from step 6 are final — the report freezes them.
+- **Refresh analytics usage data**: regenerate the Cost data behind
+  [the Analytics page](https://jwildfire.github.io/obot.roadmap/analytics/index.html) —
+
+  ```bash
+  python3 obot.roadmap/scripts/build_usage_data.py   # writes site/usage/usage.json
+  ```
+
+  The source is this machine's local transcripts, so the site deploy **cannot**
+  rebuild this data itself — it re-renders whatever `usage.json` was last
+  committed, and the wrapup is the heartbeat that keeps it current
+  (@jwildfire, 2026-07-29). Commit the refreshed file together with the diary
+  entry (standard-update grant).
 - **Post**: commit directly to `main` and push (standard-update grant). The site
   deploy triggers on `diary/**` pushes.
 - **Refresh package status**: that same deploy re-renders
