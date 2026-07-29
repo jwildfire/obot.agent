@@ -26,7 +26,9 @@ Subcommands
       Compare this file's verdicts against the legacy merge-policy.json /
       autonomy-grants.json pair, for every repo × branch either side knows.
       Flags every change as WIDENED / narrowed / unchanged. WIDENED is a
-      defect in a migration — never merge one silently.
+      defect in a migration — never merge one silently. An approved widening
+      must be declared with --approved-widening owner/repo:branch; any
+      undeclared one exits 1.
 
   add <owner/repo> [--integration BR] [--release BR ...]
       Scaffold a new repo entry at the DEFAULT profile ('protected'). With no
@@ -342,10 +344,17 @@ def cmd_diff_legacy(args):
           f"{sum(1 for r in rows if r[6]=='unchanged')} unchanged, "
           f"{len(narrowed)} narrowed, {len(widened)} WIDENED")
     if widened:
-        print("\nWIDENED rows are migration defects — a repo must never gain authority it did not have:")
+        allowed = set(args.approved_widening or [])
+        unapproved = [w for w in widened if f"{w[0]}:{w[1]}" not in allowed]
+        print("\nWIDENED rows — a repo gaining authority it did not have. Each needs @jwildfire's "
+              "explicit approval, declared with --approved-widening <owner/repo:branch>:")
         for w in widened:
-            print(f"  {w[0]} {w[1]}: merge {w[2]}->{w[3]}, unattended {w[4]}->{w[5]}")
-        sys.exit(1)
+            mark = "approved" if f"{w[0]}:{w[1]}" in allowed else "NOT APPROVED"
+            print(f"  [{mark}] {w[0]} {w[1]}: merge {w[2]}->{w[3]}, unattended {w[4]}->{w[5]}")
+        if unapproved:
+            print(f"\nobot-policy: {len(unapproved)} unapproved widening(s) — this is a migration defect.")
+            sys.exit(1)
+        print("\nobot-policy: every widening is declared approved.")
 
 
 def cmd_add(args):
@@ -428,6 +437,9 @@ def main():
 
     d = sub.add_parser("diff-legacy", help="compare verdicts against the pre-migration pair")
     d.add_argument("--legacy-dir")
+    d.add_argument("--approved-widening", action="append", metavar="OWNER/REPO:BRANCH",
+                   help="declare a widening @jwildfire explicitly approved; repeatable. "
+                        "Any undeclared widening still fails the run.")
     d.set_defaults(func=cmd_diff_legacy)
 
     a = sub.add_parser("add", help="scaffold a repo entry at the default profile")

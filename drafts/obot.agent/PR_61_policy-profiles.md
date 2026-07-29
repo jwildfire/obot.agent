@@ -7,7 +7,7 @@ One write-policy decision per repo. `scripts/merge-policy.json` and `scripts/aut
 
 Closes #140 in the hub is not applicable — the requirement lives in the roadmap repo. Requirement: jwildfire/obot.roadmap#140.
 
-**This PR needs your approval and I have not merged it.** `policy.json` is inside its own carve-out, and the shape here (two profiles, protected default, customizations gated) is what you approved — the specific grant contents, the per-repo assignments, and the migration itself are still yours to sign off. Two repos need a decision from you before this is right; see **Decisions needed**.
+**Approved by @jwildfire in session on 2026-07-29** via a decision prompt: the shape, the per-repo assignments, clearing the stale `open.gismo` blocker, and folding in the halt-switch fix. **Not merged** — `policy.json` is inside its own carve-out, so the merge itself is a separate go-ahead from you.
 
 ## Roadmap context
 
@@ -30,39 +30,45 @@ Approvals are now structured, not prose. Every repo carries `approved: {by, date
 
 ## Evidence — verified by running, not by reading
 
-**0 WIDENED.** `obot-policy diff-legacy` compares every verdict against the old pair on both axes:
+**Every change is accounted for.** `obot-policy diff-legacy` compares every verdict against the old pair on both axes:
 
 ```
 repo                         branch    merge:before  merge:after  --auto:before  --auto:after  delta
-jwildfire/demo-301           main      standard      attested     no             no            narrowed
+jwildfire/demo-301           main      standard      standard     no             yes           WIDENED
 jwildfire/demo-301           site      attested      attested     no             no            unchanged
 jwildfire/gsm.safety         dev       standard      standard     yes            yes           unchanged
 jwildfire/gsm.safety         main      attested      attested     no             no            unchanged
 jwildfire/obot.agent         main      standard      standard     yes            yes           unchanged
 jwildfire/obot.roadmap       main      standard      standard     yes            yes           unchanged
-jwildfire/open.csr           dev       standard      attested     no             no            narrowed
+jwildfire/open.csr           dev       standard      standard     no             yes           WIDENED
 jwildfire/open.csr           main      attested      attested     no             no            unchanged
-jwildfire/open.gismo         dev       standard      standard     yes            no            narrowed
+jwildfire/open.gismo         dev       standard      standard     yes            yes           unchanged
 jwildfire/open.gismo         main      attested      attested     no             no            unchanged
 jwildfire/safety-histogram   dev       standard      standard     yes            yes           unchanged
 jwildfire/safety-histogram   master    attested      attested     no             no            unchanged
 jwildfire/safety.viz         dev       standard      standard     yes            yes           unchanged
 jwildfire/safety.viz         main      attested      attested     no             no            unchanged
 
-14 branch verdicts compared: 11 unchanged, 3 narrowed, 0 WIDENED
+14 branch verdicts compared: 12 unchanged, 0 narrowed, 2 WIDENED
+  [approved] jwildfire/demo-301 main: unattended False->True
+  [approved] jwildfire/open.csr  dev:  unattended False->True
 ```
 
-`diff-legacy` **exits 1 on any WIDENED row** — a repo gaining authority it did not have is treated as a build failure, not a note.
-
-**End-to-end, through the real binary.** A stub `gh` feeds synthetic PR JSON to the actual `obot-merge --check`, so the whole script runs — arg parsing, refusal precedence, exit codes. Across **80 repo × branch pairs (10 repos × 8 branches)** the verdicts are identical before and after except the two intended narrowings:
+**No merge lane changed anywhere.** The two WIDENED rows are purely on the `--auto` axis: promoting `open.csr` and `demo-301` to `auto` (your call) gives unattended sessions merge authority on their integration branches, which the old grants matrix did not. Both are declared approved on the command line; **any undeclared widening exits 1** and fails the run:
 
 ```
-33c33
-< jwildfire/open.csr   dev    ALLOW:standard
-> jwildfire/open.csr   dev    ALLOW:approval
-42c42
-< jwildfire/demo-301   main   ALLOW:standard
-> jwildfire/demo-301   main   ALLOW:approval
+$ obot-policy diff-legacy                      # no declarations
+obot-policy: 2 unapproved widening(s) — this is a migration defect.   (exit 1)
+
+$ obot-policy diff-legacy --approved-widening jwildfire/open.csr:dev \
+                          --approved-widening jwildfire/demo-301:main
+obot-policy: every widening is declared approved.                     (exit 0)
+```
+
+**End-to-end, through the real binary.** A stub `gh` feeds synthetic PR JSON to the actual `obot-merge --check`, so the whole script runs — arg parsing, refusal precedence, exit codes. Across **80 repo × branch pairs (10 repos × 8 branches)** the verdicts are **byte-identical** before and after:
+
+```
+ALL 80 repo x branch merge verdicts IDENTICAL to before the migration
 ```
 
 **Real PRs, real `gh`.** `obot-merge --check` against one open PR per profile — obot.agent#52 (`auto`, integration → CHECK PASSED, rc 0), safety.viz#121 and #119 (`auto`, integration, drafts → REFUSED, rc 2). Verdicts and exit codes unchanged; the only new output is an informational `policy: profile auto, role integration` line.
@@ -85,21 +91,29 @@ jwildfire/safety.viz         main      attested      attested     no            
 
 **Adding a repo is now one command plus one decision:** `obot-policy add <owner/repo>` reads the default branch from GitHub and writes a `protected` entry that grants nothing; `obot-policy promote <owner/repo> --jeremy-approved '<where/when>'` is the separate, stamped step.
 
-## Decisions needed
+## Your decisions, applied
 
-**1. `open.csr` and `demo-301` don't fit either profile cleanly.** Both were in the merge policy but not the autonomy matrix, i.e. "interactive standard merges yes, unattended writes no" — a combination the two-profile model deliberately does not reproduce. I wrote both as `protected`, the strictly-narrowing choice, which costs you the standard merge lane you have there today. For `open.csr` the evidence points the other way: obot.agent#51 says the intent was "makes it selectable by `--auto` sessions", and the `csr` goal is registered active with `open.csr` as its backlog — so today an `--auto` session selecting csr work would be blocked by a grants matrix nobody meant to omit it from. Promoting either is one stamped command.
+**1. `open.csr` and `demo-301` → `auto`.** Both were in the merge policy but not the autonomy matrix — "interactive standard merges yes, unattended writes no", a combination the two-profile model deliberately does not reproduce. You chose `auto` for both, a deliberate widening on the unattended axis. Applied via `obot-policy promote`, which stamped the approval into each repo's `approved` block, citing this session's decision prompt. For `open.csr` this also closes a real gap: obot.agent#51 intended "makes it selectable by `--auto` sessions", and the `csr` goal is registered active with `open.csr` as its backlog, so until now an `--auto` session selecting csr work would have been blocked by a matrix nobody meant to omit it from.
 
-**2. `open.gismo`'s blocker is stale.** The old grants matrix carried `prereq: "obotclaw App install pending — until installed, no pushes/merges"`. The App **is** installed now (verified against `installation/repositories`, 2026-07-29). I carried the blocker forward as `custom.blocked` rather than drop it, because dropping a blocker is a widening. Clearing it restores its `auto` grants. Note the old prereq was prose an agent had to notice and honour; as a `custom.blocked` field the resolver enforces it.
+**2. `open.gismo` blocker cleared.** The old matrix carried `prereq: "obotclaw App install pending — until installed, no pushes/merges"`. The App **is** installed (verified against `installation/repositories`, 2026-07-29), so the blocker's own condition is satisfied. Removed; the repo's full `auto` grants are restored.
 
-**3. Naming.** The goal registry has a per-goal `grant_profile: "standard"` field, unread by anything today, on a different axis from a repo's profile. I documented the distinction rather than touch a carve-out file; retiring the unused field is a follow-up if you want it.
+**3. Halt-switch fix folded in (closes #60).** `obot-auto` derived the workspace root from its own path, so the `autonomy-halt` kill switch looked in the wrong directory when run from a linked worktree and **silently failed to fire**. It now resolves the workspace from the git common dir, with an `OBOT_WORKSPACE` override. Verified both ways:
 
-## Also found
+```
+# before the fix, from a linked worktree, halt file present:
+obot-auto: pre-flight OK (level=A1, goal=charts → hub#78)          # kill switch ignored
 
-**jwildfire/obot.agent#60 — pre-existing, not from this change.** `obot-auto` derives the workspace root from its own path, so the `autonomy-halt` kill switch is looked for in the wrong directory when run from a linked worktree and silently fails to fire. Low exposure today (the settings allowlist points at the main clone) but worth closing before A2 scheduled runs. Left out of this PR to keep the guardrail diff reviewable.
+# after:
+obot-auto: halt file present (…/obot2/.claude/autonomy-halt) — remove it to launch   (exit 1)
+```
+
+Both the main clone and the worktree now resolve `WORKSPACE=/Users/jwildfire/Documents/obot2`, and preflight output is unchanged across all four goals.
+
+**4. Naming, left alone.** The goal registry's per-goal `grant_profile: "standard"` is unread by anything today and sits on a different axis from a repo's profile. Documented the distinction in `goals/README.md` rather than edit a second carve-out file; retiring the dead field is a follow-up if you want it.
 
 ## Next steps
 
-Your call on the two repos above and on clearing the `open.gismo` blocker; I'll stamp whatever you pick with `obot-policy promote` and push. Nothing merges until you say so.
+Ready for your review. Nothing merges until you say so — and when you do, it is an attested merge: `policy.json` is in the carve-out, so `obot-merge 61 -R jwildfire/obot.agent --jeremy-approved '<note>'`.
 
 ---
 This PR was drafted by Claude Code using Opus 5 and reviewed by @jwildfire

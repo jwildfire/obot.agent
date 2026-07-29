@@ -26,8 +26,22 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-WORKSPACE="$(dirname "$REPO_DIR")"
 POLICY="$SCRIPT_DIR/policy.json"
+
+# The workspace is the parent of the obot.agent CLONE, not of wherever this
+# copy of the script happens to sit: run from a linked worktree
+# (obot2/obot.agent-worktrees/<branch>), `dirname $REPO_DIR` points at the
+# worktrees directory and the halt-file kill switch silently never fires
+# (obot.agent#60). The git common dir always resolves to the main clone's
+# .git, so derive from that and keep OBOT_WORKSPACE as an override.
+if [ -n "${OBOT_WORKSPACE:-}" ]; then
+  WORKSPACE="$OBOT_WORKSPACE"
+elif GIT_COMMON_DIR="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+     && [ -n "$GIT_COMMON_DIR" ]; then
+  WORKSPACE="$(cd "$(dirname "$(dirname "$GIT_COMMON_DIR")")" && pwd)"
+else
+  WORKSPACE="$(dirname "$REPO_DIR")"
+fi
 
 GOAL="charts"
 INCREMENT=""
