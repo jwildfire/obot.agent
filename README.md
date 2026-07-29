@@ -49,8 +49,39 @@ For current status — which renderers are live, what's in review, what's next �
   test-driver prompt).
 - `interviews/` — P004 interview records (historical; kept verbatim).
 - `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens), `obot-merge`
-  (the policy-gated merge lane), the idea-queue intake pair (`reminders-to-ideas`,
-  `ideas-sweep`), and the wiki requirements-harvest helper.
+  (the policy-gated merge lane), `obot-auto` (launches an unattended `--auto` session),
+  `policy.json` + `obot-policy` (see below), the idea-queue intake pair
+  (`reminders-to-ideas`, `ideas-sweep`), and the wiki requirements-harvest helper.
+
+## Write policy: one decision per repo
+
+[`scripts/policy.json`](scripts/policy.json) is the guardrail for every agent write in
+the workspace — what merges where, and what an unattended session may do. A repo gets
+**one** decision, its **profile**:
+
+| | `protected` (the default) | `auto` (@jwildfire promotes a repo to it) |
+|---|---|---|
+| **integration** branch | merge needs `--jeremy-approved` attestation | merges on the standard lane |
+| **release** branch(es) | attestation | attestation |
+| any other branch | refused | refused |
+| unattended `--auto` session | no writes at all | branch, draft PR, merge integration, manage issues |
+
+Branches are declared by **role**, not name, so a repo whose branches aren't called
+`dev`/`main` needs no special case — `demo-301` maps `main`→integration and its live
+Pages branch `site`→release. A repo **absent from the file is refused entirely**; adding
+one lands it at `protected`. Anything beyond a profile goes in that repo's `custom`
+block and carries its own recorded approval.
+
+```bash
+scripts/obot-policy explain jwildfire/safety.viz   # effective permissions, with the approval record
+scripts/obot-policy matrix                         # every repo x branch
+scripts/obot-policy validate                       # structural + policy consistency (obot-auto gates on this)
+scripts/obot-policy add jwildfire/new-repo         # scaffold at 'protected'
+```
+
+`policy.json` sits inside its own carve-out: PRs touching it never merge unattended, and
+never merge at all without @jwildfire's sign-off. It replaced the `merge-policy.json` +
+`autonomy-grants.json` pair, which had to be edited separately per repo and had drifted.
 
 ## Agent identity
 

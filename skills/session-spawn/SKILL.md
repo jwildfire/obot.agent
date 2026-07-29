@@ -59,15 +59,20 @@ Skip anything the agent can rediscover by reading the code.
 - **Merging**: never merge without Jeremy's explicit approval (operating
   contract — unchanged). Once a merge IS approved, use the policy-gated lane
   only: `obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>` (add `--check`
-  to dry-run the policy first). It verifies the base branch against
-  [`scripts/merge-policy.json`](../../scripts/merge-policy.json), merges as
-  obotclaw[bot], and verifies the result. Protected/release branches
-  (`approvalRequired` tier) additionally need
+  to dry-run the policy first). It resolves the base branch against
+  [`scripts/policy.json`](../../scripts/policy.json), merges as
+  obotclaw[bot], and verifies the result. Only the **integration** branch of an
+  **`auto`**-profile repo merges on the standard lane; every branch of a
+  `protected` repo, and every **release**-role branch anywhere (a release
+  branch, or a published surface like demo-301's `site`), is on the *attested*
+  lane and additionally needs
   `--jeremy-approved '<where/when he approved>'` — pass it ONLY when Jeremy
   explicitly approved that specific merge in-session; the note is posted on the
   PR as an audit comment. Raw `gh pr merge`, REST, and GraphQL merges are
   denied by the workspace `merge-gate-guard` PreToolUse hook — a denial there
   means "use obot-merge", not "find another route".
+  `scripts/obot-policy explain <owner/repo>` prints a repo's effective
+  permissions if you need to check before starting work.
 
 ### 3. Pick the spawn parameters deliberately
 

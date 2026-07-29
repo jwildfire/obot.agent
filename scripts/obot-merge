@@ -2,20 +2,24 @@
 # obot-merge — policy-gated PR merge, executed as obotclaw[bot].
 #
 # The single mechanical merge lane for agent sessions in the obot workspace.
-# Checks the PR's base branch against scripts/merge-policy.json, refuses drafts
-# and anything outside the policy, mints a fresh obotclaw[bot] installation
-# token (obot-app-token, same directory), merges, and verifies the result.
+# Checks the PR's base branch against scripts/policy.json (via obot-policy,
+# same directory), refuses drafts and anything outside the policy, mints a
+# fresh obotclaw[bot] installation token (obot-app-token), merges, and
+# verifies the result.
 #
 # The operating contract is unchanged: Jeremy's explicit approval is required
 # BEFORE invoking this for a real merge. This tool removes the mechanical
 # permission block once that approval exists - it is not the approval.
 #
-# Policy tiers (merge-policy.json):
-#   allowed          - integration lanes; contract-gated approval, no attestation
-#   approvalRequired - protected/release branches; merge ONLY with Jeremy's
-#                      explicit in-session approval, attested via
-#                      --jeremy-approved '<where/when he approved>'. The note is
-#                      posted as an audit comment on the PR before merging.
+# Merge lanes (resolved by `obot-policy resolve <repo> <base>` from the repo's
+# profile plus the role its base branch plays):
+#   standard - integration branch of an 'auto' repo; contract-gated approval,
+#              no attestation
+#   attested - release branches, and every branch of a 'protected' repo; merge
+#              ONLY with Jeremy's explicit in-session approval, passed as
+#              --jeremy-approved '<where/when he approved>'. The note is posted
+#              as an audit comment on the PR before merging.
+#   refused  - any branch with no declared role, and any repo not in the file
 #
 # Usage:
 #   obot-merge <pr-number> -R <owner>/<repo> [--merge|--squash|--rebase]
@@ -31,9 +35,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-POLICY_FILE="$SCRIPT_DIR/merge-policy.json"
+POLICY_FILE="$SCRIPT_DIR/policy.json"
+RESOLVER="$SCRIPT_DIR/obot-policy"
 
-usage() { sed -n 's/^# \{0,1\}//p' "${BASH_SOURCE[0]}" | sed -n '3,27p' >&2; }
+usage() { sed -n 's/^# \{0,1\}//p' "${BASH_SOURCE[0]}" | sed -n '3,30p' >&2; }
 fail()  { printf 'obot-merge: %s\n' "$1" >&2; exit 1; }
 refuse(){ printf 'obot-merge: REFUSED - %s\n' "$1" >&2; exit 2; }
 
@@ -51,42 +56,52 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$PR" ] && [ -n "$REPO" ] || { usage; fail "PR number and -R owner/repo are required"; }
+# Fail closed: no policy file, no resolver, no merge. There is deliberately no
+# fallback to a permissive path when the guardrail is unreadable.
 [ -f "$POLICY_FILE" ] || fail "policy file missing: $POLICY_FILE"
+[ -x "$RESOLVER" ]    || fail "policy resolver missing or not executable: $RESOLVER"
 
 PR_JSON="$(gh pr view "$PR" -R "$REPO" --json baseRefName,isDraft,state,mergeable,headRefOid,url,title)" \
   || fail "could not resolve PR #$PR in $REPO"
 
-VERDICT="$(printf '%s' "$PR_JSON" | python3 -c "
-import json, sys
+BASE="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["baseRefName"])')"
+
+# Policy verdict comes from the shared resolver so obot-merge and the --auto
+# session can never disagree about what a repo permits.
+RESOLVED="$("$RESOLVER" resolve "$REPO" "$BASE" --json)" || true
+[ -n "$RESOLVED" ] || fail "policy resolver produced no verdict for $REPO $BASE"
+
+VERDICT="$(printf '%s' "$PR_JSON" | OBOT_RESOLVED="$RESOLVED" OBOT_PR="$PR" python3 -c "
+import json, os, sys
 
 pr = json.load(sys.stdin)
-policy = json.load(open('$POLICY_FILE'))
-repo, base = '$REPO', pr['baseRefName']
-entry = policy.get(repo)
-if isinstance(entry, list):  # legacy shape: plain list = allowed lanes
-    entry = {'allowed': entry}
+resolved = json.loads(os.environ['OBOT_RESOLVED'])
+num, base = os.environ['OBOT_PR'], pr['baseRefName']
 
-print(f\"PR #$PR {pr['url']}\")
+print(f\"PR #{num} {pr['url']}\")
 print(f\"  title: {pr['title']}\")
 print(f\"  base:  {base}   state: {pr['state']}   draft: {pr['isDraft']}   mergeable: {pr['mergeable']}\")
 print(f\"  head:  {pr['headRefOid']}\")
+if resolved.get('profile'):
+    role = f\", role {resolved['role']}\" if resolved.get('role') else ''
+    print(f\"  policy: profile {resolved['profile']}{role}\")
 
-if entry is None:
-    print(f'REFUSE:{repo} is not in merge-policy.json - merges in this repo are Jeremy-manual')
+# Refusal precedence is unchanged from the merge-policy.json era: a repo that
+# is not in the policy at all outranks the PR's own state, then draft, then
+# state, then the branch lane. 'profile' is absent exactly when the repo is
+# unknown to the policy.
+if 'profile' not in resolved:
+    print('REFUSE:' + resolved['reason'])
+elif pr['isDraft']:
+    print('REFUSE:PR is a draft - mark it ready for review first')
+elif pr['state'] != 'OPEN':
+    print(f\"REFUSE:PR state is {pr['state']}, not OPEN\")
+elif resolved['lane'] == 'standard':
+    print('ALLOW:standard')
+elif resolved['lane'] == 'attested':
+    print('ALLOW:approval')
 else:
-    allowed = entry.get('allowed', [])
-    approval = entry.get('approvalRequired', [])
-    if pr['isDraft']:
-        print('REFUSE:PR is a draft - mark it ready for review first')
-    elif pr['state'] != 'OPEN':
-        print(f\"REFUSE:PR state is {pr['state']}, not OPEN\")
-    elif base in allowed:
-        print('ALLOW:standard')
-    elif base in approval:
-        print('ALLOW:approval')
-    else:
-        lanes = ', '.join(allowed + [b + ' (approval-tier)' for b in approval])
-        print(f\"REFUSE:base branch '{base}' is not an allowed merge target for {repo} (lanes: {lanes})\")
+    print('REFUSE:' + resolved['reason'])
 ")"
 
 printf '%s\n' "$VERDICT" | grep -v '^REFUSE:\|^ALLOW:'

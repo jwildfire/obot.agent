@@ -26,8 +26,22 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-WORKSPACE="$(dirname "$REPO_DIR")"
-GRANTS="$SCRIPT_DIR/autonomy-grants.json"
+POLICY="$SCRIPT_DIR/policy.json"
+
+# The workspace is the parent of the obot.agent CLONE, not of wherever this
+# copy of the script happens to sit: run from a linked worktree
+# (obot2/obot.agent-worktrees/<branch>), `dirname $REPO_DIR` points at the
+# worktrees directory and the halt-file kill switch silently never fires
+# (obot.agent#60). The git common dir always resolves to the main clone's
+# .git, so derive from that and keep OBOT_WORKSPACE as an override.
+if [ -n "${OBOT_WORKSPACE:-}" ]; then
+  WORKSPACE="$OBOT_WORKSPACE"
+elif GIT_COMMON_DIR="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+     && [ -n "$GIT_COMMON_DIR" ]; then
+  WORKSPACE="$(cd "$(dirname "$(dirname "$GIT_COMMON_DIR")")" && pwd)"
+else
+  WORKSPACE="$(dirname "$REPO_DIR")"
+fi
 
 GOAL="charts"
 INCREMENT=""
@@ -52,7 +66,11 @@ done
 # ---- pre-flight (fail-fast, in dependency order) ----------------------------
 
 command -v claude >/dev/null 2>&1 || fail "claude CLI not on PATH"
-[ -f "$GRANTS" ] || fail "grants file missing: $GRANTS"
+[ -f "$POLICY" ] || fail "policy file missing: $POLICY"
+
+# 0. The policy file is the guardrail; refuse to launch an unattended session
+#    against one that does not validate.
+"$SCRIPT_DIR/obot-policy" validate >/dev/null || fail "policy.json failed validation — run scripts/obot-policy validate"
 
 # 1. Halt file — the one-command kill switch. Absence is a launch condition.
 HALT="$WORKSPACE/.claude/autonomy-halt"
@@ -60,7 +78,7 @@ HALT="$WORKSPACE/.claude/autonomy-halt"
 
 # 2. Autonomy level — A0 means draft-only observation runs; refuse to launch
 #    a merging session if the level was demoted.
-LEVEL=$(python3 -c "import json; print(json.load(open('$GRANTS'))['level'])")
+LEVEL=$(python3 -c "import json; print(json.load(open('$POLICY'))['autonomy']['level'])")
 [ "$LEVEL" != "A0" ] || echo "obot-auto: NOTE level=A0 (draft-PR-only) — session will not merge" >&2
 
 # 3. Goal is registered and active. The registry (goals/registry.json, policy

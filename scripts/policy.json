@@ -1,0 +1,229 @@
+{
+  "$schema_note": "THE guardrail file for agent writes in the obot workspace. One per-repo policy, replacing the merge-policy.json + autonomy-grants.json pair (which had to be edited separately for every repo and had already drifted). A repo gets ONE decision: its profile. 'protected' is the default for every repo @jwildfire has not explicitly promoted; 'auto' is a promotion he approves, recorded in the repo's 'approved' block. Anything a repo needs BEYOND its profile goes in 'custom' and needs its own recorded approval. Repos absent from 'repos' are refused entirely - listing a repo is itself a decision. This file sits inside its own carve-out: PRs touching it never merge unattended, and never merge at all without @jwildfire's sign-off.",
+  "version": 2,
+  "updated": "2026-07-29",
+  "design": "https://jwildfire.github.io/obot.roadmap/requirements/design/18_design.html",
+  "supersedes": [
+    "scripts/merge-policy.json",
+    "scripts/autonomy-grants.json"
+  ],
+  "defaultProfile": "protected",
+  "roles": {
+    "_note": "Branch ROLES, not branch names - so a repo whose branches are not called dev/main needs no special-casing. Each repo entry maps its own branch names onto these roles; the profile decides what each role permits. A branch with no role is refused outright under every profile.",
+    "integration": "The lane work lands on: where feature branches merge and where the next release accumulates. One per repo. Usually 'dev', but 'main' where there is no dev (obot.agent, obot.roadmap, demo-301).",
+    "release": "The published or protected surface - changing it changes what the world sees. Zero or more per repo. A release branch ('main', 'master'), or a published-site source (demo-301's 'site' is the live GitHub Pages branch)."
+  },
+  "profiles": {
+    "protected": {
+      "_summary": "The default. Nothing merges without @jwildfire's explicit in-session approval, attested on the PR; unattended (--auto) sessions may not write to the repo at all. Equivalent to how a repo behaved under the old pair when it was listed for merges but absent from the autonomy matrix - minus the standard merge lane.",
+      "merge": {
+        "integration": "attested",
+        "release": "attested",
+        "unroled": "refused"
+      },
+      "autonomy": {
+        "branch": false,
+        "draftPR": false,
+        "mergeStandard": [],
+        "issues": "read-only",
+        "_note": "An --auto session selecting an increment in a 'protected' repo must refuse and say so - this repo is outside its grant."
+      }
+    },
+    "auto": {
+      "_summary": "Promoted per repo by @jwildfire. The integration branch merges on the standard lane under the standing operating contract (his approval of the WORK is still required - the lane only removes the mechanical block); release branches still require attestation; unattended sessions may branch, open draft PRs, merge integration, and manage issues.",
+      "merge": {
+        "integration": "standard",
+        "release": "attested",
+        "unroled": "refused"
+      },
+      "autonomy": {
+        "branch": true,
+        "draftPR": "integration",
+        "mergeStandard": [
+          "integration"
+        ],
+        "issues": "full+closes"
+      }
+    }
+  },
+  "lanes": {
+    "_note": "What the three merge outcomes mean to obot-merge.",
+    "standard": "Mergeable via obot-merge with no extra flag. Contract-gated: @jwildfire approved the work; the tool removes the mechanical block, it is not the approval.",
+    "attested": "Mergeable ONLY with --jeremy-approved '<where/when he approved>'. The note is posted on the PR as an audit comment before the merge. Never available to an unattended session - there is no in-session approval to attest.",
+    "refused": "Not a merge target. obot-merge exits 2."
+  },
+  "invariants": {
+    "_note": "True under every profile. A repo entry cannot opt out of these; only @jwildfire can, in session, per merge.",
+    "never": [
+      "merge a release-role branch without @jwildfire's explicit in-session approval, attested via --jeremy-approved",
+      "merge any PR touching a carveOut path unattended, on any lane, in any repo",
+      "tag or publish a release (prep is allowed: notes draft + staged promotion PR)",
+      "delete anything - files, issues, branches, releases, history - without approval",
+      "write to any repo outside the jwildfire org: read-only, no exceptions, drafts handed to @jwildfire",
+      "merge into a branch with no role in this file"
+    ]
+  },
+  "autonomy": {
+    "_note": "Global dials for --auto sessions, unchanged from autonomy-grants.json. These gate the whole run; the per-repo profile gates each write. Effective unattended merge = profile 'auto' AND role 'integration' AND level != A0 AND no carveOut path touched.",
+    "level": "A1",
+    "levels": {
+      "A0": "observed runs - draft-PR-only, no merges anywhere except the obot.roadmap standing grant (demotion target)",
+      "A1": "routine merges - standard-lane obot-merge unattended, minus the carve-out; the attested lane never (entry level, decided 2026-07-22)",
+      "A2": "scheduled - nightly trigger without a human launch (not yet enabled)"
+    },
+    "haltFile": ".claude/autonomy-halt",
+    "budgets": {
+      "wallClockHoursDefault": 4,
+      "incrementsPerRun": 1,
+      "_note": "checked at phase boundaries; hitting a cap parks the increment with a digest"
+    },
+    "issueCloses": {
+      "allowed": true,
+      "except": "hub Requirement issues - those close via release promotion PRs that @jwildfire approves",
+      "requires": "verifiable completion (merged PR by headRefOid, or directly verified repo state) cited in the closing comment"
+    },
+    "releases": {
+      "prep": true,
+      "publish": false,
+      "_note": "notes draft + staged promotion PR allowed; tagging and publishing always human-triggered"
+    },
+    "outsideOrg": "read-only, no exceptions - drafts handed to @jwildfire"
+  },
+  "carveOut": {
+    "_note": "PRs touching any of these merge only with @jwildfire's approval, even on a standard-lane branch in an 'auto' repo. Paths are relative to jwildfire/obot.agent unless prefixed 'workspace'.",
+    "paths": [
+      "scripts/policy.json",
+      "scripts/merge-policy.json",
+      "scripts/autonomy-grants.json",
+      "goals/",
+      "workspace .claude/hooks/",
+      "workspace .claude/settings.json"
+    ]
+  },
+  "repos": {
+    "jwildfire/safety.viz": {
+      "profile": "auto",
+      "branches": {
+        "integration": "dev",
+        "release": [
+          "main"
+        ]
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-22",
+        "where": "obot.roadmap#18 design review - merge tiers and the --auto grant matrix approved together"
+      }
+    },
+    "jwildfire/open.gismo": {
+      "profile": "auto",
+      "branches": {
+        "integration": "dev",
+        "release": [
+          "main"
+        ]
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-22",
+        "where": "obot.roadmap#18 design review"
+      },
+      "_note": "The old grants matrix carried 'obotclaw App install pending - until installed, no pushes/merges'. Cleared 2026-07-29: the App install was verified present (installation/repositories) and @jwildfire approved dropping the blocker, restoring this repo's full 'auto' grants."
+    },
+    "jwildfire/safety-histogram": {
+      "profile": "auto",
+      "branches": {
+        "integration": "dev",
+        "release": [
+          "master"
+        ]
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-22",
+        "where": "obot.roadmap#18 design review"
+      },
+      "_note": "The repo's DEFAULT branch is 'master', which is the release role here - integration is 'dev'. Roles are declared, never inferred from the default branch, precisely because of cases like this."
+    },
+    "jwildfire/gsm.safety": {
+      "profile": "auto",
+      "branches": {
+        "integration": "dev",
+        "release": [
+          "main"
+        ]
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-22",
+        "where": "obot.roadmap#18 design review - standard tier decided same day; branch model adopted in gsm.safety#44"
+      }
+    },
+    "jwildfire/open.csr": {
+      "profile": "auto",
+      "branches": {
+        "integration": "dev",
+        "release": [
+          "main"
+        ]
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-29",
+        "where": "AskUserQuestion decision prompt, 2026-07-29 session \u2014 'Both auto' selected for the two drift repos on PR #61; restores the standard dev lane and makes the active csr goal selectable by --auto"
+      },
+      "_note": "Was in merge-policy.json (2026-07-25) but absent from the autonomy matrix, so unattended sessions could not write here - a state neither profile reproduces. Resolved 2026-07-29: promoted to 'auto', which restores the standard dev lane and closes the gap that obot.agent#51 left open ('makes it selectable by --auto sessions' - the csr goal is registered active with open.csr as its backlog)."
+    },
+    "jwildfire/demo-301": {
+      "profile": "auto",
+      "branches": {
+        "integration": "main",
+        "release": [
+          "site"
+        ]
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-29",
+        "where": "AskUserQuestion decision prompt, 2026-07-29 session \u2014 'Both auto' selected for the two drift repos on PR #61; deliberate widening, unattended merges into main now permitted"
+      },
+      "_note": "No dev branch: 'main' is the integration lane (every PR's target) and 'site' is the live GitHub Pages source, which takes the release role. This is the case the role model exists for - no branch-name special-casing. Same drift as open.csr (merge lane, no autonomy entry); resolved 2026-07-29 by promoting to 'auto', a deliberate widening @jwildfire approved."
+    },
+    "jwildfire/obot.roadmap": {
+      "profile": "auto",
+      "branches": {
+        "integration": "main",
+        "release": []
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-04",
+        "where": "obot.roadmap autonomy grant - standard updates and direct commits to main without approval; never delete"
+      },
+      "custom": {
+        "directCommits": {
+          "value": "main",
+          "why": "the hub standing grant: routine roadmap updates commit straight to main, no PR ceremony. The no-delete invariant still applies in full.",
+          "approved": {
+            "by": "@jwildfire",
+            "date": "2026-07-04",
+            "where": "obot.roadmap autonomy grant"
+          }
+        }
+      }
+    },
+    "jwildfire/obot.agent": {
+      "profile": "auto",
+      "branches": {
+        "integration": "main",
+        "release": []
+      },
+      "approved": {
+        "by": "@jwildfire",
+        "date": "2026-07-22",
+        "where": "obot.roadmap#18 design review"
+      },
+      "_note": "The carveOut paths live in this repo, so many of its PRs need approval regardless of profile."
+    }
+  }
+}
