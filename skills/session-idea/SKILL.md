@@ -1,6 +1,6 @@
 ---
 name: session-idea
-description: "File one idea to the hub's Ideas discussions for triage — the in-session capture door to the idea queue, posted as obotclaw[bot] in the same shape the Siri/Reminders lane produces, honouring the `private:` prefix. Use when @jwildfire says 'session idea: …', '/session-idea', 'file that as an idea', 'park that for triage', or a half-formed thought surfaces that belongs in the queue rather than in this session. Do NOT use for a task to pick up later (that is session-update), tooling or convention friction (that is session-scaffold), a diary observation (that is session-note), work that already has or clearly deserves an issue (file or edit the issue directly), or triaging the queue that already exists (that is session-inbox)."
+description: "File one idea to the hub's Ideas discussions for triage — the in-session capture door to the idea queue, posted as obotclaw[bot] in the same shape the Siri/Reminders lane produces, honouring the `private:` prefix. Files directly by default; `--print` dry-runs only when @jwildfire asks to see the composed post first. Use when @jwildfire says 'session idea: …', '/session-idea', 'file that as an idea', 'park that for triage', or a half-formed thought surfaces that belongs in the queue rather than in this session. Do NOT use for a task to pick up later (that is session-update), tooling or convention friction (that is session-scaffold), a diary observation (that is session-note), work that already has or clearly deserves an issue (file or edit the issue directly), or triaging the queue that already exists (that is session-inbox)."
 argument-hint: "The idea to file"
 ---
 
@@ -46,7 +46,8 @@ somebody should decide," it is an idea.
 ### 1. Shape it before filing
 
 An idea is read cold, days later, by the triage Action or by @jwildfire on his
-phone. Spend one sentence making that possible:
+phone. Spend one sentence making that possible — **shaping is one pass, not a
+drafting exercise**: the triage Action reads it within minutes and can ask.
 
 - **Title** — the idea itself, not a category. "Make `obot-merge --check` report
   mergeability" beats "merge tooling". Keep it under 80 characters; longer titles
@@ -78,16 +79,22 @@ title/body/provenance shape [`reminders-to-ideas`](../../scripts/reminders-to-id
 produces — one queue, one format, whichever door the idea came through. It prints
 the discussion URL.
 
-When @jwildfire dictated the idea in his own words, use `--print` first and read
-the composed post back to him before filing; when the agent noticed it, file it
-and show him the result.
+**File directly and show the result — that is the default.** Use `--print` first
+**only when @jwildfire dictated the idea and asked to see the composed post
+before it goes out**; the dry-run → read-back → file loop is three round trips for
+the common case.
 
-### 4. Share and log
+### 4. Share and log — one round trip
+
+Chain the scratchpad log line into the **same** Bash call as `ideas-file` (`&&`),
+so filing, logging, and the URL cost one round trip:
 
 - Give the discussion URL as a clickable Markdown link (GitHub Link Sharing
   Convention).
-- Append one line to the scratchpad's `## Session log`
-  (`- HH:MM {tag} — filed idea: {title} {url}`), so
+- Append one line to the scratchpad's `## Session log` —
+  `- $(date +%H:%M) {tag} — filed idea: {title} {url}`, timestamp **shelled**,
+  inserted **under the heading** with the command in
+  [`templates/sibling-briefing.md`](../../templates/sibling-briefing.md) — so
   [`session-wrapup`](../session-wrapup/SKILL.md) can count captured-but-unpromoted
   ideas without mining transcripts.
 
@@ -97,6 +104,10 @@ Return to the work in flight. Filing an idea is not a licence to start it, and
 **not** an invitation to triage it in-session: the Action answers within minutes
 and `session-inbox` catches the rest. Triaging your own fresh post just spends
 tokens racing a lane that already works.
+
+This is the general pattern the whole framework follows — **capture, hand off,
+return**; the rule is stated for every skill in
+[`docs/session-framework.md`](../../docs/session-framework.md).
 
 ## Lifecycle
 

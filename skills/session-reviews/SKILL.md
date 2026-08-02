@@ -1,7 +1,7 @@
 ---
 name: session-reviews
-description: "Spawn a sibling agent that walks @jwildfire through the open PRs waiting on his decision — one at a time, leading with why each one matters and what is being asked of him, then executing the decision (mark ready, merge via obot-merge, request changes, defer). Use when @jwildfire says '/session-reviews', 'walk me through the PRs', 'what needs my review?', 'let's do reviews', or a session ends with several PRs stacked up awaiting him. Do NOT use to review the agent's own uncommitted diff (that is /code-review), to open a single PR he already named (just show it), or to merge anything without his explicit in-session approval."
-argument-hint: "Optional: a repo, a PR number, or a focus to scope the queue"
+description: "Spawn a sibling agent that walks @jwildfire through the open PRs waiting on his decision — one at a time, leading with why each one matters and what is being asked of him, then executing the decision (mark ready, merge via obot-merge, request changes, defer). One queue sweep, and the table, the lane choice, and the spawn go out in a single message. Use when @jwildfire says '/session-reviews', 'walk me through the PRs', 'what needs my review?', 'let's do reviews', or a session ends with several PRs stacked up awaiting him. Do NOT use to review the agent's own uncommitted diff (that is /code-review), to open a single PR he already named (just show it), or to merge anything without his explicit in-session approval."
+argument-hint: "Optional: a repo, a PR number, or a focus to scope the queue (carried in the reviewer's briefing, not investigated inline)"
 ---
 
 # Session Reviews
@@ -14,7 +14,9 @@ opens each PR with the decision it is asking for, and executes the answer.
 **It spawns an agent** (@jwildfire's wording: "create a new agent to walk me
 through review"). Reviewing is its whole job, so the lead session keeps its own
 thread and the reviewer can run for as long as the queue takes, driven from the
-terminal or from Remote Control on his phone.
+terminal or from Remote Control on his phone. That is the
+[responsiveness contract](../../docs/session-framework.md) in its intended shape:
+the lead acks and spawns, the queue is walked in the sibling.
 
 ## When to Use
 
@@ -30,9 +32,11 @@ his, always, and this skill never assumes it.
 
 ### 1. Build the queue
 
+**One sweep, not two.** Run it once, as JSON, and render the human table from that
+JSON — the un-flagged invocation is a second sweep for the same data:
+
 ```bash
-obot.agent/scripts/reviews-queue          # the table
-obot.agent/scripts/reviews-queue --json   # one object per PR, for the reviewer's briefing
+obot.agent/scripts/reviews-queue --json   # one object per PR: the table AND the reviewer's briefing
 ```
 
 One sweep across every repo he owns, split into three buckets:
@@ -56,6 +60,11 @@ If the queue is empty, say so and stop. Do not spawn an agent to report nothing.
 
 ### 2. Pick the lane
 
+**Steps 1, 2 and 3 go out in the same message**: the queue table, the lane choice,
+and the spawn. The choice is presented *alongside* the table, never as an extra
+round trip before it — and when he has already said "walk me through them", spawn
+immediately and mention the checkbox lane as an alternative.
+
 - **Default — the conversation.** He is at the terminal or on his phone and wants
   to talk through them. Spawn the reviewer (step 3).
 - **Large queue (roughly 5+) or he is stepping away — the checkboxes.** File the
@@ -64,14 +73,18 @@ If the queue is empty, say so and stop. Do not spawn an agent to report nothing.
   check ([obot.roadmap#114](https://github.com/jwildfire/obot.roadmap/issues/114),
   validated 2026-07-25). Offer the choice rather than deciding for him.
 - **`--here`** — he asked for the walkthrough in this session. Skip the spawn and
-  run steps 4-6 inline.
+  run steps 4-6 inline. Running it inline **suspends the responsiveness contract
+  at his request** — say so when it starts. It is one of the three declared
+  exemptions in [`docs/session-framework.md`](../../docs/session-framework.md).
 
 ### 3. Spawn the reviewer
 
 Follow the [`session-spawn`](../session-spawn/SKILL.md) contract in full — auto
 permission mode, `--remote-control`, `👯🤖 {date} {slug}` naming, green colour,
-the scratchpad heartbeat. This one is judgment-heavy and conversational, so give
-it a strong model.
+the scratchpad heartbeat. The reviewer inherits
+[`templates/sibling-briefing.md`](../../templates/sibling-briefing.md), so the
+briefing here carries only the walkthrough-specific text. This one is
+judgment-heavy and conversational, so give it a strong model.
 
 ```bash
 claude --bg --permission-mode auto --remote-control --model opus \
@@ -135,6 +148,10 @@ old constitutes approval.
 obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo> --check   # always first
 obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>
 ```
+
+Chain the `--check` / `gh pr ready` / `obot-merge` / mergeability re-read sequence
+into as few calls as the gates allow — this runs inside the reviewer sibling,
+where @jwildfire is waiting on each answer.
 
 Two traps, both verified against the live queue (2026-07-29):
 

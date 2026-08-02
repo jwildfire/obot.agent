@@ -1,6 +1,6 @@
 ---
 name: session-todo
-description: "Render the session todo list: the prioritized kickoff list persisted by session-init, plus mid-session additions from session-update and notes from session-note. Use when @jwildfire asks 'session todo', 'show the list', 'what's left this session', or after finishing items. Also checks items off when told they're done. Do NOT use to regenerate priorities from scratch (that is session-init)."
+description: "Render the session todo list: the prioritized kickoff list persisted by session-init, plus mid-session additions from session-update and notes from session-note. Use when @jwildfire asks 'session todo', 'show the list', 'what's left this session', or after finishing items. Also checks items off when told they're done. Straggler files are bounded (three most recent, none older than 7 days) and it points at the live session-hub page when the watch loop is running. Do NOT use to regenerate priorities from scratch (that is session-init)."
 argument-hint: "Optional: item(s) to check off before rendering"
 ---
 
@@ -27,6 +27,10 @@ what the scratchpad already holds.
 
 ## Procedure
 
+**Batch the whole flow**: the check-offs (edits) and the reads go out in **one
+tool block**, then one render — three sequential round trips become one plus the
+render.
+
 1. **Check off first, if asked** — if the request (or the argument) names
    finished items, mark them in the scratchpad, in whichever section they live
    (`## Overview` or `## Todo`):
@@ -35,10 +39,23 @@ what the scratchpad already holds.
    - [x] {item} *(done HH:MM)*
    ```
 
+   The `HH:MM` is **shelled, never modeled** (obot.agent#57) — write the line with
+   the same heading-anchored shell helper the heartbeat uses, substituting
+   `$(date '+*(done %H:%M)*')`, so a check-off never carries a hallucinated clock.
+
    Check off, never delete.
-2. **Read the scratchpad** — today's file, plus any recent files with unchecked
-   items (a session that ended without a wrapup leaves stragglers).
-3. **Render one formatted list**, top to bottom:
+2. **Read the scratchpad** — today's file plus **at most the three most recent
+   prior files, and none older than 7 days**, in **one batched call** (not a
+   glob-then-read sequence). Older unchecked items were the previous wrapup's job
+   and are carried in the hand-off; they are not re-swept here.
+3. **Take the cheap path when the ask is just "what's left?"** — render today's
+   `## Overview` and unchecked `## Todo` first, and note stragglers as a one-line
+   trailing count rather than expanding them. Expand only if he asks.
+4. **Point at the live view when it exists** — if a session-hub watch loop is
+   running (`pgrep -f "session-hub.mjs --watch"`), say so and point at the live
+   page rather than re-deriving what the loop already renders every 60s;
+   [`session-dashboard`](../session-dashboard/SKILL.md) opens it.
+5. **Render one formatted list**, top to bottom:
 
    - A one-line status summary: `N open / M done`.
    - **The kickoff priorities** (`## Overview`) as a markdown task list, keeping

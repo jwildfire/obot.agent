@@ -35,10 +35,28 @@ scratchpad, no wrapup.
 *Example:* the P004 test-driver runs as a bounded subagent inside a migration session;
 its coverage report returns to the parent session, which decides what to do with it.
 
+## Which tier, when
+
+The delegation rule the session framework rests on — the full contract is
+[`docs/session-framework.md`](session-framework.md); this is which tier it applies to.
+
+- **Spawned agents are the delegation primitive.** Anything that would cost the lead more
+  than ~30 seconds goes to a sibling, briefed from
+  [`templates/sibling-briefing.md`](../templates/sibling-briefing.md) via the
+  [`session-spawn`](../skills/session-spawn/SKILL.md) contract.
+- **Synchronous subagents are banned from the lead's response path.** A subagent blocks the
+  turn it runs in, so it may only be used when its entire result is needed to answer *and*
+  it is reliably bounded well inside the reply SLA. Verification sweeps, roadmap deltas,
+  ideas triage, PR recon, and free-text investigation are **not** bounded — they are
+  siblings. The evidence: a blocking init delta subagent measured 4m03s / 19 tool calls on
+  2026-08-01 and returned zero corrections.
+- **The lead's own jobs are render, spawn, relay, and stop.** If the lead is doing something
+  else during a bookend, it is doing a sibling's job.
+
 ## Comparison
 
-| | Lifecycle | Identity | Who reads its output |
-|---|---|---|---|
-| **Session** | Full: init → work → wrapup → diary | Own name/color | Jeremy, and later sessions via diary/scratchpad |
-| **Spawned agent** | Full, independent of the spawning session | Own name/color, set at kickoff | Jeremy; the spawner only via the artifacts it leaves |
-| **Subagent** | Bounded by the parent task; none of its own | None — acts under its parent's | The parent session, which relays or acts on it |
+| | Lifecycle | Identity | Who reads its output | Blocks the lead? |
+|---|---|---|---|---|
+| **Session** | Full: init → work → wrapup → diary | Own name/color | Jeremy, and later sessions via diary/scratchpad | n/a |
+| **Spawned agent** | Full, independent of the spawning session | Own name/color, set at kickoff | Jeremy; the spawner only via the artifacts it leaves | **No** |
+| **Subagent** | Bounded by the parent task; none of its own | None — acts under its parent's | The parent session, which relays or acts on it | **Yes — which is why it stays off the response path** |

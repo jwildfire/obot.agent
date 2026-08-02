@@ -41,15 +41,21 @@ For current status — which renderers are live, what's in review, what's next �
 - `AGENTS.md` — the overlay: program rules layered on gsm.agent conventions.
 - `agent.md` — short entrypoint: which skill to reach for.
 - `docs/` — framework docs (test framework, GxP framework, interview framework,
-  terminology, gsm.viz reference). The harvested requirement matrices moved to
+  terminology, [`session-framework`](docs/session-framework.md) — the responsiveness contract the session commands
+  answer to — gsm.viz reference). The harvested requirement matrices moved to
   safety.viz (`requirements/`) in obot.roadmap#64; `docs/requirements/` keeps the
   harvest-phase review record and a pointer.
 - `skills/` — the agent skills; grouped index in [`agent.md`](agent.md).
 - `commands/` — the short `/s-*` aliases for the session-command family (`/s-init`
   is `/session-init`); generated and installed by
-  [`scripts/session-aliases`](scripts/session-aliases).
+  [`scripts/session-aliases`](scripts/session-aliases). Note the workspace copies at
+  `~/Documents/obot2/.claude/commands/*.md` are **installed copies, not symlinks** —
+  editing the files here does not update the live workspace commands until
+  `scripts/session-aliases` is re-run. Skills under `.claude/skills/` *are* symlinks and
+  go live immediately.
 - `templates/` — starter templates (requirements matrix, interview log/question,
-  test-driver prompt).
+  test-driver prompt) plus the sibling briefing and the delta-sweep briefing — the
+  fill-in briefings `session-spawn` and the bookends use.
 - `interviews/` — P004 interview records (historical; kept verbatim).
 - `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens), `obot-merge`
   (the policy-gated merge lane), `obot-auto` (launches an unattended `--auto` session),
