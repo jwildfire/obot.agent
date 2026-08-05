@@ -37,7 +37,7 @@ echo "=== HANDOFF (preprocessed $(date '+%Y-%m-%d %H:%M')) ==="
 
 echo "=== SCRATCHPAD ==="
 n=0
-for p in $(ls -t "$WS"/.claude/session-notes/2*.md 2>/dev/null | head -2); do
+for p in $(ls -t "$WS"/.claude/session-notes/2*.md 2>/dev/null | grep -v -- '-init-delta' | head -2); do
   [ "$n" -gt 0 ] && echo "--- previous scratchpad (pointer-chase guard) ---"
   echo "file: $p (age: $(age "$p"))"
   section "$p" '^## Overview'
