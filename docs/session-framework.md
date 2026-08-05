@@ -28,6 +28,9 @@ Wall-clock is the symptom; **sequential model round trips are the cause**. The b
 - The 2026-08-01 blocking init delta agent cost **4m03s / 19 tool calls** and produced
   **zero** corrections to the hand-off list — the clearest available evidence that
   render-first-from-the-hand-off is both faster and safe.
+- **The zero-round-trip Tier 0**: the `/s-init` alias pre-injects the hand-off bundle
+  (`tools/session-init/handoff.sh`) as command preprocessing, so the first paint can
+  precede the first tool call entirely — the only route to hub#91's <10s bar.
 
 Optimize round trips, not tool calls: batch reads into one block, chain shell steps with
 `&&`, and put the ack and the spawn in the same message.
@@ -148,9 +151,22 @@ factors.
 - Speed may **not** be bought by regressing these.
 - None of the wrapup's five done-conditions may be traded for speed (hub#148 assumption 2).
 
+## Model allocation
+
+- **Lead/orchestrator sessions default to Opus** — the lead is a router, and routing does
+  not need the deepest model; per-turn latency is what @jwildfire feels at the keyboard.
+- **Fable is reached through subagents and siblings**: judgment-heavy, novel, or
+  framework-shaping work spawns with `--model fable`
+  ([`session-spawn`](../skills/session-spawn/SKILL.md) owns the per-task guidance); light
+  mechanical chores go to sonnet/haiku.
+- [`obot-auto`](../scripts/obot-auto) launches the 🦾🤖 lead with `--model opus` by
+  default (`--model` still overrides).
+
 ## Provenance
 
 - **SLAs** — @jwildfire's live mandate, 2026-08-01.
+- **Model allocation** — @jwildfire, 2026-08-04: "I'm good using opus as the default
+  orchestrator agent. it can always use fable in subagents or siblings."
 - **Design decisions D1-D7** (and **D8**, promoted here from the 2026-07-31
   orchestrator-responsiveness comment) come from
   [hub#91](https://github.com/jwildfire/obot.roadmap/issues/91) and its design doc, whose

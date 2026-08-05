@@ -60,28 +60,32 @@ conversation's own context) or at the end of a session (that is
 The lead's only init jobs are **read, paint, spawn, stop**. Everything
 model-bound happens in the sibling.
 
-### 1. Read the hand-off — ONE batched tool block
+### 1. Read the hand-off — or skip it: `/s-init` pre-injects it
 
-All Tier 0 sources are read in a **single** Bash call — not sequential Read
-calls, and not one call per source. The whole read is ~38ms locally and the
-sweep cache is ~2ms warm, so any latency here is round trips, not I/O.
+**Fast path (zero tool calls):** when the invocation already carries a
+`=== HANDOFF (preprocessed …) ===` block — the `/s-init` alias runs
+[`tools/session-init/handoff.sh`](../../tools/session-init/handoff.sh) as
+command preprocessing — the Tier-0 read is **already done. Make no tool calls
+before the paint**: go straight to step 2 and paint from the injected bundle.
+This is the only route to hub#91's <10s first-paint bar.
 
-Emit the four sources from one call, `===`-delimited so they parse in one pass:
+Otherwise (long-form `/session-init`, or the bundle is missing), all Tier 0
+sources are read in a **single** Bash call — the same script, never a bespoke
+inline chain. The whole read is ~40ms locally, so any latency here is round
+trips, not I/O:
 
 ```bash
-cd {workspace root} && \
-  echo "=== SCRATCHPAD ===" && \
-  ls -t .claude/session-notes/*.md 2>/dev/null | head -1 | xargs -I{} sh -c \
-    'echo "file: {}"; awk "/^## Overview/,/^## [^O]/" {}; grep -n "^- \[ \]" {}' && \
-  echo "=== DIARY ===" && \
-  ls -t ../obot.roadmap/diary/*.md 2>/dev/null | grep -v README | head -1 | xargs -I{} sh -c \
-    'echo "file: {}"; awk "/^## Next session: loose ends/,/^## [^N]/" {}; awk "/^## 🙋 ToDo/,/^## [^🙋]/" {}' && \
-  echo "=== MEMORY ===" && \
-  cat ~/.claude/projects/*obot2/memory/next-session-todo.md 2>/dev/null && \
-  echo "=== SWEEP CACHE ===" && \
-  ls -l .claude/session-hub/cache/ 2>/dev/null && \
-  cat .claude/session-hub/cache/gh-sweep.json 2>/dev/null
+cd {workspace root} && bash obot.agent/tools/session-init/handoff.sh
 ```
+
+The script is the single source of truth for the Tier-0 read, and it is
+failure-tolerant by construction: every source optional, zero-match greps
+harmless, always exits 0. (The 2026-08-04 acceptance run lost a full round
+trip — and the SLA — to a `grep` exiting 1 inside a hand-rolled `&&` chain;
+that is why there is no inline block to copy here.) It emits, `===`-delimited
+with precomputed ages: the **two** newest scratchpads (both, because a wrapup
+has left "see YYYY-MM-DD.md" pointers before), the latest diary hand-off
+sections, the `next-session-todo` memory, and the sweep cache.
 
 - **Session scratchpad(s)** — the newest `.claude/session-notes/*.md`: its
   `## Overview` block with check state, plus any unchecked `## Todo` stragglers
@@ -104,6 +108,15 @@ more than ~3 days old), skip to the [fallback](#fallback-full-sweep).
 
 The painted list is the deliverable and it must be reachable in **<= 2 lead
 round trips** from invocation.
+
+**Paint mid-turn, not end-of-turn.** Emit the painted list as visible text the
+moment the hand-off is in context — on the fast path that is the **first text
+of the first response, before any tool call**; on the script path it
+immediately follows the one read. The persist write and the sibling spawn
+(steps 3–4) come **after** the paint as tool calls in the same turn, and the
+turn closes with the one-line ack — never a re-print of the list. Holding the
+paint until after the persist/spawn calls cost a full visible round trip on
+2026-08-04.
 
 **Tier 0 — render the hand-off verbatim.** Reproduce the scratchpad
 `## Overview` numbering, its check state, and its `Agent-actionable` /
@@ -188,8 +201,14 @@ model-bound jobs:
 3. any **free-text focus recon** from the command argument.
 
 Brief it from
-[`templates/delta-sweep-briefing.md`](../../templates/delta-sweep-briefing.md)
-over the [`session-spawn`](../session-spawn/SKILL.md) contract (identity, auto
+[`templates/delta-sweep-briefing.md`](../../templates/delta-sweep-briefing.md) —
+resolve it as **`obot.agent/templates/delta-sweep-briefing.md` from the
+workspace root**; the relative link does not resolve through the workspace
+skill symlink, and the 2026-08-04 run concluded the template was "missing",
+composed a drifted bespoke briefing, and reproduced obot.agent#57's symptom
+through exactly that drift. Never compose the briefing from scratch while the
+template exists. Lay it over the
+[`session-spawn`](../session-spawn/SKILL.md) contract (identity, auto
 permission mode, remote control, heartbeat, terminal `result:` line).
 
 Ack in **one line** — what was delegated, the slug, where the corrections will
@@ -229,9 +248,17 @@ be named ("moved sv#122 up: CI went green"). Weigh:
 ### Timing ledger
 
 At steps 2 and 5, append one JSON line per step to
-`.claude/session-hub/cache/init-timings.jsonl` per the schema in the
-[responsiveness contract](../../docs/session-framework.md). The ledger is local
-telemetry — **never commit it**.
+`.claude/session-hub/cache/init-timings.jsonl` using **exactly** the contract
+schema — non-schema keys made the 2026-08-04 acceptance line unscoreable
+against the SLA it existed to prove:
+
+```json
+{"ts":"<ISO, shelled>","bookend":"init","step":"first-paint|tier2-relay","tier":0,"ms":0,"session":"<job id>"}
+```
+
+`ms` is elapsed from invocation to the step; the `=== NOW ===` stamp in the
+hand-off bundle anchors the start. The ledger is local telemetry — **never
+commit it**.
 
 ## Housekeeping — after the first paint
 

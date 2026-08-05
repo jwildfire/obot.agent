@@ -320,6 +320,14 @@ section, the scratchpad `## Overview` check-state, and the `next-session-todo`
 memory (step 8) — the hand-off [`session-init`](../session-init/SKILL.md) reads
 back.
 
+**The hand-off must be self-contained (2026-08-04):** the `## Overview` this
+wrapup leaves behind carries the complete ranked list — full one-line items
+with links, groups, and check-state — in the **current day's** scratchpad,
+never a pointer to an earlier day's file ("see YYYY-MM-DD.md"). A session that
+spans days copies the list forward into today's file as part of step 8. Init
+reads ONE file; the 2026-08-04 init paid a round trip chasing a two-file
+pointer chain.
+
 **Roadmap prep — obot.agent orchestration job (1), roadmap-standards enforcement:**
 every priority on the drafted list must link a hub requirement. **The obligation is
 unchanged; only its position relative to the checkpoint moves** (hub #148 D6). A

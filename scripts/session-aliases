@@ -63,12 +63,26 @@ frontmatter() {
   ' "$1"
 }
 
+# session-init's alias additionally pre-injects the Tier-0 hand-off bundle as `!`
+# command preprocessing (executed by the harness before the model runs, the same
+# expansion pass as `@`), so the first paint needs zero tool calls — the only
+# route to hub#91's <10s first-paint bar. `allowed-tools` scopes the preprocessing
+# to exactly that script. If a CLI version ignores `!` lines, the line renders as
+# literal text and the skill's own step-1 script read still works — graceful
+# degradation, verified live before relying on it (2026-08-04 plan).
 render() {
   local skill="$1" short="$2" hint="$3"
   printf -- '---\n'
   printf -- 'description: "Short alias for /%s. Both forms load the same skill."\n' "$skill"
   [ -n "$hint" ] && printf -- 'argument-hint: %s\n' "$hint"
+  if [ "$skill" = "session-init" ]; then
+    printf -- 'allowed-tools: Bash(bash obot.agent/tools/session-init/handoff.sh)\n'
+  fi
   printf -- '---\n\n'
+  if [ "$skill" = "session-init" ]; then
+    printf -- '## Tier-0 hand-off bundle (pre-read — paint directly from this, zero tool calls)\n\n'
+    printf -- '!%s\n\n' '`bash obot.agent/tools/session-init/handoff.sh`'
+  fi
   printf -- '@.claude/skills/%s/SKILL.md\n' "$skill"
 }
 

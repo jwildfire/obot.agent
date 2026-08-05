@@ -85,10 +85,11 @@ As the lead agent this is your call — think strategically per sibling rather
 than defaulting to your own settings:
 
 - **Model** (`--model`): judgment-heavy, novel, or framework-shaping work → the
-  strongest available model; well-specified template-following implementation →
-  a mid-tier model (e.g. opus); light mechanical chores → a small fast model
-  (e.g. sonnet or haiku). State the choice and why in your reply (allocation
-  grant, 2026-07-11).
+  strongest available model (fable — siblings and subagents are where Fable
+  lives: leads default to opus, @jwildfire 2026-08-04); well-specified
+  template-following implementation → a mid-tier model (e.g. opus); light
+  mechanical chores → a small fast model (e.g. sonnet or haiku). State the
+  choice and why in your reply (allocation grant, 2026-07-11).
 - **Effort** (`--effort`): inherit by default; raise it for hard verification or
   judgment work, lower it for mechanical tasks.
 - **Name** (`-n`): `👯🤖 {YYYY-MM-DD} {slug}` per the workspace naming
