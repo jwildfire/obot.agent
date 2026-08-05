@@ -2,7 +2,12 @@
 name: session-init
 description: "Open a working session by rendering the previous wrapup's hand-off immediately — first paint in under a minute — then delegating the GitHub delta, the ideas sweep, and any free-text focus recon to one background sibling that revises the list when it lands. Use at the start of any coding session — 'session init', 'session overview', 'prioritized list of open tasks', 'what's on deck'. With --auto (hub #18, launched via obot-auto), the same init then selects the top eligible increment and proceeds as a fully autonomous dev session instead of stopping at the list. Do NOT use mid-session (session-todo re-renders the persisted list) or for closing out (that is session-wrapup)."
 argument-hint: "Optional: session focus — weighted at Tier 2 by the recon sibling, never investigated inline"
+allowed-tools: Bash(bash obot.agent/tools/session-init/handoff.sh)
 ---
+
+## Tier-0 hand-off bundle (pre-read — paint directly from this, zero tool calls)
+
+!`bash obot.agent/tools/session-init/handoff.sh`
 
 # Session Init
 
@@ -60,16 +65,16 @@ conversation's own context) or at the end of a session (that is
 The lead's only init jobs are **read, paint, spawn, stop**. Everything
 model-bound happens in the sibling.
 
-### 1. Read the hand-off — or skip it: `/s-init` pre-injects it
+### 1. Read the hand-off — or skip it: the command pre-injects it
 
 **Fast path (zero tool calls):** when the invocation already carries a
-`=== HANDOFF (preprocessed …) ===` block — the `/s-init` alias runs
-[`tools/session-init/handoff.sh`](../../tools/session-init/handoff.sh) as
-command preprocessing — the Tier-0 read is **already done. Make no tool calls
+`=== HANDOFF (preprocessed …) ===` block — the skill itself now pre-runs
+[`tools/session-init/handoff.sh`](../../tools/session-init/handoff.sh) at load,
+so **both** `/session-init` and `/s-init` inject it — the Tier-0 read is **already done. Make no tool calls
 before the paint**: go straight to step 2 and paint from the injected bundle.
-This is the only route to hub#91's <10s first-paint bar.
+This is the route to hub#91's <10s first-paint bar, on both command forms.
 
-Otherwise (long-form `/session-init`, or the bundle is missing), all Tier 0
+Otherwise (the bundle is missing — e.g. inline shell execution disabled), all Tier 0
 sources are read in a **single** Bash call — the same script, never a bespoke
 inline chain. The whole read is ~40ms locally, so any latency here is round
 trips, not I/O:
