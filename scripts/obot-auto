@@ -12,7 +12,8 @@
 #
 #   --goal            goal slug from goals/registry.json (default: charts)
 #   --increment       pin the increment; still subject to eligibility checks
-#   --model           model override for the session (default: inherit)
+#   --model           model override for the session (default: opus — leads
+#                     default to Opus; docs/session-framework.md Model allocation)
 #   --dry-run         the spawned session stops after init + selection and
 #                     reports the chosen increment (costs one short session)
 #   --preflight-only  run the local checks and print the launch command
@@ -125,8 +126,11 @@ ARGS="--goal $GOAL"
 [ "$DRY_RUN" -eq 1 ] && ARGS="$ARGS --dry-run"
 PROMPT="/session-init --auto $ARGS"
 
-CMD=(claude --bg --permission-mode auto -n "$NAME")
-[ -n "$MODEL" ] && CMD+=(--model "$MODEL")
+# Leads default to Opus (@jwildfire 2026-08-04, framework doc Model allocation);
+# --remote-control is spawn canon (oa#42) — closes oa#54 for the --auto lead.
+MODEL="${MODEL:-opus}"
+CMD=(claude --bg --permission-mode auto --remote-control -n "$NAME")
+CMD+=(--model "$MODEL")
 CMD+=("$PROMPT")
 
 if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
