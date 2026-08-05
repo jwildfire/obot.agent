@@ -12,7 +12,19 @@ documented divergence is commit attribution mechanics — see
 [`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md).
 
 The tiers of agent execution used in this program (*session* / *spawned agent* /
-*subagent*) are defined in [`docs/terminology.md`](docs/terminology.md).
+*subagent*) are defined in [`docs/terminology.md`](docs/terminology.md), and which tier may
+sit in the lead's response path is set by
+[`docs/session-framework.md`](docs/session-framework.md).
+
+## Session framework: responsiveness
+
+- The session bookends and every chat reply answer to a responsiveness contract —
+  SLAs, the round-trip budget, the delegation rule, first-paint and revision handling,
+  and the declared exemptions. [`docs/session-framework.md`](docs/session-framework.md)
+  is that contract and the sole authority for it (@jwildfire's live mandate, 2026-08-01).
+- Read it before touching any session skill, command file, or briefing template. This
+  file deliberately does not restate its clauses, so there is only ever one copy to keep
+  current.
 
 ## Mission
 

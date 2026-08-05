@@ -1,6 +1,6 @@
 ---
 name: obot-identity
-description: "Use when an agent action should be attributed to the obot automation identity (obotclaw[bot]) rather than @jwildfire, or when deciding which of the two identities applies. Covers minting installation tokens with scripts/obot-app-token and the git/gh usage patterns for bot-attributed commits, pushes, issues, and PRs."
+description: "Use when an agent action should be attributed to the obot automation identity (obotclaw[bot]) rather than @jwildfire, when deciding which of the two identities applies, or when naming/colouring a session (lead, sibling, ultracode, --auto) and pinning the lead in the agents view. Covers minting installation tokens with scripts/obot-app-token, the git/gh usage patterns for bot-attributed commits, pushes, issues, and PRs, and the session naming conventions."
 ---
 
 # obot Identity Skill
@@ -20,6 +20,29 @@ applies. Covers minting tokens with `scripts/obot-app-token` and the git/gh usag
 The AGENTS.md attribution convention (drafted-by line in the body) applies to the *content*
 of issues, PRs, and comments regardless of which identity posts them. Jeremy still reviews
 and merges as @jwildfire — the bot authors the work; it never approves or merges it.
+
+## Session identity and naming
+
+Who a session *is*, in the terminal and in the `claude agents` view. This is
+**housekeeping, not startup** — it never sits ahead of a bookend's first paint (see
+[`docs/session-framework.md`](../../docs/session-framework.md)).
+
+- **Names and colours**:
+  - lead / main session — `😺🤖 {YYYY-MM-DD} {session # (only if > 1 that day)}`, **orange**
+  - spawned siblings — `👯🤖 {date} {slug}`, **green** (@jwildfire, 2026-07-11)
+  - ultracode / Workflow jobs — `⚡️🤖 {description}`, description-based, no date (2026-07-12)
+  - `--auto` autonomous sessions — `🦾🤖 {YYYY-MM-DD} {slug}`, **purple**
+- **Setting them**: interactive sessions use the built-in `/name` and `/color` slash
+  commands, which the model **cannot run** — remind @jwildfire to type them if the session
+  isn't named yet. A background session sets `name` and `color` directly in its own
+  `~/.claude/jobs/{id}/state.json`.
+- **Pinning the lead**: the lead pins itself to the top of the `claude agents` view by
+  appending its own job id to `~/.claude/jobs/pins.json` — the view's persistent pin store,
+  a plain JSON array of job ids. Manually-added entries render as pinned and survive view
+  restarts (verified live 2026-07-24). While editing, drop ids that no longer have a
+  `~/.claude/jobs/{id}` directory (inert pins from deleted jobs). Siblings stay unpinned so
+  the pinned group stays the lead-session lane; `ctrl+T` in the view remains for ad-hoc
+  pins (@jwildfire, 2026-07-23).
 
 ### Attribution mechanics (D2, resolved 2026-07-11)
 
