@@ -124,7 +124,7 @@ NAME="🦾🤖 $(date +%F) $SLUG"
 ARGS="--goal $GOAL"
 [ -n "$INCREMENT" ] && ARGS="$ARGS --increment $INCREMENT"
 [ "$DRY_RUN" -eq 1 ] && ARGS="$ARGS --dry-run"
-PROMPT="/session-init --auto $ARGS"
+PROMPT="/s-init --auto $ARGS"
 
 # Leads default to Opus (@jwildfire 2026-08-04, framework doc Model allocation);
 # --remote-control is spawn canon (oa#42) — closes oa#54 for the --auto lead.
