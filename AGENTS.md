@@ -70,6 +70,7 @@ Modernize SafetyGraphics JavaScript renderers with a GxP-oriented engineering di
 - Do not remove behavior because it is awkward to implement in Chart.js; document the requirement and propose a replacement or justified de-scope.
 - Preserve backward-compatible data mappings unless Jeremy explicitly approves a breaking API change.
 - Every migration PR must state which requirements it covers and which tests provide evidence.
+- Do not start work on an issue that carries no milestone — see [Milestone before work](#milestone-before-work).
 - Do not claim GxP validation. Use language like "GxP-oriented", "qualification-ready evidence", or "traceability support" unless a formal validation process exists.
 
 ## Reference architecture
@@ -104,6 +105,36 @@ This is the project-level test-first discipline for JS renderer work, used along
 upstream [`tdd`](https://github.com/Gilead-BioStats/gsm.agent/blob/main/skills/tdd/SKILL.md)
 skill; how the two relate will be settled when gsm.agent's Q3 skills-library work lands
 (D1, deferred 2026-07-11).
+
+## Milestone before work
+
+**No work starts on an issue until a milestone is assigned** (@jwildfire, 2026-08-14).
+The milestone belongs to *picking the issue up* — it goes on before the branch, not at
+close-out.
+
+- **Selecting work.** An issue with no milestone is not pickable. Assign one first,
+  creating the release's milestone if it does not exist yet, or say plainly why the issue
+  belongs to no release and pick something else. The `--auto` selection criteria in
+  [`skills/session-init/SKILL.md`](skills/session-init/SKILL.md) carry this as an
+  eligibility check, and it is the earliest place the rule bites.
+- **Both halves are required, not either.** The **milestone groups** the release; the
+  **`Closes #N` keyword closes** the issue. `Closes` lines with no milestone ship work no
+  release accounts for; a milestone with no `Closes` lines leaves shipped issues open.
+- **Every RC PR body names the issues its release ships**, one `Closes #N` line each, even
+  when increment PRs already closed them — the RC body is the release's manifest.
+- **The milestone records the release that shipped the work**, not the wave that scoped it.
+  When an issue slips a release, move its milestone forward at ship time rather than
+  leaving the scoping wave's version on it.
+- Enforced mechanically by [`scripts/obot-merge`](scripts/obot-merge), which refuses a
+  merge whose `Closes` target carries no milestone and a release-role merge whose body
+  names no issue. `--no-milestone '<reason>'` and `--no-issues '<reason>'` are the escape
+  hatches; each wants a real reason, and neither is a substitute for assigning the
+  milestone.
+
+**Why this exists.** safety.viz v1.6.0 (2026-08-14) shipped four delivered issues and
+grouped none of them: no `v1.6.0` milestone existed, three of the issues still carried
+`v1.2.0` from the wave that scoped them, and the RC PR body carried no `Closes` lines. The
+release's own record had to be reconstructed from the diff the same night.
 
 ## Branching and release model (safety.viz only)
 

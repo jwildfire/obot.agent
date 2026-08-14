@@ -22,6 +22,29 @@ where the notes live and how they are written.
   the altitude exemplar remains the
   [v1.5.0 release](https://github.com/jwildfire/safety.viz/releases/tag/v1.5.0).
 
+## Before the notes: the milestone
+
+The notes and the milestone describe the same release, so build the milestone
+first and write the notes from it.
+
+1. **Create the release's milestone** in the repo if it does not exist —
+   matching the existing naming exactly (`v1.6.0`, not `v1.6`), due-dated to the
+   release, described in one line.
+2. **Assign it to every issue the release delivers**, taken from the increment
+   PRs' `Closes` lines over the window (`git log <last-tag>..origin/<integration>`),
+   not from the notes draft. Move the milestone forward off the wave that scoped
+   the issue: it records **the release that shipped the work**.
+3. **Close only what is fully delivered.** An issue delivered in part keeps the
+   milestone, stays open, and gets a comment naming exactly what remains — the
+   notes then say "partial" for it. When in doubt, leave it open.
+4. **Carry a `Closes #N` line into the RC PR body for each of them**, even where
+   the increment PR already closed the issue. The milestone groups; the keyword
+   closes; the RC body is the manifest. [`scripts/obot-merge`](../../scripts/obot-merge)
+   refuses the release merge without it.
+5. **Close the milestone** when the release ships and nothing in it is open.
+
+Full rule and its history: [`AGENTS.md` → Milestone before work](../../AGENTS.md#milestone-before-work).
+
 ## The section shape
 
 In order, for `# {repo} vX.Y.Z`:
