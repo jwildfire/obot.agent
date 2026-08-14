@@ -111,5 +111,17 @@ The machinery for scheduling these runs is hub
 [#122](https://github.com/jwildfire/obot.roadmap/issues/122); the release
 tracking behind the summary is [#123](https://github.com/jwildfire/obot.roadmap/issues/123).
 
+## The per-session wrapup uses the same two headlines
+
+Until the nightly summary exists, the session wrapup *is* the delivery vehicle,
+so it carries the same ordering: every wrapup output — checkpoint page, diary
+entry, `--auto` morning digest, closing chat response — opens with
+**🚦 Release candidates needing review**, then **🧭 Decisions needed**, each a
+bulleted list of one-line items linking their PR or draft release and their hub
+demo or decision artifact. Both lists are cumulative: an RC he has not reviewed
+and a decision he has not made stay at the top of every subsequent wrapup until
+he closes them. The composition rules live in
+[`skills/session-wrapup/SKILL.md`](../skills/session-wrapup/SKILL.md#the-two-headlines).
+
 ---
 This document was drafted by Claude Code using Opus 5 and reviewed by @jwildfire

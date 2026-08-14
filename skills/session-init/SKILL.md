@@ -96,8 +96,12 @@ sections, the `next-session-todo` memory, and the sweep cache.
   `## Overview` block with check state, plus any unchecked `## Todo` stragglers
   from sessions that ended without a wrapup.
 - **The latest diary entry** in [`diary/`](../../../obot.roadmap/diary/) — only
-  its `## Next session: loose ends` and `## 🙋 ToDo` sections (skip the rest;
-  skip `README.md`).
+  its two headline sections (`## 🚦 Release candidates needing review` and
+  `## 🧭 Decisions needed`, the standing queue of items awaiting @jwildfire),
+  plus `## Next session: loose ends` and `## 🙋 ToDo` (skip the rest; skip
+  `README.md`). Headline items belong in the paint's *Waiting on @jwildfire*
+  group, never ranked into the agent-actionable list — they are his queue, not
+  the session's work.
 - **The `next-session-todo` memory** — the agreed priorities from the last
   wrapup checkpoint.
 - **The session-hub sweep cache** under `.claude/session-hub/cache/`, with its
