@@ -11,8 +11,15 @@ where the notes live and how they are written.
 
 ## Where the notes live: NEWS.md
 
-- Every release-shipping repo keeps a **`NEWS.md` at the repo root** — the running release
-  log, newest release first (@jwildfire, 2026-08-14, v1.6.0 RC review).
+- **Every repo keeps a `NEWS.md` at the repo root, always current in `main`** — the running
+  release log, newest section first (@jwildfire, 2026-08-14 v1.6.0 RC review; extended to
+  every repo 2026-08-15, [decision record](https://github.com/jwildfire/obot.roadmap/discussions/155)).
+- **Unreleased work accumulates under a `vX.Y.Z (Upcoming)` heading.** Merged-but-unreleased
+  changes are listed there as they land, so the repo always carries a running list of
+  what's new and un-released. When the release is cut, the heading **loses the
+  `(Upcoming)` suffix** and its section is the release body, copied verbatim — the
+  `(Upcoming)` marker never appears in a published release. Keeping the section current is
+  part of landing the change, not a release-time reconstruction.
 - The **current section is the draft of the release notes**: it lands on the integration
   branch during the RC window, flows into the open RC PR, and is what @jwildfire reads as
   "the release notes" when reviewing. On approval, the section is **copied verbatim as the
@@ -47,7 +54,8 @@ Full rule and its history: [`AGENTS.md` → Milestone before work](../../AGENTS.
 
 ## The section shape
 
-In order, for `# {repo} vX.Y.Z`:
+In order, for `# {repo} vX.Y.Z` (titled `# {repo} vX.Y.Z (Upcoming)` until the release is
+cut):
 
 1. **The demo-artifact link, first.** A `**See it move:**` line pointing at the release's
    annotated demo page under `obot.roadmap/reports/{slug}/` — always the first line of the
@@ -92,6 +100,8 @@ what the release pages already say — never invent history.
   repo's formatter gate (e.g. `npx prettier --check NEWS.md`) before pushing.
 - Keep the RC PR body's notes and NEWS.md **saying the same thing** — when one is revised
   in review, revise the other (Draft Sync Convention).
-- Repos that release by draft GitHub release rather than a dev → main PR (obot.agent,
-  obot.roadmap, demo-301) keep the same NEWS.md; the draft release body is its current
-  section.
+- Repos whose integration branch is `main` release the same way, from a lagging release
+  branch: obot.agent's RC is a `main → stable` PR (the R2 shape, @jwildfire 2026-08-15),
+  demo-301's is `main → site`. The NEWS.md contract is identical — the current
+  `(Upcoming)` section becomes the RC PR's notes and the tag's body. The draft-GitHub-release
+  workaround is retired ([rc-framework.md](../../docs/rc-framework.md)).

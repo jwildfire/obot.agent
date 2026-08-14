@@ -1,7 +1,7 @@
 {
   "$schema_note": "THE guardrail file for agent writes in the obot workspace. One per-repo policy, replacing the merge-policy.json + autonomy-grants.json pair (which had to be edited separately for every repo and had already drifted). A repo gets ONE decision: its profile. 'protected' is the default for every repo @jwildfire has not explicitly promoted; 'auto' is a promotion he approves, recorded in the repo's 'approved' block. Anything a repo needs BEYOND its profile goes in 'custom' and needs its own recorded approval. Repos absent from 'repos' are refused entirely - listing a repo is itself a decision. This file sits inside its own carve-out: PRs touching it never merge unattended, and never merge at all without @jwildfire's sign-off.",
   "version": 2,
-  "updated": "2026-07-29",
+  "updated": "2026-08-15",
   "design": "https://jwildfire.github.io/obot.roadmap/requirements/design/18_design.html",
   "supersedes": [
     "scripts/merge-policy.json",
@@ -216,14 +216,16 @@
       "profile": "auto",
       "branches": {
         "integration": "main",
-        "release": []
+        "release": [
+          "stable"
+        ]
       },
       "approved": {
         "by": "@jwildfire",
         "date": "2026-07-22",
         "where": "obot.roadmap#18 design review"
       },
-      "_note": "The carveOut paths live in this repo, so many of its PRs need approval regardless of profile."
+      "_note": "The carveOut paths live in this repo, so many of its PRs need approval regardless of profile. 'stable' is the R2 lagging release branch (@jwildfire approved R2 on 2026-08-15, recorded in obot.roadmap discussion #155): cut at the v0.3.0 commit, work keeps landing on 'main', each release is a main -> stable PR on the attested lane, and the tag lands on 'stable'."
     }
   }
 }

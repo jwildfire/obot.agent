@@ -1,0 +1,23 @@
+# The minimum gate behind automatic merges to main (operational-repo control,
+# @jwildfire 2026-08-15, obot.roadmap discussion #155): the full node test suite
+# plus the policy-file validator, on every push and PR. A repo whose merges to
+# production are automatic needs something that makes breakage appear.
+name: test
+
+on:
+  push:
+    branches: [main, stable]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test suite
+        run: node --test tools/session-hub/test/*.test.mjs tools/statusline/test/*.test.mjs scripts/test/*.test.mjs
+      - name: Policy file validation
+        run: python3 scripts/obot-policy validate

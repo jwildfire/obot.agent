@@ -6,7 +6,7 @@ account of what a user can now do. The GitHub release publishes from the section
 here, copied verbatim, when the release is approved and tagged.
 -->
 
-# obot.agent v0.4.0
+# obot.agent v0.4.0 (Upcoming)
 
 **See it move:** the [annotated v0.4.0 demo](https://jwildfire.github.io/obot.roadmap/reports/oa-v0.4-demo/) walks each change as a real terminal capture with the command that produced it.
 
@@ -26,6 +26,14 @@ v0.3.0 gave obot the ability to run unattended. v0.4.0 is about what that run co
 
 - **Releases now have a written contract.** `docs/rc-framework.md` states what reaches your review queue — release candidates and decision artifacts, nothing else — and what a candidate must carry, with a deployed demo page as a hard gate. The companion `rc-release-notes` skill puts the notes in a repo's `NEWS.md`, demo link first, and the tag publishes that section verbatim on approval. This file is that convention applied to obot.agent itself. ([#83](https://github.com/jwildfire/obot.agent/pull/83), [#86](https://github.com/jwildfire/obot.agent/pull/86) · hub [#123](https://github.com/jwildfire/obot.roadmap/issues/123))
 
+- **Releases are now real, reviewable PRs.** A lagging `stable` branch, cut at v0.3.0, gives this repo what it never had: a base to propose a release against. Each release is a `main → stable` PR whose diff is exactly the release window, carrying the RC roles and merging only with explicit approval — the release you are reading arrives that way. The same decision set the program's governing principle (operational repos self-improve with automatic merges to `main` and periodic `stable` releases; user-facing clinical work is reviewed before prod) and the NEWS.md convention this heading follows: every repo keeps a NEWS.md current in `main`, unreleased work under a `(Upcoming)` heading. ([decision record](https://github.com/jwildfire/obot.roadmap/discussions/155))
+
+- **The test suite runs in CI.** Every push and pull request now runs the full 112-test suite plus the policy-file validator on GitHub Actions — previously this repo had no CI at all, which mattered rather a lot for a repo whose merges to production are automatic. A red check now blocks a broken `main` instead of a morning surprise.
+
+- **Prime remembers across restarts.** The standing Q&A session writes its durable state to a capped, provenance-stamped `prime-state.md`, and a cold session rehydrates from one read via `tools/prime-rehydrate` — including across midnight, which the first version got wrong and a same-night fix corrected. ([#91](https://github.com/jwildfire/obot.agent/pull/91), [#94](https://github.com/jwildfire/obot.agent/pull/94) · hub [#154](https://github.com/jwildfire/obot.roadmap/discussions/154))
+
+- **`/grill-me` interviews you about a goal** — a resumable, multi-session elicitation interview that extracts what you want built, including the parts held tacitly, before requirements are filed. ([#96](https://github.com/jwildfire/obot.agent/pull/96))
+
 - **Thirteen session commands have one-word aliases, and three are new:** `/s-idea` files a half-formed thought to the triage queue without derailing the session, `/s-reviews` walks the PRs waiting on a decision one at a time, and `/s-prime` runs a session as the standing question desk — a long-lived session that answers from warm context in seconds and delegates anything slower. ([#64](https://github.com/jwildfire/obot.agent/pull/64), [#84](https://github.com/jwildfire/obot.agent/pull/84) · hub [#48](https://github.com/jwildfire/obot.roadmap/issues/48), [#114](https://github.com/jwildfire/obot.roadmap/issues/114))
 
 ## Also in this release
@@ -37,7 +45,7 @@ v0.3.0 gave obot the ability to run unattended. v0.4.0 is about what that run co
 
 ## Tests and provenance
 
-112 tests are green across the status line, session hub, serve loop, audit lane and the merge gate, up from 66 at v0.3.0 (`node --test tools/session-hub/test/*.test.mjs tools/statusline/test/*.test.mjs scripts/test/*.test.mjs`). Every capture on the demo page is real output from this machine with its reproduce command executed before publication.
+112 tests are green across the status line, session hub, serve loop, audit lane and the merge gate, up from 66 at v0.3.0 (`node --test tools/session-hub/test/*.test.mjs tools/statusline/test/*.test.mjs scripts/test/*.test.mjs`), and the suite now runs in CI on every push and pull request. Every capture on the demo page is real output from this machine with its reproduce command executed before publication.
 
 # Earlier releases
 
