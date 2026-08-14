@@ -37,9 +37,13 @@ In order, for `# {repo} vX.Y.Z`:
    hub requirement, its repo issue(s), and its implementing PR(s), and ends with a
    `[Try it live](…)` link where a live surface exists.
 4. **`## Also in this release`** — process, housekeeping and evidence work, one line each.
-5. **Optional inventory** — for repos with a gallery or module roster, the current table
-   with the new entries bolded.
-6. **A tests/provenance line** — suite counts and gates, compressed.
+5. **A tests/provenance line** — suite counts and gates, compressed.
+
+Do **not** repeat a standing inventory (the full gallery / module-roster table) in every
+release's section — a release section covers what *changed*; the current roster lives on
+the gallery page, and the notes link to it ("no need to list all the renderers in the
+news.md every future release", @jwildfire, v1.6.0 approval review, 2026-08-14 — v1.6.0
+itself keeps its table as the shape's first exercise).
 
 Below the versioned sections, an **`# Earlier releases`** index: one line per past release
 linking its GitHub release page (and its demo artifact where one exists). Back-fill only
@@ -55,8 +59,11 @@ what the release pages already say — never invent history.
   bodies are the primary source; the notes compress them to the user-facing layer.
 - **Optimize for the review path** @jwildfire actually walks: skim the RC PR → read the
   demo page → read the release notes → dig elsewhere only if needed. The notes are the
-  layer where he confirms completeness, so favor coverage over brevity — minor and patch
-  releases are lighter but the same shape.
+  layer where he confirms completeness — cover every user-visible change, but keep each
+  one tight: a headline sentence plus a bullet's worth of what-you-can-now-do, with depth
+  deferred to the demo page and the API reference (that is what the demo link at the top
+  is for). His v1.6.0 read: "a tad long, but ok overall" — treat length as a real cost,
+  not a rewrite trigger. Minor and patch releases are lighter but the same shape.
 - The NEWS.md update ships as a normal **increment PR to the integration branch** during
   the RC window, so it flows into the open RC without touching the RC PR itself. Run the
   repo's formatter gate (e.g. `npx prettier --check NEWS.md`) before pushing.
