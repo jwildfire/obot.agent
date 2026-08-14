@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# prime-rehydrate — emit 🎩🤖 obot-prime's cold-turn state bundle in one
+# tolerant pass (decision artifact 2026-08-14-prime-context-management, C3 —
+# approved 2026-08-14, Q&A obot.roadmap#154).
+#
+# The one bounded read a compacted prime runs to get back to useful: state
+# file(s) + today's session log + the warm sweep cache, ===-delimited, ages
+# precomputed. Budget: ≈7k tokens, ≈0.35 s wall (measured on the identical
+# handoff.sh pattern). Trust the compaction summary for flavor, this bundle
+# for facts.
+#
+# Invoked two ways, mirroring tools/session-init/handoff.sh:
+#   - by commands/s-prime.md as `!` preprocessing → a relaunch rehydrates with
+#     zero tool calls;
+#   - by a running prime on the first post-compaction turn that touches state,
+#     as its single read round trip.
+#
+# Every source is optional, every failure is silent, and the script always
+# exits 0 — a missing file must never cost prime a model round trip.
+set -u
+WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+now_s=$(date +%s)
+
+age() { # age <path> → "NNm" or "cold"
+  [ -e "${1:-}" ] || { echo "cold"; return; }
+  local m
+  m=$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null) || { echo "cold"; return; }
+  echo "$(( (now_s - m) / 60 ))m"
+}
+
+section() { # section <file> <start-regex> — print from heading to next H2
+  awk -v start="$2" '$0 ~ start {f=1} f && /^## / && $0 !~ start {exit} f' "$1" 2>/dev/null
+}
+
+echo "=== PRIME REHYDRATE (emitted $(date '+%Y-%m-%d %H:%M')) ==="
+
+echo "=== PRIME STATE (what is true now — prime-owned) ==="
+ps="$WS/.claude/session-hub/prime-state.md"
+echo "file: $ps (age: $(age "$ps"))"
+cat "$ps" 2>/dev/null
+
+echo "=== NAVIGATOR STATE (verified view — navigator-owned, read-only to prime) ==="
+ns="$WS/.claude/session-hub/navigator-state.md"
+if [ -e "$ns" ]; then
+  echo "file: $ns (age: $(age "$ns"))"
+  cat "$ns" 2>/dev/null
+else
+  echo "absent — no Navigator; prime's own stamps are the freshest available"
+fi
+
+echo "=== SESSION LOG (today — what happened; corrections fold newest-wins) ==="
+log="$WS/.claude/session-notes/$(date +%F).md"
+echo "file: $log (age: $(age "$log"))"
+# Bounded read: the whole bundle must stay ≤ ~30 KB / ~8k tokens (the artifact's
+# cold-turn budget). On a heavy night the log section alone can exceed that
+# (38 KB observed 2026-08-14), so emit only the newest lines — and say so, no
+# silent caps. State does not live here; prime-state.md above is the rollup.
+sec="$(section "$log" '^## Session log')"
+bytes=$(printf '%s\n' "$sec" | wc -c | tr -d ' ')
+if [ "${bytes:-0}" -gt 12000 ]; then
+  echo "(bounded read: newest ~12 KB of ${bytes} B — full log at $log)"
+  printf '%s\n' "$sec" | tail -c 12000 | sed '1d'
+else
+  printf '%s\n' "$sec"
+fi
+
+echo "=== SWEEP CACHE (GitHub delta) ==="
+cache="$WS/.claude/session-hub/cache/gh-sweep.json"
+echo "cache age: $(age "$cache")"
+cat "$cache" 2>/dev/null; echo
+
+echo "=== NOW ==="
+date '+%Y-%m-%d %H:%M'
+exit 0

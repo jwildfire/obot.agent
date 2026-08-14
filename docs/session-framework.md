@@ -162,6 +162,17 @@ factors.
 - [`obot-auto`](../scripts/obot-auto) launches the 🦾🤖 lead with `--model opus` by
   default (`--model` still overrides).
 
+## Standing sessions: durable state
+
+A session designed to outlive compaction (today: 🎩🤖 obot-prime) keeps its
+working set **on disk, not in conversation**: a capped, provenance-stamped
+state file, one-bounded-read rehydration, and delete-on-resolve retention. The
+contract lives in
+[`session-prime`](../skills/session-prime/SKILL.md#durable-state-and-rehydration)
+— one copy only, per this document's own convention. Decided in the
+[2026-08-14 context-management artifact](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-14-prime-context-management/),
+approved in [Q&A #154](https://github.com/jwildfire/obot.roadmap/discussions/154).
+
 ## Provenance
 
 - **SLAs** — @jwildfire's live mandate, 2026-08-01.

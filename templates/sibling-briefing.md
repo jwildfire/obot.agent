@@ -34,7 +34,14 @@ rediscover by reading the code. -->
 - The timestamp is **shelled, never modeled**, and the line is inserted **under the
   `## Session log` heading** — a bare end-of-file `>>` lands under `## Scaffold` on any
   scratchpad whose sections have drifted, and corrupts the wrapup's inventory
-  (obot.agent#57). Use exactly:
+  (obot.agent#57). Preferred form (~1/10th the generated tokens per event):
+
+```bash
+bash {workspace root}/obot.agent/tools/scratchpad-log '👯🤖 {slug}' '{event}'
+```
+
+- Fallback — only when `tools/scratchpad-log` is unavailable or not yet
+  allowlisted in this workspace, use the equivalent inline form:
 
 ```bash
 WS=~/Documents/obot2
