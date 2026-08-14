@@ -392,6 +392,19 @@ sections (Data Requirement, Design, Tasks) stay stubbed for their own stages.
   — it freezes the step-8 check-states anyway, so it has no business on the
   pre-checkpoint path (hub #148 D6). The analytics/status refresh and the
   open-Ideas listing move off that path with it.
+- **Refresh analytics usage data**: regenerate the Cost data behind
+  [the Analytics page](https://jwildfire.github.io/obot.roadmap/analytics/index.html) —
+
+  ```bash
+  python3 obot.roadmap/scripts/build_usage_data.py   # writes site/usage/usage.json
+  ```
+
+  The source is this machine's local transcripts, so the site deploy **cannot**
+  rebuild this data itself — it re-renders whatever `usage.json` was last
+  committed, and the wrapup is the heartbeat that keeps it current
+  (@jwildfire, 2026-07-29). Commit the refreshed file together with the diary
+  entry (standard-update grant). Like the report render, this is a
+  post-checkpoint step (hub #148 D6).
 - **Post**: commit directly to `main` and push (standard-update grant). The site
   deploy triggers on `diary/**` pushes.
 - **Refresh package status**: that same deploy re-renders
