@@ -63,10 +63,28 @@ and it stands or falls on whether he can see what changed without reading code.
 3. **The five-section obot PR body**: executive summary (with `Closes #X`) →
    roadmap context (goal, requirements delivered) → evidence as HTML links →
    technical briefing → next steps.
-4. **A green gate**: CI passing on the head commit; for safety.viz renderers the
+4. **A milestone, and a `Closes #N` line per issue the release ships.** The
+   milestone groups the release; the keyword closes the issue — **both**, never
+   either. Create the release's milestone before the window opens, assign it to
+   every issue the release delivers (moving it forward off the wave that scoped
+   the issue), and list them all in the RC body even where increment PRs already
+   closed them: the RC body is the release's manifest. An issue only partly
+   delivered keeps the milestone and stays **open**, with a comment naming what
+   remains. See [`AGENTS.md` → Milestone before work](../AGENTS.md#milestone-before-work);
+   [`scripts/obot-merge`](../scripts/obot-merge) refuses a release merge that
+   names no issue, and any merge whose `Closes` target has no milestone.
+5. **A green gate**: CI passing on the head commit; for safety.viz renderers the
    done-gate as well — gallery demo, evidence page, API reference all live.
-5. **One line stating the ask**: what decision is being requested, and what
+6. **One line stating the ask**: what decision is being requested, and what
    happens on approval (tag and publish, or merge and hold).
+
+After the release is tagged, the hub requirements it delivered move stage on the
+["obot Roadmap" project](https://github.com/users/jwildfire/projects/1) — to
+**Released** when the requirement is wholly shipped, and they close only then. A
+requirement with open sub-issues stays where it is and gets a comment recording
+what this release delivered and what is left. This is part of the release, not
+follow-up: v1.6.0 shipped with [obot.roadmap#35](https://github.com/jwildfire/obot.roadmap/issues/35)
+still sitting at *Design*.
 
 ### Repos with no visual surface
 

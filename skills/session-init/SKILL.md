@@ -362,8 +362,13 @@ Selection order:
 3. **Implementation-ready** — the highest-priority hand-off item that (a)
    belongs to an active goal in
    [`goals/registry.json`](../../goals/registry.json), (b) traces to a hub
-   requirement whose Design is signed off, (c) has its repo work scoped, and
-   (d) touches only repos its grant profile allows.
+   requirement whose Design is signed off, (c) has its repo work scoped, (d)
+   touches only repos its grant profile allows, and (e) **carries a milestone**.
+   A milestone-less issue is not pickable: assign it the release's milestone —
+   creating that milestone if the release has none — *before* branching, or skip
+   the issue and say why it belongs to no release. Assigning the milestone is
+   part of picking the work up, not part of closing it out (@jwildfire,
+   2026-08-14; [`AGENTS.md` → Milestone before work](../../AGENTS.md#milestone-before-work)).
 4. **Pipeline-advancement** — nothing implementation-ready: take the goal's
    next requirement stuck earliest in the lifecycle and advance the *artifact*
    (draft the requirement/design doc, publish it, end at the review gate).
@@ -371,7 +376,8 @@ Selection order:
 **Hard skips, never selected:** anything gated on @jwildfire; anything without
 a filed hub requirement (roadmap-first); anything outside the grant matrix;
 release *publishing* (prep is allowed — notes draft + staged promotion PR);
-ultracode launches. **One increment per run.** If selection exhausts, report
+ultracode launches. An issue with **no milestone** is not a hard skip but is not
+pickable as-is either — milestone it first, per criterion (e) above. **One increment per run.** If selection exhausts, report
 "no eligible increment" with the per-candidate reason — that is itself useful
 roadmap signal — and end.
 
