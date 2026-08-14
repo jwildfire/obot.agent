@@ -19,11 +19,34 @@ scaffolding) still owes. Sessions follow this until #123's design supersedes it.
 Everything else lands without him: increments merge on the standard lane, and
 their record is the nightly executive summary, not his inbox.
 
+## Operational vs clinical control
+
+The governing principle behind what reaches his queue (@jwildfire, 2026-08-15,
+[decision record](https://github.com/jwildfire/obot.roadmap/discussions/155)):
+
+- **Operational repos** (the obot harness and program surfaces): agents get wide
+  latitude to self-improve — proactive, automatic merges to production (`main`),
+  fixing issues as they appear, with **periodic (~weekly) releases to `stable`**
+  for housekeeping and to keep him fully in the loop.
+- **User-facing clinical repos**: he reviews **everything** before it reaches
+  prod, and releases are formally documented as soon as they go live.
+
+Which repo is which is a decision he makes, never an agent: the clear cases and
+the ambiguous ones are laid out in the
+[repo-classification decision artifact](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-operational-clinical-classification/),
+and the classification is recorded per repo in
+[`scripts/policy.json`](../scripts/policy.json) once he decides. The weekly
+release trigger is reconciled with the session-model design in
+[Q&A #158](https://github.com/jwildfire/obot.roadmap/discussions/158), not here.
+**Precondition**: automatic merge-to-prod on an operational repo requires that
+repo to have CI running its test suite — a repo with no gate has nothing to make
+issues "appear".
+
 ## Two kinds of PR
 
 | | Increment PR | Release-candidate PR |
 |---|---|---|
-| Base | integration branch (`dev`, or `main` where there is no `dev`) | release branch (`main`; demo-301's `site`) |
+| Base | integration branch (`dev`, or `main` where there is no `dev`) | release branch (`main`; obot.agent's `stable`; demo-301's `site`) |
 | Reviewer | none — never assign or request @jwildfire | @jwildfire, always |
 | Merge lane | standard — `obot-merge <pr> -R <repo>` | attested — `obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'` |
 | Body | short: what changed, why, evidence link | the full five sections below |
@@ -51,7 +74,12 @@ and it stands or falls on whether he can see what changed without reading code.
    release log, whose current section *is* the notes draft, opening with the
    `**See it move:**` demo link ahead of the feature list — and the tag's
    release body is copied verbatim from that section on approval (@jwildfire,
-   2026-08-14). Shape and
+   2026-08-14). **Every repo keeps its NEWS.md current in `main` at all times**:
+   between releases, merged-but-unreleased work accumulates under a
+   `vX.Y.Z (Upcoming)` heading, which loses the `(Upcoming)` suffix when the
+   release is cut (@jwildfire, 2026-08-15,
+   [decision record](https://github.com/jwildfire/obot.roadmap/discussions/155)).
+   Shape and
    procedure: [`skills/rc-release-notes/SKILL.md`](../skills/rc-release-notes/SKILL.md).
 2. **A demo page — the hard requirement.** A self-contained HTML page published
    under `obot.roadmap/reports/{slug}/` on the hub Pages site, walking each
@@ -93,12 +121,27 @@ of the *behaviour* change: before/after transcript excerpts, a screenshot of the
 new output, and the exact command to reproduce it. "It's internal tooling" is
 not an exemption; if a change cannot be shown, it is not ready to be released.
 
-### Repos where integration *is* the release branch
+### Repos whose integration branch is `main`
 
-obot.agent, obot.roadmap and demo-301 have no `dev`. There, the RC is a **draft
-GitHub release** — same notes, same demo link, same ask — proposed against the
-accumulated `main`, rather than a `dev → main` PR. Publishing stays human
-(`releases: {prep: true, publish: false}`).
+obot.agent, obot.roadmap and demo-301 have no `dev` — work lands directly on
+`main`. That does not exempt them from the RC-is-a-PR rule:
+
+- **obot.agent** carries a **lagging `stable` branch**, cut at the v0.3.0 commit
+  (the R2 shape, @jwildfire 2026-08-15,
+  [decision record](https://github.com/jwildfire/obot.roadmap/discussions/155)).
+  Work keeps landing on `main`; each release is a **`main → stable` PR** whose
+  diff is exactly the release window. The PR takes the RC roles (assignee
+  `obotclaw[bot]`, reviewer @jwildfire), merges on the attested lane, and the
+  tag lands on `stable`.
+- **demo-301** releases by `main → site` PR — `site` is the live Pages branch
+  and holds the release role.
+- **obot.roadmap** does not cut releases today; if that changes, it adopts the
+  same lagging-`stable` shape.
+
+Publishing stays human everywhere (`releases: {prep: true, publish: false}`).
+The earlier draft-GitHub-release workaround is retired: a draft release has no
+assignee, no reviewer, no review request and no diff — none of what makes an RC
+reviewable.
 
 ## Blockers and open questions never become PRs
 
