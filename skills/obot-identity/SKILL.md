@@ -32,6 +32,9 @@ Who a session *is*, in the terminal and in the `claude agents` view. This is
   - spawned siblings — `👯🤖 {date} {slug}`, **green** (@jwildfire, 2026-07-11)
   - ultracode / Workflow jobs — `⚡️🤖 {description}`, description-based, no date (2026-07-12)
   - `--auto` autonomous sessions — `🦾🤖 {YYYY-MM-DD} {slug}`, **purple**
+  - obot-prime concierge — `🎩🤖 obot-prime`, no date (standing singleton, launched by
+    `scripts/obot-prime`; contract in
+    [`session-prime`](../session-prime/SKILL.md)), **blue**
 - **Setting them**: interactive sessions use the built-in `/name` and `/color` slash
   commands, which the model **cannot run** — remind @jwildfire to type them if the session
   isn't named yet. A background session sets `name` and `color` directly in its own

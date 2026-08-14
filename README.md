@@ -59,6 +59,8 @@ For current status — which renderers are live, what's in review, what's next �
 - `interviews/` — P004 interview records (historical; kept verbatim).
 - `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens), `obot-merge`
   (the policy-gated merge lane), `obot-auto` (launches an unattended `--auto` session),
+  `obot-prime` (launches the standing 🎩🤖 Q&A concierge session —
+  [`skills/session-prime`](skills/session-prime/SKILL.md)),
   `policy.json` + `obot-policy` (see below), the idea-queue intake trio
   (`reminders-to-ideas`, `ideas-file`, `ideas-sweep`), `reviews-queue` (the classified
   PR queue behind `session-reviews`), `session-aliases` (generates and installs the
