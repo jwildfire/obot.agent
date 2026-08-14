@@ -45,8 +45,8 @@ toggle writes.
 
 | Lane | Who | How | Bridged? |
 | --- | --- | --- | --- |
-| Sibling `👯🤖` spawns | agent (automatic) | `--remote-control` on the `claude --bg` command — [`session-spawn`](../skills/session-spawn/SKILL.md) step 4, verified at step 5 | yes, since 2026-07-23 |
-| Autonomous `🦾🤖` lead | agent (automatic) | `--remote-control` in [`scripts/obot-auto`](../scripts/obot-auto) | yes, since oa#54 |
+| Sibling `👯🤖` spawns | agent (automatic) | `--remote-control` on the `claude --bg` command — [`session-spawn`](../skills/session-spawn/SKILL.md) step 4, verified at step 6 | yes, since 2026-07-23 |
+| Autonomous `🦾🤖` lead | agent (automatic) | `--remote-control` in [`scripts/obot-auto`](../scripts/obot-auto) | yes, since oa#54 (landed on `main` in oa#77) |
 | Agents-view dispatch | @jwildfire | no flag available — relies entirely on the global setting | yes, since 2026-07-29 |
 | Any interactive session | @jwildfire, once | `/config` → **Enable Remote Control for all sessions** → `true` | yes, since 2026-07-29 |
 | A session already running | @jwildfire, per session | type `/remote-control` in that session | on demand |
@@ -136,11 +136,18 @@ This is the lane that kept the lead 😺🤖 session off Remote Control from
 hardening: **the lead session was never spawned by that skill.** oa#54 recorded
 the same symptom for the 2026-07-26 autonomous lead and attributed it to
 `obot-auto`; the job signature shows that session came through this lane too.
-`obot-auto`'s missing flag was a real and separate gap (fixed in oa#54), but it
-was not the cause of either unbridged job.
+`obot-auto`'s missing flag was a real and separate gap (filed as oa#54, flag
+landed on `main` in oa#77), but it was not the cause of either unbridged job.
 
 **Lane 2 is the only fix for this lane** — there is no flag to add. That makes
 the global toggle load-bearing rather than optional.
+
+**Confirmed working, 2026-08-14 on CLI 2.1.232.** The triage one-liner below
+now reports three live `template: claude` jobs — `respawnFlags` of
+`['--agent','claude']` and `['--agent','claude','--permission-mode','auto',
+'--model','fable']`, no `--remote-control` anywhere — and all three carry a
+`bridgeSessionId`. The setting alone bridges this lane, on a CLI twelve patch
+versions past the one it was verified on.
 
 ### Bonus lane: spawning fresh sessions from the phone
 
@@ -231,16 +238,13 @@ to cover `--bg` spawns as well as interactive ones. Every session started from
 that moment on is bridged regardless of lane. Nothing to redo unless the key
 gets reset — and if it does, an agent cannot put it back.
 
-**Step 2 — the one thing still outstanding.** The lead 😺🤖 session was started
-before step 1, so it is still unbridged and will stay that way for its whole
-life. Pick one:
-
-- **Send it any follow-up message.** It is a `done` background job, so the
-  message re-execs it and the now-true setting applies at that start. Expected
-  to be enough on its own — verify by looking for it on
-  <https://claude.ai/code>.
-- **Or `claude attach 96636d0f` and type `/remote-control`.** The certain
-  route if the restart above does not do it.
+**Step 2 — resolved by attrition, 2026-08-14.** The one session left outstanding
+when this was written (the pre-step-1 lead 😺🤖, job `96636d0f`) has since ended;
+its job directory is gone. Nothing to attach or restart. Re-running the triage
+one-liner above on CLI 2.1.232 shows **every** live job bridged, including three
+`template: claude` agents-view jobs whose `respawnFlags` are just
+`['--agent','claude']` — no flag, bridged anyway. That is lane 4 working off the
+global setting alone, which is the whole point of step 1.
 
 **Step 3 — optional cleanup.** Three throwaway probe sessions are on
 <https://claude.ai/code> and can be deleted: `rc-flag-probe` and `rc-live-probe`
