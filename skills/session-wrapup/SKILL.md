@@ -109,8 +109,14 @@ including open calls carried from earlier sessions.
 
 - **Shape:** `- **{the question in a few words}** — {the call in one line};
   recommendation: {the option to take}. [decision artifact]({hub url}) ·
-  blocks: [{goal or issue}]({url})`, plus `*(carried from MM-DD)*` when the item
-  is not new.
+  [answer in Q&A]({discussion url}) · blocks: [{goal or issue}]({url})`, plus
+  `*(carried from MM-DD)*` when the item is not new.
+- **Every decision has a hub Q&A thread** (@jwildfire, 2026-08-14): post a brief
+  executive summary — question, options in a line each, recommendation — to the
+  hub's [Q&A category](https://github.com/jwildfire/obot.roadmap/discussions/categories/q-a),
+  linking the artifact for the full argument (never restate it in markdown).
+  The thread is where he documents the decision; record it in the
+  decisions-index Discussion column so the roadmap Todo section links it.
 - **Every bullet names a recommendation.** Surfacing a decision without one hands
   him the work of inventing the options — the same failure the blockers step
   already rules out with `## Proposed mitigation`.

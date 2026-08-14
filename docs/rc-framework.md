@@ -89,6 +89,14 @@ judgement call, a policy carve-out, a missing prerequisite — it writes a
   and what unblocks on each choice.
 - Linked from the blocked goal's hub issue and surfaced in that night's
   executive summary under *Critical blockers*.
+- **Posted to the hub's [Q&A discussions](https://github.com/jwildfire/obot.roadmap/discussions/categories/q-a)**
+  (@jwildfire, 2026-08-14): a *brief* executive summary — the open question, the
+  options in a line each, and the recommendation — linking the artifact for the
+  full argument, never restating it in markdown. The Q&A thread is the *place*:
+  @jwildfire documents his decision there. The thread is linked from the
+  [decisions index](https://github.com/jwildfire/obot.roadmap/blob/main/reports/decisions/README.md)
+  and from the roadmap page's Todo section, which leads with both queues —
+  RCs needing review and decisions needed.
 - One artifact per decision. Bundling three questions into one page defeats it.
 
 **Escalation:** if every active goal in
