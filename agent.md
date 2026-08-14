@@ -30,6 +30,10 @@ Every `session-*` skill answers to a short `/s-*` alias as well — `/s-init`,
 `/s-todo`, `/s-idea`, `/s-reviews`, … Both forms load the same skill; see
 [`commands/`](commands/) and [`scripts/session-aliases`](scripts/session-aliases).
 
+**Release flow**
+
+- `rc-release-notes` — draft and maintain `NEWS.md` as each release's notes draft (demo-artifact link first, text-only functionality-first list); the notes half of an RC per [`docs/rc-framework.md`](docs/rc-framework.md)
+
 **Tools**
 
 - [`tools/session-hub/`](tools/session-hub/README.md) — the session dashboard: live view (`--watch`) + frozen wrapup report (`--report`); hub requirement [#24](https://github.com/jwildfire/obot.roadmap/issues/24)

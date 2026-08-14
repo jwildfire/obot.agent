@@ -41,13 +41,18 @@ review queue.
 An RC is not "the accumulated diff." It is a release proposed for publication,
 and it stands or falls on whether he can see what changed without reading code.
 
-1. **Release notes, house style.** Functionality-first and user-facing: what a
-   person can now do that they could not do before, and why that matters. One
-   bullet per feature, each linking its hub requirement and implementing PRs.
-   Process notes compress to a line. The exemplar is
+1. **Release notes, house style, drafted in `NEWS.md`.** Functionality-first
+   and user-facing: what a person can now do that they could not do before, and
+   why that matters. One bullet per feature, each linking its hub requirement
+   and implementing PRs. Process notes compress to a line. The exemplar is
    [safety.viz v1.5.0](https://github.com/jwildfire/safety.viz/releases/tag/v1.5.0)
    — match its altitude, not a commit log. Minor and patch releases are lighter
-   but the same shape.
+   but the same shape. The notes live in the repo's **`NEWS.md`** — the running
+   release log, whose current section *is* the notes draft, opening with the
+   `**See it move:**` demo link ahead of the feature list — and the tag's
+   release body is copied verbatim from that section on approval (@jwildfire,
+   2026-08-14). Shape and
+   procedure: [`skills/rc-release-notes/SKILL.md`](../skills/rc-release-notes/SKILL.md).
 2. **A demo page — the hard requirement.** A self-contained HTML page published
    under `obot.roadmap/reports/{slug}/` on the hub Pages site, walking each
    update with screenshots or short clips and try-it-yourself steps against the
