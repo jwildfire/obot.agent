@@ -44,9 +44,13 @@ grep -qxF '.claude/worktrees/' .git/info/exclude 2>/dev/null || echo '.claude/wo
 **Why:** Claude Code auto-approves worktrees under `.claude/worktrees/` and treats any
 other location as a "permission-root relocation" that requires a manual click from
 @jwildfire — which stalls every unattended session that isolates work the upstream way.
-In an interactive Claude Code session, prefer the built-in EnterWorktree tool (it
-creates worktrees under `.claude/worktrees/` automatically); the manual commands above
-are for scripted lanes and spawned agents.
+**Never call the EnterWorktree tool in the obot2 workspace** (@jwildfire, 2026-08-04:
+"i really don't want you to prompt me to enter worktrees. just do it."). The workspace
+root is not a git repository, so the tool surfaces a permission prompt and then fails
+anyway with "current directory is not in a git repository". The scripted commands above
+are the only lane — interactive sessions, scripted lanes, and spawned agents alike. Work
+the worktree through absolute paths into it rather than switching the session into it,
+and never tell a spawned agent or ultracode job to use EnterWorktree here.
 
 Everything else in the upstream convention still applies: one branch per worktree, all
 commands run from inside the worktree, push and `gh pr create` from the worktree, and
