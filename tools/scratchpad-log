@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# scratchpad-log — append one heartbeat line to the shared session scratchpad,
+# inserted under the `## Session log` heading (never a blind EOF append).
+#
+#   scratchpad-log '<tag>' '<event>'
+#   scratchpad-log '👯🤖 ctx-mgmt' 'started: context research'
+#
+# Replaces the per-event 759-char Bash+python heredoc from
+# templates/sibling-briefing.md at ~1/10th the generated tokens per event
+# (decision artifact 2026-08-14-prime-context-management, C4 — approved
+# 2026-08-14, Q&A obot.roadmap#154). Semantics are identical to the heredoc,
+# which remains the documented fallback when this script is unavailable:
+# shelled timestamp (never modeled), heading-anchored insert with the
+# section-drift guard (obot.agent#57), one line per call, never rewrite the
+# file wholesale — it is shared by the lead, every sibling, and every
+# ultracode job.
+set -u
+WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+TAG="${1:?usage: scratchpad-log '<tag>' '<event>'}"
+EVENT="${2:?usage: scratchpad-log '<tag>' '<event>'}"
+LOG="$WS/.claude/session-notes/$(date +%F).md"
+LINE="- $(date +%H:%M) $TAG — $EVENT"
+python3 - "$LOG" "$LINE" <<'PY'
+import sys, pathlib
+p, line = pathlib.Path(sys.argv[1]), sys.argv[2]
+if not p.exists():
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"# Session scratchpad — {p.stem}\n\n## Overview\n\n## Todo\n\n## Notes\n\n## Scaffold\n\n## Session log\n")
+lines = p.read_text().splitlines()
+if "## Session log" not in lines:
+    lines += ["", "## Session log"]
+i = lines.index("## Session log") + 1
+j = i
+while j < len(lines) and not lines[j].startswith("## "):
+    j += 1
+while j > i and not lines[j-1].strip():
+    j -= 1
+lines.insert(j, line)
+p.write_text("\n".join(lines) + "\n")
+PY

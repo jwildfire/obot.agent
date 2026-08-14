@@ -105,14 +105,71 @@ exemptions** — prime has no bookends, so none of the declared exemptions can f
 
 ## Longevity
 
-- Prime **stays up indefinitely**. Context compaction is expected and safe:
-  durable state lives in the scratchpad and in the delegates' artifacts, never
-  only in prime's context.
+- Prime **stays up indefinitely**. Context compaction is expected and safe —
+  by mechanism, not assertion: the
+  [durable-state contract](#durable-state-and-rehydration) below keeps the
+  working set on disk and rehydration to one bounded read.
 - **Keep replies lean** — lists over prose (@jwildfire preference, 2026-07-31);
   every token of reply is latency now and context burn later.
 - **No scheduled bookends.** When @jwildfire retires an instance, close with a
   light [`session-wrapup`](../session-wrapup/SKILL.md) so the spawn log folds into
   the diary; the next `scripts/obot-prime` launch starts clean.
+
+## Durable state and rehydration
+
+Decided in the
+[2026-08-14 context-management artifact](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-14-prime-context-management/),
+approved by @jwildfire
+([Q&A #154](https://github.com/jwildfire/obot.roadmap/discussions/154));
+C1, C3 and C5 land here. The one-line version: **trust the compaction summary
+for flavor, the bundle for facts.**
+
+### The state file (C1)
+
+- `{workspace}/.claude/session-hub/prime-state.md` — prime-owned; prime is the
+  sole writer, so section-replacing edits are safe. Five sections: **Open**
+  (pending items, one line + link each) / **Delegates** (slug · lane ·
+  told-to-do · status) / **Armed** (monitor ids, cadence, re-arm notes) /
+  **Claims** (assertions made to @jwildfire) / **Settled** (do-not-relitigate,
+  with provenance).
+- **Hard cap ~4 KB.** Resolved lines are deleted, not archived — the log keeps
+  history. STATE answers "what is true now"; the scratchpad `## Session log`
+  answers "what happened"; never conflate them.
+- **Provenance stamp on every line**: `[verified gh HH:MM]` /
+  `[asserted 👯🤖 slug HH:MM]` / `[self, unverified]` / `[corrected HH:MM]` —
+  written for the reader deciding whether to repeat the claim to @jwildfire.
+- **Write-with-reply**: any claim to @jwildfire about system state — and every
+  spawn, arm, and correction — gets its state line **in the same message** as
+  the reply, so the write costs zero round trips. If it is worth telling
+  @jwildfire, it is worth one stamped line (the 2026-08-14 "self-corrects"
+  incident is the case study).
+- A `navigator-state.md` beside it (when the Navigator exists — hub
+  requirement, filed separately) is Navigator-owned: prime reads it, never
+  writes it. **Claims always stays prime's own** — only prime knows what it
+  just told @jwildfire.
+
+### Rehydration (C3)
+
+- On the **first post-compaction turn that touches state** — or whenever
+  unsure the working set is grounded — run exactly one bounded read:
+  `bash obot.agent/tools/prime-rehydrate` (every source optional, always
+  exits 0; the log section is byte-bounded and says when it truncates).
+  Pure-lookup turns (conventions, where-does-X-live) skip it.
+- Relaunches pay zero round trips:
+  [`commands/s-prime.md`](../../commands/s-prime.md) pre-injects the bundle as
+  `!` preprocessing.
+- Never assert program state from the compaction summary alone.
+
+### Retention (C5)
+
+- **Answered questions**: gone once relayed — transcripts keep them verbatim.
+- **Delegate reports**: reduce to one pointer line once relayed; the artifact
+  is the authority.
+- **GitHub state**: pointed at, never copied — `gh-sweep.json` and one bounded
+  `gh` call are the authorities; copied state is born stale and reads as
+  confident.
+- **Settled decisions**: one `## Settled` line with provenance until applied,
+  then deleted. Settled means cite-and-move-on, never re-argue.
 
 ## If `$ARGUMENTS` carries a question
 
