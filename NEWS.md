@@ -37,7 +37,7 @@ v0.3.0 gave obot the ability to run unattended. v0.4.0 is about what that run co
 
 ## Tests and provenance
 
-104 tests are green across the status line, session hub, serve loop and audit lane, up from 66 at v0.3.0 (`node --test tools/session-hub/test/*.test.mjs` + `tools/statusline/test/*.test.mjs`). Every capture on the demo page is real output from this machine with its reproduce command executed before publication.
+112 tests are green across the status line, session hub, serve loop, audit lane and the merge gate, up from 66 at v0.3.0 (`node --test tools/session-hub/test/*.test.mjs tools/statusline/test/*.test.mjs scripts/test/*.test.mjs`). Every capture on the demo page is real output from this machine with its reproduce command executed before publication.
 
 # Earlier releases
 
