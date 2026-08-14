@@ -48,17 +48,31 @@ else
   echo "absent — no Navigator; prime's own stamps are the freshest available"
 fi
 
-echo "=== SESSION LOG (today — what happened; corrections fold newest-wins) ==="
-log="$WS/.claude/session-notes/$(date +%F).md"
-echo "file: $log (age: $(age "$log"))"
-# Bounded read: the whole bundle must stay ≤ ~30 KB / ~8k tokens (the artifact's
-# cold-turn budget). On a heavy night the log section alone can exceed that
-# (38 KB observed 2026-08-14), so emit only the newest lines — and say so, no
-# silent caps. State does not live here; prime-state.md above is the rollup.
-sec="$(section "$log" '^## Session log')"
+echo "=== SESSION LOG (two newest day-files — what happened; corrections fold newest-wins) ==="
+# Two newest day-files, never just today's: right after midnight the new
+# day-file is nearly empty while the whole session lives in yesterday's —
+# prime measured the failure at 2026-08-15 00:06 (3,334 B returned while
+# 2026-08-14.md held the 44 KB session). Same pointer-chase guard as
+# handoff.sh, restricted to real YYYY-MM-DD files so diary drafts and
+# init-delta files stay out.
+#
+# Bounded read: the whole bundle must stay ≤ ~30 KB / ~8k tokens (the
+# artifact's cold-turn budget). On a heavy night one log section alone can
+# exceed that (38 KB observed 2026-08-14), so the bound applies to the
+# COMBINED text — older file first, newest last, so the tail always keeps the
+# newest lines — and it announces itself: no silent caps. State does not live
+# here; prime-state.md above is the rollup.
+sec=""
+for f in $(ls -t "$WS"/.claude/session-notes/*.md 2>/dev/null | grep -E '/[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$' | head -2 | sort); do
+  s="$(section "$f" '^## Session log')"
+  [ -n "$s" ] || continue
+  sec="${sec}
+--- $(basename "$f") (age: $(age "$f")) ---
+$s"
+done
 bytes=$(printf '%s\n' "$sec" | wc -c | tr -d ' ')
 if [ "${bytes:-0}" -gt 12000 ]; then
-  echo "(bounded read: newest ~12 KB of ${bytes} B — full log at $log)"
+  echo "(bounded read: newest ~12 KB of ${bytes} B across the two newest day-files)"
   printf '%s\n' "$sec" | tail -c 12000 | sed '1d'
 else
   printf '%s\n' "$sec"
