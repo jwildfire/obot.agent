@@ -63,6 +63,10 @@ For current status — which renderers are live, what's in review, what's next �
   (`reminders-to-ideas`, `ideas-file`, `ideas-sweep`), `reviews-queue` (the classified
   PR queue behind `session-reviews`), `session-aliases` (generates and installs the
   `/s-*` aliases), and the wiki requirements-harvest helper.
+- `tools/` — the session [`session-hub`](tools/session-hub/README.md) (live dashboard +
+  wrapup report) and [`statusline`](tools/statusline/README.md) (the status line every
+  agent runs, with its clickable hub link). Each ships an installer where the harness
+  needs a copy outside the repo.
 
 ## Write policy: one decision per repo
 
