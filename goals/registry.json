@@ -27,11 +27,29 @@
     },
     "csr": {
       "issue": 112,
-      "status": "active",
+      "status": "paused",
       "grant_profile": "standard",
       "backlog": [
         "jwildfire/open.csr"
-      ]
+      ],
+      "paused": {
+        "by": "@jwildfire",
+        "date": "2026-08-14",
+        "where": "in-session direction, 2026-08-14 goal review — '112 and 72 on hold for now'; active set is charts #78, app #79, autonomy #73",
+        "_note": "Paused, not retired: the goal issue stays open and open.csr keeps its 'auto' profile in scripts/policy.json. --auto will not select this goal while status is 'paused'."
+      }
+    },
+    "keynote": {
+      "issue": 72,
+      "status": "paused",
+      "grant_profile": "standard",
+      "backlog": [],
+      "paused": {
+        "by": "@jwildfire",
+        "date": "2026-08-14",
+        "where": "in-session direction, 2026-08-14 goal review — '112 and 72 on hold for now'",
+        "_note": "Registered here for the first time on 2026-08-14 so the hold is recorded rather than implied by absence — the keynote goal had never been registry-listed, which made it invisible to --auto rather than deliberately held. Un-pausing it is a one-word change when the September talk moves back into scope."
+      }
     }
   }
 }

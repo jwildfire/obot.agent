@@ -51,6 +51,8 @@ for d in "$WS/obot.roadmap/diary" "$WS/../obot.roadmap/diary"; do
   latest=$(ls -t "$d"/2*.md 2>/dev/null | head -1)
   [ -n "$latest" ] || continue
   echo "file: $latest (age: $(age "$latest"))"
+  section "$latest" '^## 🚦 Release candidates'
+  section "$latest" '^## 🧭 Decisions needed'
   section "$latest" '^## Next session: loose ends'
   section "$latest" '^## 🙋 ToDo'
   break
