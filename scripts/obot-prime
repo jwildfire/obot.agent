@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# obot-prime — launch (or locate) the standing 🎩🤖 obot-prime concierge session.
+#
+# obot-prime is the long-running Q&A session: @jwildfire asks it anything about
+# the program; it answers fast and delegates everything slow. The full contract
+# is skills/session-prime/SKILL.md. This launcher enforces the singleton rule
+# and the launch flags; it does no session work itself.
+#
+# Usage:
+#   obot-prime                   # launch in the background (Remote Control on)
+#   obot-prime --model <model>   # model override (default: opus — routers
+#                                #   default to Opus; docs/session-framework.md)
+#   obot-prime --preflight-only  # run checks and print the launch command only
+#
+# Reach the running session with `claude agents` / `claude attach <id>`, or from
+# claude.ai/code and the Claude mobile app via Remote Control. Tip: typing /fast
+# in the session lowers per-turn latency further (fast mode rides Opus).
+# Exit codes: 0 launched (or already running — id printed), 1 pre-flight failure.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Workspace derivation, same rationale as obot-auto (obot.agent#60): from a
+# linked worktree, dirname of the repo points into .claude/worktrees; the git
+# common dir always resolves to the main clone. OBOT_WORKSPACE overrides.
+if [ -n "${OBOT_WORKSPACE:-}" ]; then
+  WORKSPACE="$OBOT_WORKSPACE"
+elif GIT_COMMON_DIR="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+     && [ -n "$GIT_COMMON_DIR" ]; then
+  WORKSPACE="$(cd "$(dirname "$(dirname "$GIT_COMMON_DIR")")" && pwd)"
+else
+  WORKSPACE="$(dirname "$REPO_DIR")"
+fi
+
+MODEL="opus"
+PREFLIGHT_ONLY=0
+
+fail() { echo "obot-prime: $*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model)          MODEL="$2"; shift 2 ;;
+    --preflight-only) PREFLIGHT_ONLY=1; shift ;;
+    -h|--help)        sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)                fail "unknown argument: $1" ;;
+  esac
+done
+
+# ---- pre-flight -------------------------------------------------------------
+
+command -v claude >/dev/null 2>&1 || fail "claude CLI not on PATH"
+
+# Singleton rule: one 🎩🤖 at a time. Any non-done prime job counts as live —
+# a waiting concierge sits in 'blocked' between questions, not 'working'.
+RUNNING=$(python3 - "$HOME/.claude/jobs" <<'PY'
+import json, pathlib, sys
+jobs = pathlib.Path(sys.argv[1])
+for f in jobs.glob("*/state.json") if jobs.is_dir() else []:
+    try:
+        s = json.loads(f.read_text())
+    except Exception:
+        continue
+    if str(s.get("name", "")).startswith("\U0001f3a9") and s.get("state") != "done":
+        print(f.parent.name, s.get("state"))
+PY
+)
+if [ -n "$RUNNING" ]; then
+  set -- $RUNNING
+  echo "obot-prime: already running (job $1, state $2)"
+  echo "obot-prime: reach it with: claude attach $1  — or claude.ai/code / the phone"
+  exit 0
+fi
+
+NAME="🎩🤖 obot-prime"
+CMD=(claude --bg --permission-mode auto --remote-control -n "$NAME")
+CMD+=(--model "$MODEL")
+CMD+=("/s-prime")
+
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  printf 'obot-prime: would run (from %s):' "$WORKSPACE"; printf ' %q' "${CMD[@]}"; printf '\n'
+  exit 0
+fi
+
+# Launch from the workspace root so the session gets the workspace CLAUDE.md,
+# the .claude overlay (skills/commands), and the session-hub cache.
+cd "$WORKSPACE"
+exec "${CMD[@]}"

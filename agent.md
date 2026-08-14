@@ -19,6 +19,7 @@ for the relevant skill in `skills/`:
 - `session-spawn` — fork work to a background sibling (the delegation primitive)
 - `session-reviews` — spawn a reviewer that walks @jwildfire through the PRs waiting on his decision
 - `session-dashboard` — open the live session dashboard in Chrome (starts the watch loop if needed)
+- `session-prime` — run as 🎩🤖 obot-prime, the standing Q&A concierge (launched by `scripts/obot-prime`): answers fast from warm sources, delegates everything slower, never builds
 - `session-wrapup` — close: draft the checkpoint from the scratchpad, verify in a sibling during review, then apply
 
 Every session command answers to the responsiveness contract in
