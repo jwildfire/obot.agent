@@ -53,7 +53,21 @@ test('the workspace root itself counts as inside', () => {
   assert.match(out, /↗ ops hub/);
 });
 
-test('case differences in the workspace path still match (case-insensitive fs)', () => {
+// The case-tolerant match only exists on a case-insensitive filesystem (macOS);
+// on a case-sensitive one the uppercased workspace path is a different, absent
+// directory and the fallback is correct behavior, not a failure.
+const caseInsensitiveFs = (() => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'obot-case-probe-'));
+  try {
+    fs.writeFileSync(path.join(d, 'probe'), '');
+    return fs.existsSync(path.join(d, 'PROBE'));
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+})();
+
+test('case differences in the workspace path still match (case-insensitive fs)',
+  { skip: caseInsensitiveFs ? false : 'requires a case-insensitive filesystem' }, () => {
   const ws = fakeWorkspace();
   const out = run(payload({ dir: path.join(ws, 'Documents') }), { OBOT_WORKSPACE: ws.toUpperCase() });
   assert.match(out, /↗ ops hub/);
