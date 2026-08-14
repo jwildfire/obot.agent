@@ -50,7 +50,8 @@ and it stands or falls on whether he can see what changed without reading code.
    but the same shape. The notes live in the repo's **`NEWS.md`** — the running
    release log, whose current section *is* the notes draft, opening with the
    `**See it move:**` demo link ahead of the feature list — and the tag's
-   release body publishes from that section (@jwildfire, 2026-08-14). Shape and
+   release body is copied verbatim from that section on approval (@jwildfire,
+   2026-08-14). Shape and
    procedure: [`skills/rc-release-notes/SKILL.md`](../skills/rc-release-notes/SKILL.md).
 2. **A demo page — the hard requirement.** A self-contained HTML page published
    under `obot.roadmap/reports/{slug}/` on the hub Pages site, walking each

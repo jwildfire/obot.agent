@@ -15,8 +15,9 @@ where the notes live and how they are written.
   log, newest release first (@jwildfire, 2026-08-14, v1.6.0 RC review).
 - The **current section is the draft of the release notes**: it lands on the integration
   branch during the RC window, flows into the open RC PR, and is what @jwildfire reads as
-  "the release notes" when reviewing. On publish, the tag's GitHub release body comes from
-  this section.
+  "the release notes" when reviewing. On approval, the section is **copied verbatim as the
+  tag's GitHub release body** — "a news.md file that will be copied to release notes once
+  I approve the PR" (@jwildfire, sv#124 review, 2026-08-14).
 - The exemplar file is [safety.viz `NEWS.md`](https://github.com/jwildfire/safety.viz/blob/dev/NEWS.md);
   the altitude exemplar remains the
   [v1.5.0 release](https://github.com/jwildfire/safety.viz/releases/tag/v1.5.0).
@@ -46,6 +47,9 @@ what the release pages already say — never invent history.
 
 ## Writing it
 
+- **Write it copy-ready.** The section must publish with zero editing: no "see the PR for
+  details", no internal-process asides, no TODOs. If a line would not belong in a
+  published GitHub release, it does not belong in NEWS.md.
 - **Derive from the real diff**: read every increment PR body merged since the last tag
   (`git log <last-tag>..origin/<integration>`), not a session summary of them. The PR
   bodies are the primary source; the notes compress them to the user-facing layer.
