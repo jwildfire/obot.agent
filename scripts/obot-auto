@@ -126,8 +126,12 @@ ARGS="--goal $GOAL"
 [ "$DRY_RUN" -eq 1 ] && ARGS="$ARGS --dry-run"
 PROMPT="/s-init --auto $ARGS"
 
-# Leads default to Opus (@jwildfire 2026-08-04, framework doc Model allocation);
-# --remote-control is spawn canon (oa#42) — closes oa#54 for the --auto lead.
+# Leads default to Opus (@jwildfire 2026-08-04, framework doc Model allocation).
+# --remote-control is spawn canon (oa#42) — closes oa#54 for the --auto lead: the
+# autonomous lead must be drivable from claude.ai/code and the phone, same as its
+# siblings. The global `remoteControlAtStartup` setting also covers this lane now,
+# but the flag stays explicit — it survives the setting being reset, and it is
+# recorded in the job's respawnFlags. See docs/remote-control.md.
 MODEL="${MODEL:-opus}"
 CMD=(claude --bg --permission-mode auto --remote-control -n "$NAME")
 CMD+=(--model "$MODEL")

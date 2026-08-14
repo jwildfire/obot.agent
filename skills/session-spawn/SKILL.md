@@ -99,12 +99,10 @@ than defaulting to your own settings:
   `--permission-mode auto` explicitly rather than relying on inheritance.
 - **Remote Control**: siblings always spawn with `--remote-control` so the
   session shows up in claude.ai/code and the Claude mobile app and can be
-  driven from there (@jwildfire directive, 2026-07-23). On success the job's
-  `~/.claude/jobs/{id}/state.json` gains a `bridgeSessionId` within ~15s of
-  spawn. This flag combination is undocumented for `--bg` (verified working on
-  CLI 2.1.218; see [`docs/remote-control.md`](../../docs/remote-control.md)) —
-  if `bridgeSessionId` never appears after a CLI update, log the regression to
-  the scratchpad and keep going; the spawn itself is unaffected.
+  driven from there (@jwildfire directive, 2026-07-23). This flag combination
+  is undocumented for `--bg` (verified working on CLI 2.1.218 and 2.1.220; see
+  [`docs/remote-control.md`](../../docs/remote-control.md)), so step 6 verifies
+  it rather than assuming it.
 
 ### 4. Run it
 
@@ -137,3 +135,39 @@ the sibling's result at your next turn.
 The wrapup then knows the sibling exists even if it never logs a line — that
 mismatch is exactly the "known gap" that justifies transcript mining in
 [`session-wrapup`](../session-wrapup/SKILL.md) step 0.
+
+### 6. Verify the bridge — required, but never before the ack
+
+The spawn command printing a job ID does **not** mean Remote Control came up.
+Check it explicitly — but **not** as a round trip wedged between the spawn and
+the ack, which is exactly what the round-trip budget forbids. Either batch it
+into the next Bash call you were going to make anyway, or run it at your next
+turn (when you relay the sibling's first result); the bridge appears within
+~15s of spawn and stays for the life of the job, so a late check is as good as
+a prompt one:
+
+```bash
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); \
+print(d.get('name'), '| bridge:', d.get('bridgeSessionId') or 'MISSING')" \
+  ~/.claude/jobs/{id}/state.json
+```
+
+- **`bridgeSessionId` present** → the sibling is drivable from claude.ai/code
+  and the phone. Nothing more to do; do not spend a message saying so.
+- **Missing** → say so in your next reply to @jwildfire (he will look for that
+  session on his phone and not find it) and log it to the scratchpad, then keep
+  going — the spawn itself is unaffected and the sibling still works locally.
+  Then check the two known causes: the flag missing from the command, or
+  `"remoteControlAtStartup"` no longer `true` in `~/.claude/settings.json`
+  (an agent cannot restore that key — it is classifier-blocked; ask
+  @jwildfire). If neither explains it, it is a CLI regression on an
+  undocumented combination: note the version and see
+  [`docs/remote-control.md`](../../docs/remote-control.md).
+
+**This skill only owns the sibling lane.** Sessions started any other way — the
+lead 😺🤖 session, anything dispatched from the agents view, `obot-auto`'s
+autonomous 🦾🤖 lead — do not pass through here, which is exactly how the lead
+session went unbridged from 2026-07-23 to 2026-07-29. If @jwildfire reports a
+session missing from Remote Control, do not assume this skill is at fault:
+identify the launch lane first using the triage table in
+[`docs/remote-control.md`](../../docs/remote-control.md).
