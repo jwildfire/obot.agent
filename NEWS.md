@@ -1,0 +1,47 @@
+<!--
+NEWS.md is the running release log and the draft of each release's notes.
+Shape (per skills/rc-release-notes/SKILL.md): newest release first; every release
+section opens with its demo-artifact link, then a text-only, functionality-first
+account of what a user can now do. The GitHub release publishes from the section
+here, copied verbatim, when the release is approved and tagged.
+-->
+
+# obot.agent v0.4.0
+
+**See it move:** the [annotated v0.4.0 demo](https://jwildfire.github.io/obot.roadmap/reports/oa-v0.4-demo/) walks each change as a real terminal capture with the command that produced it.
+
+v0.3.0 gave obot the ability to run unattended. v0.4.0 is about what that run costs you: a session opens before the model thinks, the dashboard is one click from any status line, write policy is one file instead of two drifting ones, the three things that used to park an overnight run on a permission prompt are fixed, and the release you are reading has a written contract behind it. Nothing in the session-command surface is removed or renamed.
+
+## What's new
+
+- **A session opens before the model produces a token.** The hand-off — the previous session's priorities, what is waiting on you, what changed overnight — is assembled by a shell script during command expansion, so it is already in the prompt at first paint instead of being rediscovered over several model round trips. `/session-init` and `/s-init` are now the same fast command, and `obot-auto` launches unattended leads through it too. ([#76](https://github.com/jwildfire/obot.agent/pull/76), [#77](https://github.com/jwildfire/obot.agent/pull/77), [#80](https://github.com/jwildfire/obot.agent/pull/80), [#81](https://github.com/jwildfire/obot.agent/pull/81) · hub [#91](https://github.com/jwildfire/obot.roadmap/issues/91), [#148](https://github.com/jwildfire/obot.roadmap/issues/148))
+
+- **Every status line ends with a clickable hub link** — the live session ops hub inside the obot workspace, the deployed roadmap hub anywhere else — so the dashboard is one click from any session. The status line also became a tracked, installable artifact under `tools/statusline/` rather than one untracked file on one machine, and the watch loop can serve the live view over loopback so the link opens in Chrome instead of Finder. ([#52](https://github.com/jwildfire/obot.agent/pull/52) · hub [#24](https://github.com/jwildfire/obot.roadmap/issues/24))
+
+- **A repo's write policy is one decision in one file.** Merge tiers and unattended-autonomy grants used to live in two files needing separate edits per repo, and they had drifted into a state neither could express. They are now one `policy.json` where a repo gets a single profile, `obot-policy explain <repo>` prints what that profile means in plain words, and branches match by role rather than by name — so a release branch called `master` or `site` needs no special-casing. ([#59](https://github.com/jwildfire/obot.agent/pull/59), [#61](https://github.com/jwildfire/obot.agent/pull/61) · hub [#18](https://github.com/jwildfire/obot.roadmap/issues/18), [#140](https://github.com/jwildfire/obot.roadmap/issues/140))
+
+- **Overnight runs stop parking on permission prompts.** Spawned agents were handed a worktree path outside `.claude/worktrees/` — the only location Claude Code auto-approves — so each one waited for a click that, unattended, means until morning. A new triage table also tells you in one command why a session is missing from Remote Control, and the wrapup rebuilds the Analytics cost data before it posts so the spend page stops going stale. ([#69](https://github.com/jwildfire/obot.agent/pull/69), [#63](https://github.com/jwildfire/obot.agent/pull/63), [#67](https://github.com/jwildfire/obot.agent/pull/67) · hub [#18](https://github.com/jwildfire/obot.roadmap/issues/18), [#46](https://github.com/jwildfire/obot.roadmap/issues/46))
+
+- **What needs you is the first thing a wrapup says.** Every wrapup output — checkpoint page, diary entry, morning digest, closing message — now opens with the release candidates awaiting review and the decisions awaiting your call, each linking its PR and its demo or decision artifact, with the work log underneath. Both lists carry forward until you close them, decisions post to the hub's Q&A discussions where you answer in-thread, and a risk named in a wrapup becomes a tracked issue carrying a proposed mitigation. ([#83](https://github.com/jwildfire/obot.agent/pull/83), [#85](https://github.com/jwildfire/obot.agent/pull/85), [#71](https://github.com/jwildfire/obot.agent/pull/71), [#72](https://github.com/jwildfire/obot.agent/pull/72) · hub [#142](https://github.com/jwildfire/obot.roadmap/issues/142)–[#144](https://github.com/jwildfire/obot.roadmap/issues/144), [#148](https://github.com/jwildfire/obot.roadmap/issues/148))
+
+- **Releases now have a written contract.** `docs/rc-framework.md` states what reaches your review queue — release candidates and decision artifacts, nothing else — and what a candidate must carry, with a deployed demo page as a hard gate. The companion `rc-release-notes` skill puts the notes in a repo's `NEWS.md`, demo link first, and the tag publishes that section verbatim on approval. This file is that convention applied to obot.agent itself. ([#83](https://github.com/jwildfire/obot.agent/pull/83), [#86](https://github.com/jwildfire/obot.agent/pull/86) · hub [#123](https://github.com/jwildfire/obot.roadmap/issues/123))
+
+- **Thirteen session commands have one-word aliases, and three are new:** `/s-idea` files a half-formed thought to the triage queue without derailing the session, `/s-reviews` walks the PRs waiting on a decision one at a time, and `/s-prime` runs a session as the standing question desk — a long-lived session that answers from warm context in seconds and delegates anything slower. ([#64](https://github.com/jwildfire/obot.agent/pull/64), [#84](https://github.com/jwildfire/obot.agent/pull/84) · hub [#48](https://github.com/jwildfire/obot.roadmap/issues/48), [#114](https://github.com/jwildfire/obot.roadmap/issues/114))
+
+## Also in this release
+
+- The roadmap audit queue costs no tokens until you click, and batches submit in parallel with per-agent worktrees so concurrent applies stop colliding. ([#55](https://github.com/jwildfire/obot.agent/pull/55), [#56](https://github.com/jwildfire/obot.agent/pull/56) · hub [#92](https://github.com/jwildfire/obot.roadmap/issues/92), [#109](https://github.com/jwildfire/obot.roadmap/issues/109))
+- An upstream audit you can hand over: five ready-to-file `gsm.qtl` issue drafts, each with a runnable repro, at `drafts/gsm.qtl/`. Re-verified against current upstream on 2026-08-14; they stay drafts because agents do not write outside the `jwildfire` org. ([#62](https://github.com/jwildfire/obot.agent/pull/62))
+- **Known issue:** three of this release's merges were denied on first attempt by the Claude Code auto-mode classifier and succeeded on a plain retry. The evidence and the one permission rule that would close it are in a [decision artifact](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-14-merge-lane-classifier-denials/).
+
+## Tests and provenance
+
+104 tests are green across the status line, session hub, serve loop and audit lane, up from 66 at v0.3.0 (`node --test tools/session-hub/test/*.test.mjs` + `tools/statusline/test/*.test.mjs`). Every capture on the demo page is real output from this machine with its reproduce command executed before publication.
+
+# Earlier releases
+
+Full notes for every earlier release live on its GitHub release page:
+
+- [v0.3.0](https://github.com/jwildfire/obot.agent/releases/tag/v0.3.0) (2026-07-26) — autonomous sessions: `--auto` selects the next increment from the goal registry and runs it unattended; the idea queue; goal-driven selection.
+- [v0.2.0](https://github.com/jwildfire/obot.agent/releases/tag/v0.2.0) (2026-07-15) — the session framework: lean bookends, the scratchpad heartbeat, and the sibling-spawn lane.
+- [v0.1.0](https://github.com/jwildfire/obot.agent/releases/tag/v0.1.0) (2026-07-12) — first release of the agent-harness overlay.
