@@ -27,6 +27,14 @@ cost the lead more than ~30 seconds forks here.
   sweep, a PR queue, a free-text investigation. The trigger is not "this is a big
   build", it is "**this would cost me more than ~30 seconds**".
 
+The lane test is one line
+([D0013](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-delegation-lanes/),
+decided 2026-08-15): work whose **entire product is an answer** for the lead to
+relay runs as a background subagent (the Agent tool — its result returns into
+the lead's own context); work that **leaves anything behind** — a commit, an
+artifact, a PR, or state that must outlive the spawning session — comes here.
+When in doubt, spawn the sibling.
+
 **Do not use** for in-conversation subagents (the Agent tool — results return to
 this session, no heartbeat needed) or for ultracode/Workflow jobs (`⚡️🤖
 {description}` — tracked separately, 2026-07-12).
