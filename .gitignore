@@ -1,0 +1,5 @@
+# Python bytecode. `tools/lib/` is imported by tools/blocker-log, so running any
+# of them leaves a __pycache__ beside the source; one got committed in #127.
+# The filename carries the interpreter version, so it churns on every upgrade.
+__pycache__/
+*.py[cod]
