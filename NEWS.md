@@ -8,6 +8,8 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.5.0 (Upcoming)
 
+- **Blockers now have a ten-second capture path.** When an agent hits a wall only @jwildfire's hands can clear — a settings line the permission classifier refuses, an account-level grant, a device-side setup — `tools/blocker-log` files it to the workspace-local blockers list in one allowlistable call: headline, a required paste-ready fix, required provenance, optional what-it-unblocks. The script creates the list (sentinel first) if missing, refuses duplicate headlines, and inserts under the list's `## Open` heading without ever rewriting the shared file. Approved with the blockers-list decision (BL3, 2026-08-15); the list itself stays local-only — the hub deploy now fails if its sentinel ever reaches the published site.
+
 - **A reply now comes before the work that supports it.** After obot-prime answered one question in 31 silent minutes (bookkeeping, a long sibling briefing, and a post-spawn wrap-up all composed ahead of the reply), the responsiveness contract gained a mechanical turn-ordering rule: the first content block of any turn answering @jwildfire is text, a delegating turn's first tool call is the spawn, and all bookkeeping follows the reply. Prime additionally caps every turn at two tool calls before its first visible text, defers memory and state writes to after the ack, and composes briefings as pointers to on-disk artifacts rather than paraphrases. Briefing depth is unchanged — only its position in the turn moved. ([#102](https://github.com/jwildfire/obot.agent/issues/102))
 
 # obot.agent v0.4.0
