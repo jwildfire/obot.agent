@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 // ops-dashboard — the Operations Dashboard.
 //
-// @jwildfire's local page: his todo list with blockers included, and the place he
-// answers decision artifacts instead of reading them on the public site and typing
-// the answer somewhere else. Requirement: jwildfire/obot.roadmap#180.
+// @jwildfire's local page: his todo list — release candidates, decisions, config —
+// and the place he answers decision artifacts instead of reading them on the public
+// site and typing the answer somewhere else. Requirement: jwildfire/obot.roadmap#180.
+//
+// It is also the site. Since 2026-08-15 ("I want the ops db and orginal ops hub to be
+// merged. just make them 2 different tabs on the same (local) site for now. new ops db
+// should be default view") this server carries both views: the dashboard at `/`, the
+// session hub's live render at `/live.html` inside the same header. One port, and the
+// serve marker the status line reads is written from here.
 //
 // Vocabulary, fixed by him on 2026-08-15: the **dashboard** is this local page; the
 // **hub** is the public site with the roadmap, news and artifacts.
@@ -24,7 +30,8 @@
 //
 //   --workspace <dir>  workspace root (default: cwd)
 //   --hub <dir>        obot.roadmap clone (default: <workspace>/obot.roadmap)
-//   --port <n>         loopback port (default 7326; rolls forward if taken)
+//   --port <n>         loopback port (default 7326; rolls forward if taken, and the
+//                      bound port is what lands in the status line's serve marker)
 //   --serve            run the server (without it, render once to stdout)
 //   --open             print the URL when the server is up
 import fs from 'node:fs';
@@ -33,11 +40,20 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { collectQueue, refreshRCs } from './lib/collect.mjs';
-import { render } from './lib/render.mjs';
-import { ensureStore, readAnswers, writeAnswer } from './lib/store.mjs';
+import { render, sessionShell, navigatorShell, NOT_LISTENING } from './lib/render.mjs';
+import { parseNavigatorState } from './lib/navigator.mjs';
+import { currentAnswers, recordAnswer } from './lib/answers.mjs';
+import { ensureStore } from './lib/store.mjs';
+import { runVerify, readChecks } from './lib/iq.mjs';
+import { triage } from './lib/triage.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 7326;
+
+// The session hub's live view, written by its own watch loop.
+const SESSION_DIR = ['.claude', 'session-hub'];
+const SESSION_LIVE = 'live.html';
+const WATCH_CMD = 'node obot.agent/tools/session-hub/session-hub.mjs --watch';
 
 export function parseArgs(argv) {
   const a = { port: DEFAULT_PORT, serve: false, open: false };
@@ -73,11 +89,80 @@ export function artifactPath(hub, url) {
   return fs.existsSync(file) ? file : null;
 }
 
+/** The session hub's rendered live view, or null when no watch loop has run yet. */
+export function sessionLivePath(workspace) {
+  const file = path.join(workspace, ...SESSION_DIR, SESSION_LIVE);
+  return fs.existsSync(file) ? file : null;
+}
+
+/**
+ * Advertise this server in the session hub's `serve.json`, the marker the status line
+ * reads for its link (tools/statusline). The two views are one site now, so the marker
+ * points here and `/live.html` lands on the session tab — the link keeps resolving
+ * without the status line knowing anything changed.
+ *
+ * Same contract as session-hub's own `serveHub`: `{port, pid, url, startedAt}`, and it
+ * is removed on exit only when the pid still matches, so a server that outlives this
+ * one keeps its own marker.
+ */
+export function writeServeMarker(workspace, { port, url }) {
+  const dir = path.join(workspace, ...SESSION_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  const marker = path.join(dir, 'serve.json');
+  fs.writeFileSync(marker, `${JSON.stringify({
+    port, pid: process.pid, url, startedAt: new Date().toISOString(), site: 'ops-dashboard',
+  }, null, 2)}\n`);
+  const cleanup = () => {
+    try {
+      if (JSON.parse(fs.readFileSync(marker, 'utf8')).pid === process.pid) fs.unlinkSync(marker);
+    } catch { /* already gone, or another server's marker — leave it */ }
+  };
+  process.on('exit', cleanup);
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(0); });
+  return marker;
+}
+
+/**
+ * Is anything listening for the answers he records?
+ *
+ * The deliverer is the 🧭🤖 Navigator sweep (launchd, every five minutes). Its
+ * state file is the heartbeat, and the file's own rule — a `swept:` stamp older
+ * than three cadences means the observer is dead — is the one this reuses. An
+ * absent file is the same answer as a dead one: nothing is listening.
+ *
+ * This exists so the page can *say* that. An answer sitting in a queue nobody
+ * reads must never look like an answer that landed.
+ */
+export function delivererState(workspace) {
+  const file = path.join(workspace, ...SESSION_DIR, 'navigator-state.md');
+  try {
+    const s = parseNavigatorState(fs.readFileSync(file, 'utf8'));
+    return { alive: !s.stale, sweptAt: s.sweptAt, ageMin: s.ageMin };
+  } catch {
+    return { alive: false, missing: true, sweptAt: null, ageMin: null };
+  }
+}
+
 async function page(args) {
   const queue = await collectQueue(args.workspace, args.hub, {
     agent: path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue'),
   });
-  return render({ queue, staged: readAnswers(args.workspace), workspace: args.workspace, hub: args.hub });
+  // The last recorded pass/fail per item, so an installation qualification opens
+  // showing whether it has ever been proved rather than starting blank.
+  const checks = readChecks(args.workspace);
+  const check = (i) => checks[i.id ?? i.key];
+  const withChecks = (g) => ({ ...g, items: (g.items ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)) });
+  return render({
+    queue: {
+      ...queue,
+      config: withChecks(queue.config),
+      critical: (queue.critical ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)),
+    },
+    answers: currentAnswers(args.workspace, { hub: args.hub }),
+    deliverer: delivererState(args.workspace),
+    workspace: args.workspace,
+    hub: args.hub,
+  });
 }
 
 function readBody(req, limit = 64 * 1024) {
@@ -102,9 +187,57 @@ export function serve(args) {
     try {
       if (req.method === 'POST' && req.url.split('?')[0] === '/answer') {
         const answer = JSON.parse(await readBody(req));
-        if (!answer.verdict) return send(400, 'application/json', JSON.stringify({ error: 'no verdict' }));
-        const rec = writeAnswer(args.workspace, answer);
-        return send(200, 'application/json', JSON.stringify({ ok: true, id: rec.id }));
+        let result;
+        try {
+          result = recordAnswer(args.workspace, answer, { hub: args.hub });
+        } catch (e) {
+          // A refusal he can act on. The old handler took anything with a verdict
+          // string, which is how a "per-question" answer holding no questions
+          // reached disk on 2026-08-15.
+          return send(400, 'application/json', JSON.stringify({ error: e.message }));
+        }
+        const { record, duplicate } = result;
+        const listening = delivererState(args.workspace).alive;
+        return send(200, 'application/json', JSON.stringify({
+          ok: true,
+          id: record.id,
+          decisionId: record.decisionId,
+          decisionIdError: record.decisionIdError,
+          status: record.status,
+          duplicate,
+          supersedes: record.supersedes,
+          // What happens next, in one sentence, because the page's job is to
+          // answer "what did clicking that do?" before he has to ask.
+          next: 'Recorded on this machine. The Navigator picks it up within five minutes, then an agent updates the artifact — nothing else for you to do.',
+          warning: listening ? null : NOT_LISTENING,
+        }));
+      }
+
+      // Delete and snooze, for anything in the list. The store is a ledger and
+      // this route only appends to it — no source file is ever edited from a
+      // click, so a dismissal stays recoverable and the config list keeps its
+      // own retire-with-strikethrough convention.
+      if (req.method === 'POST' && req.url.split('?')[0] === '/triage') {
+        const body = JSON.parse(await readBody(req));
+        try {
+          const rec = triage(args.workspace, body);
+          return send(200, 'application/json', JSON.stringify({ ok: true, at: rec.at }));
+        } catch (e) {
+          return send(400, 'application/json', JSON.stringify({ error: e.message }));
+        }
+      }
+
+      // Run one installation qualification's proof and record the result. The
+      // command is taken from the request, so it is re-checked against the
+      // read-only allowlist here rather than trusted because the page sent it —
+      // the page is the least trustworthy thing in this process.
+      if (req.method === 'POST' && req.url.split('?')[0] === '/check') {
+        const body = JSON.parse(await readBody(req));
+        if (!body.command) return send(400, 'application/json', JSON.stringify({ error: 'no command' }));
+        const rec = await runVerify(args.workspace, {
+          id: body.id ?? body.key, command: body.command, expect: body.expect ?? null,
+        });
+        return send(200, 'application/json', JSON.stringify(rec));
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, 'text/plain', 'method not allowed');
 
@@ -113,6 +246,33 @@ export function serve(args) {
 
       const p = req.url.split('?')[0];
       if (p === '/' || p === '/index.html') return send(200, 'text/html; charset=utf-8', await page(args));
+
+      // The second tab. `/live.html` is the address the status line already builds;
+      // `/session` is the readable alias, and `/session/frame` is the session hub's
+      // own render, served byte-for-byte inside the shell.
+      if (p === '/live.html' || p === '/session' || p === '/session/') {
+        return send(200, 'text/html; charset=utf-8', sessionShell({
+          missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
+        }));
+      }
+      if (p === '/session/frame') {
+        const live = sessionLivePath(args.workspace);
+        if (!live) return send(404, 'text/plain', `no session view yet — run: ${WATCH_CMD}`);
+        return send(200, 'text/html; charset=utf-8', fs.readFileSync(live));
+      }
+
+      // The third tab: what the 🧭🤖 Navigator sweep has seen, read fresh on every
+      // request — the file is rewritten every five minutes and a cached copy of an
+      // observer's state is exactly the thing that must not go stale silently.
+      if (p === '/navigator' || p === '/navigator/') {
+        const file = path.join(args.workspace, ...SESSION_DIR, 'navigator-state.md');
+        let md = null;
+        try { md = fs.readFileSync(file, 'utf8'); } catch { /* no sweep yet */ }
+        return send(200, 'text/html; charset=utf-8', navigatorShell(
+          md ? { state: parseNavigatorState(md) } : { missing: file },
+        ));
+      }
+
       if (p === '/queue.json') {
         const q = await collectQueue(args.workspace, args.hub);
         return send(200, 'application/json', JSON.stringify({ items: q.items }, null, 2));
@@ -129,7 +289,14 @@ export function serve(args) {
         if (e.code === 'EADDRINUSE' && left > 0) return listen(port + 1, left - 1);
         throw e;
       });
-      server.listen(port, HOST, () => resolve({ server, url: `http://${HOST}:${port}/` }));
+      // Report the bound port, not the requested one — `--port 0` means "any free
+      // port", and the marker the status line reads has to name the real one.
+      server.listen(port, HOST, () => {
+        const bound = server.address().port;
+        const url = `http://${HOST}:${bound}/`;
+        writeServeMarker(args.workspace, { port: bound, url: `${url}live.html` });
+        resolve({ server, url });
+      });
     };
     listen(args.port, 20);
   });

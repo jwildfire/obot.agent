@@ -119,3 +119,27 @@ test('renderState: empty queue says so explicitly', () => {
   const md = renderState({ snapshot: {}, events: [], meta })
   assert.match(md, /RC queue: EMPTY/)
 })
+
+// The Navigator is also the deliverer for decision answers (#120). It is the
+// only observer that runs when no session does — launchd, every five minutes —
+// so it is what turns "he clicked" into something an agent will see.
+test('renderState: answers he has recorded appear in the state file prime reads', () => {
+  const md = renderState({
+    snapshot: {},
+    events: [],
+    meta,
+    answers: [{
+      id: 'a1', decisionId: 'D0003', artifact: '2026-08-14-demo-301-site-size',
+      verdict: 'adopt-all', status: 'delivered', at: new Date().toISOString(), questions: {},
+    }],
+  })
+  assert.match(md, /## Decision answers/)
+  assert.match(md, /D0003/)
+  assert.match(md, /adopt-all/)
+})
+
+test('renderState: no answers pending still says so, rather than dropping the section', () => {
+  const md = renderState({ snapshot: {}, events: [], meta, answers: [] })
+  assert.match(md, /## Decision answers/)
+  assert.match(md, /none/i)
+})

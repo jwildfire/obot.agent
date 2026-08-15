@@ -80,6 +80,14 @@ reviews release candidates and decision artifacts, and nothing else
 An RC is not "the accumulated diff." It is a release proposed for publication,
 and it stands or falls on whether he can see what changed without reading code.
 
+**Its title starts with the package name and the version** — `gsm.safety v1.1.0 —
+the participant-level metrics phase`, never a bare sentence and never `Release
+candidate:` as the first words (@jwildfire, 2026-08-15: "release candidate PRs should
+all start with a package name and a version number"). That is what he sees in a queue
+of five, on a phone, with nothing else to tell them apart. The Operations Dashboard
+derives the same label for PRs written before the rule, but a derived label is a
+repair, not the convention.
+
 1. **Release notes, house style, drafted in `NEWS.md`.** Functionality-first
    and user-facing: what a person can now do that they could not do before, and
    why that matters. One bullet per feature, each linking its hub requirement

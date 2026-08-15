@@ -35,6 +35,8 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, appendFileSync } from
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { answersSection, deliverAnswers, pendingAnswers } from '../ops-dashboard/lib/answers.mjs'
+
 const WS = process.env.OBOT_WORKSPACE || join(process.env.HOME, 'Documents/obot2')
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const POLICY = join(REPO_ROOT, 'scripts', 'policy.json')
@@ -42,6 +44,8 @@ const STATE_MD = join(WS, '.claude/session-hub/navigator-state.md')
 const SNAPSHOT = join(WS, '.claude/session-hub/cache/navigator-rc.json')
 const LOG = join(WS, '.claude/session-hub/navigator-sweep.log')
 const SCRATCHPAD_LOG = join(REPO_ROOT, 'tools', 'scratchpad-log')
+// The hub clone, for joining an artifact slug to the decision id he quotes.
+const HUB = process.env.OBOT_HUB || join(WS, 'obot.roadmap')
 const CADENCE_MIN = 5
 const REVIEWER = 'jwildfire'
 const MAX_EVENTS = 15
@@ -100,7 +104,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
   return events
 }
 
-export function renderState({ snapshot, events, meta }) {
+export function renderState({ snapshot, events, meta, answers = [] }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   const head = meta.ok
     ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · ok — ${meta.repoCount} repos, ${Object.keys(snapshot).length} RCs`
@@ -124,6 +128,13 @@ export function renderState({ snapshot, events, meta }) {
       : 'no review yet'
     lines.push(`- **${short(rc.repo, rc.number)}** "${rc.title}" → \`${rc.base}\` · ${review} · ${rc.commentCount} comments · ${rc.url} ${stamp}`)
   }
+  // The decision answers he has recorded and nobody has applied (#120). This
+  // section is why the Navigator is the deliverer: an answer written to the ops
+  // store when no session is running has no other reader, and the failure that
+  // produced this — a `staged` record nothing watched — was invisible precisely
+  // because it lived somewhere nothing scheduled ever looked.
+  lines.push('', answersSection(answers).trimEnd())
+
   lines.push('', `## Recent events (newest first, capped ${MAX_EVENTS})`, '')
   if (!events.length) lines.push('- (none recorded yet)')
   for (const e of events) lines.push(`- ${e.at || meta.sweptAt.slice(-5)} ${e.line} ${e.stamp || stamp}`)
@@ -163,6 +174,8 @@ function log(msg) {
   } catch { /* logging is best-effort */ }
 }
 
+const safePending = () => { try { return pendingAnswers(WS, { hub: HUB }) } catch { return [] } }
+
 function main() {
   const sweptAt = nowStamp()
   let prevWrap = { lastGoodAt: null, snapshot: {}, events: [] }
@@ -173,7 +186,10 @@ function main() {
     repos = discoverRepos(JSON.parse(readFileSync(POLICY, 'utf8')))
   } catch (e) {
     const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: 0, ok: false, errors: [`policy.json: ${e.message}`], lastGoodAt: prevWrap.lastGoodAt }
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta }))
+    // A sweep that cannot read the policy still reports his answers: they come
+    // from the local store, and a failed RC sweep is no reason to imply there is
+    // nothing waiting on an agent.
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending() }))
     log(`FAILED policy.json: ${e.message}`)
     process.exit(0)
   }
@@ -201,18 +217,38 @@ function main() {
   }
 
   const events = diff(prevWrap.snapshot, next, goneStates, failedRepos)
+
+  // The other half of the sweep: hand over the decision answers he has recorded
+  // (#120). Bookkeeping still — the Navigator announces, it never applies — but
+  // it is the only thing running when no session is, so without this an answer
+  // sits in the ops store until he asks about it, which is the failure this
+  // capability exists to end. A broken answer store must not break the RC sweep.
+  let answers = []
+  let answerEvents = []
+  try {
+    answerEvents = deliverAnswers(WS, { hub: HUB }).events
+    answers = pendingAnswers(WS, { hub: HUB })
+  } catch (e) {
+    errors.push(`answers: ${String(e.message).slice(0, 120)}`)
+  }
+
   const hhmm = sweptAt.slice(-5)
-  const stamped = events.map(e => ({ ...e, at: hhmm, stamp: `[verified gh ${hhmm}]` }))
+  // Provenance is per source: RC events are verified against GitHub, answer
+  // events come off the local ops store. One stamp for both would be a lie.
+  const stamped = [
+    ...events.map(e => ({ ...e, stamp: `[verified gh ${hhmm}]` })),
+    ...answerEvents.map(e => ({ ...e, stamp: `[ops store ${hhmm}]` })),
+  ].map(e => ({ ...e, at: hhmm }))
   const allEvents = [...stamped.reverse(), ...(prevWrap.events || [])].slice(0, MAX_EVENTS)
 
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers }))
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over)${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()

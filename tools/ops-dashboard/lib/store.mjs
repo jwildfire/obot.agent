@@ -48,44 +48,8 @@ Requirement: [obot.roadmap#180](https://github.com/jwildfire/obot.roadmap/issues
 
 const stamp = (o) => ({ _note: SENTINEL, ...o });
 
-/**
- * Record an answer. One file per answer, never an edit of an earlier one — the
- * store is an append-only ledger so "what did he say, and when" survives an agent
- * that applies it badly.
- */
-export function writeAnswer(workspace, answer) {
-  const dir = path.join(ensureStore(workspace), 'answers');
-  const at = new Date();
-  const base = `${at.toISOString().replace(/[:.]/g, '-')}-${(answer.artifact || 'unknown').slice(0, 40)}`;
-  // Append-only is the point of this folder, and a millisecond timestamp is not
-  // unique enough to guarantee it — two answers in the same tick would silently
-  // leave one behind. Take the next free suffix instead.
-  let id = base;
-  for (let n = 2; fs.existsSync(path.join(dir, `${id}.json`)); n++) id = `${base}-${n}`;
-  const record = stamp({
-    id,
-    at: at.toISOString(),
-    status: 'staged',
-    artifact: answer.artifact ?? null,
-    decisionId: answer.decisionId ?? null,
-    verdict: answer.verdict ?? null,
-    questions: answer.questions ?? {},
-    words: (answer.words ?? '').trim(),
-  });
-  fs.writeFileSync(path.join(dir, `${id}.json`), `${JSON.stringify(record, null, 2)}\n`);
-  return record;
-}
-
-/** Every staged answer, newest first. */
-export function readAnswers(workspace) {
-  const dir = path.join(opsDir(workspace), 'answers');
-  let names = [];
-  try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')); } catch { return []; }
-  return names
-    .map((n) => { try { return JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')); } catch { return null; } })
-    .filter(Boolean)
-    .sort((a, b) => (b.at || '').localeCompare(a.at || ''));
-}
+// Answers themselves live in `answers.mjs`: recording one is a pipeline (join the
+// decision id, supersede what it replaces, hand it to a deliverer), not a write.
 
 export function writeCache(workspace, name, value) {
   const dir = path.join(ensureStore(workspace), 'cache');

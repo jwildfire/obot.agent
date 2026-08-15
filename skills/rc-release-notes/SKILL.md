@@ -56,6 +56,13 @@ first and write the notes from it.
 
 Full rule and its history: [`AGENTS.md` → Milestone before work](../../AGENTS.md#milestone-before-work).
 
+## The RC PR's title
+
+`{package} v{X.Y.Z} — {what the release is}`, e.g. `gsm.safety v1.1.0 — the
+participant-level metrics phase`. The package and the version come first, always
+(@jwildfire, 2026-08-15) — that line is how he tells five release candidates apart in a
+queue on his phone. No `Release candidate:` lead; the base branch already says it is one.
+
 ## The section shape
 
 In order, for `# {repo} vX.Y.Z` (titled `# {repo} vX.Y.Z (Upcoming)` until the release is
