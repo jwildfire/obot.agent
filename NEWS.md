@@ -6,7 +6,11 @@ account of what a user can now do. The GitHub release publishes from the section
 here, copied verbatim, when the release is approved and tagged.
 -->
 
-# obot.agent v0.4.0 (Upcoming)
+# obot.agent v0.5.0 (Upcoming)
+
+Nothing yet — merged-but-unreleased work accumulates here until the v0.5.0 release is cut.
+
+# obot.agent v0.4.0
 
 **See it move:** the [annotated v0.4.0 demo](https://jwildfire.github.io/obot.roadmap/reports/oa-v0.4-demo/) walks each change as a real terminal capture with the command that produced it.
 
