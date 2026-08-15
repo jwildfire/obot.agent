@@ -64,6 +64,18 @@ cut):
 1. **The demo-artifact link, first.** A `**See it move:**` line pointing at the release's
    annotated demo page under `obot.roadmap/reports/{slug}/` — always the first line of the
    section, before any prose or feature list. This is a standing rule, not a style choice.
+
+   The demo page is an agent artifact and gets a row in the hub's news feed, so its own
+   `<head>` carries the line that feed shows — written when the page is written:
+
+   ```html
+   <title>safety.viz v1.7.0 — annotated demo</title>
+   <meta name="description" content="What v1.7.0 adds, annotated: the Time-to-Event Explorer, captured live from the release-candidate build, with a way into each behaviour.">
+   ```
+
+   Name what the release actually adds; "AI-generated report." and bare version numbers
+   do not tell @jwildfire whether the row is worth opening. Contract and checker in
+   `obot.roadmap/reports/README.md`.
 2. **A short intro paragraph** — the release in two or three sentences, plus a
    compatibility line ("No existing API is removed or renamed") when true.
 3. **`## What's new`** — the robust list. One bullet per feature, **text only, no
