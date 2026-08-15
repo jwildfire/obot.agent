@@ -18,6 +18,6 @@ jobs:
         with:
           node-version: 24
       - name: Test suite
-        run: node --test tools/session-hub/test/*.test.mjs tools/statusline/test/*.test.mjs scripts/test/*.test.mjs
+        run: node --test tools/session-hub/test/*.test.mjs tools/statusline/test/*.test.mjs tools/navigator/test/*.test.mjs scripts/test/*.test.mjs
       - name: Policy file validation
         run: python3 scripts/obot-policy validate

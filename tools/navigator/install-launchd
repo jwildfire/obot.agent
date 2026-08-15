@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# install-launchd — install (or reinstall) the Navigator RC-review sweep as a
+# macOS LaunchAgent: com.obot.navigator-sweep, every 5 minutes, survives
+# session death and reboot. Session-bound Monitors are exactly what failed on
+# sv#131 (hub#157) — durability is the point.
+#
+# Run from the MAIN obot.agent checkout after the sweep has merged; the plist
+# bakes in this script's own repo root plus absolute node/gh paths, so the
+# minimal launchd environment needs no shell profile.
+#
+#   bash tools/navigator/install-launchd            # install + start
+#   bash tools/navigator/install-launchd --uninstall
+#
+# Status:  launchctl print "gui/$UID/com.obot.navigator-sweep" | head
+# Nudge:   launchctl kickstart -k "gui/$UID/com.obot.navigator-sweep"
+# Logs:    {workspace}/.claude/session-hub/navigator-sweep.log
+set -euo pipefail
+
+LABEL="com.obot.navigator-sweep"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SWEEP="$REPO_ROOT/tools/navigator/sweep.mjs"
+NODE="$(command -v node)"
+GH="$(command -v gh)"
+CADENCE_SECONDS=300
+
+if [ "${1:-}" = "--uninstall" ]; then
+  launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+  rm -f "$PLIST"
+  echo "uninstalled $LABEL"
+  exit 0
+fi
+
+[ -f "$SWEEP" ] || { echo "not found: $SWEEP" >&2; exit 1; }
+[ -n "$NODE" ] && [ -n "$GH" ] || { echo "need node and gh on PATH" >&2; exit 1; }
+
+mkdir -p "$(dirname "$PLIST")"
+cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$NODE</string>
+    <string>$SWEEP</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$(dirname "$NODE"):$(dirname "$GH"):/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key><integer>$CADENCE_SECONDS</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>/tmp/$LABEL.err</string>
+</dict>
+</plist>
+PLIST
+
+launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+launchctl bootstrap "gui/$UID" "$PLIST"
+echo "installed $LABEL — every $((CADENCE_SECONDS / 60)) min via $NODE"
+launchctl print "gui/$UID/$LABEL" | grep -E 'state|interval' | head -3 || true

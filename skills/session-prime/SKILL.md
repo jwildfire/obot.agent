@@ -142,12 +142,45 @@ failure. These lines make the ordering mechanical:
 
 1. **Session context + the scratchpad** (`{workspace}/.claude/session-notes/` —
    today's file and recent days).
-2. **The session-hub sweep cache** — `{workspace}/.claude/session-hub/cache/`
+2. **The Navigator's RC file** —
+   `{workspace}/.claude/session-hub/navigator-state.md` (Navigator-owned;
+   written every 5 minutes by the scheduled sweep, obot.agent
+   `tools/navigator/sweep.mjs` under launchd `com.obot.navigator-sweep`). The
+   first-stop answer for anything about RCs and @jwildfire's reviews: the open
+   RC queue, latest review per RC with state and excerpt, and recent events
+   (new reviews, new RCs, merges/closes), every line `[verified gh HH:MM]`.
+   **Freshness is in the file's own `swept:` header — check it every time.
+   Stale rule: older than 15 min (3× cadence) means the observer is dead, not
+   quiet.** A stale file is never presented as current: say the Navigator is
+   down, answer from one bounded `gh` call instead, restart with
+   `launchctl kickstart -k gui/$UID/com.obot.navigator-sweep`, and log the
+   outage in the scratchpad. A missing file means no Navigator — same
+   fallback, minus the restart.
+3. **The session-hub sweep cache** — `{workspace}/.claude/session-hub/cache/`
    (~2ms warm): repo, issue, and PR state without a network call.
-3. **Overlay docs**: obot.agent `AGENTS.md` / `agent.md` / `docs/`, the workspace
+4. **Overlay docs**: obot.agent `AGENTS.md` / `agent.md` / `docs/`, the workspace
    `CLAUDE.md` — conventions, architecture, and pointers.
-4. **One bounded live call** — a single `gh` command or roadmap-site fetch for a
+5. **One bounded live call** — a single `gh` command or roadmap-site fetch for a
    current number (issue state, PR status, board column).
+
+### RC review watching is the Navigator's job, not prime's
+
+- **Per-RC review Monitors are retired.** The sv#131 miss (2026-08-15:
+  CHANGES_REQUESTED at 08:29Z unseen for hours) had two causes — coverage was
+  a manual per-RC step, and watchers died with the session. The scheduled
+  Navigator sweep fixes both: it discovers RCs from `scripts/policy.json`
+  (release-role base, review requested from @jwildfire, or already reviewed),
+  so a new RC in any policy repo is observed with nobody arming anything, and
+  it survives prime restarts. Do not arm a Monitor "to watch for reviews on
+  PR X" — that recreates the failed mechanism alongside the working one.
+- A Monitor remains legitimate only for a **one-off, non-RC wait inside a
+  live exchange** — e.g. a specific CI run @jwildfire is actively waiting on —
+  where sub-5-minute immediacy matters. List it in `## Armed` with the
+  standing caveat that it dies with the session and the Navigator does not
+  back it up.
+- New-review events also land in the scratchpad `## Session log` as
+  `🧭🤖 nav` lines, so a compacted prime re-reading the log sees them without
+  opening the state file.
 
 ## Delegation lanes — pick per question, name the lane in the ack
 
@@ -204,10 +237,13 @@ for flavor, the bundle for facts.**
   the reply, so the write costs zero round trips. If it is worth telling
   @jwildfire, it is worth one stamped line (the 2026-08-14 "self-corrects"
   incident is the case study).
-- A `navigator-state.md` beside it (when the Navigator exists — hub
-  requirement, filed separately) is Navigator-owned: prime reads it, never
-  writes it. **Claims always stays prime's own** — only prime knows what it
-  just told @jwildfire.
+- `navigator-state.md` beside it ([hub#157](https://github.com/jwildfire/obot.roadmap/issues/157),
+  live since 2026-08-15) is Navigator-owned: the scheduled sweep is its sole
+  writer, prime reads it and never writes it — two files, one writer each,
+  no racing. Prime folds what it relays from there into its own sections as
+  `[asserted 🧭🤖 nav HH:MM]` if it must persist a line, but the usual move
+  is to point, not copy. **Claims always stays prime's own** — only prime
+  knows what it just told @jwildfire.
 
 ### Rehydration (C3)
 
