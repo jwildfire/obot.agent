@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# blocker-log — capture one blocker to the workspace-local blockers list,
+# inserted under the `## Open` heading of $WS/.claude/blockers.md.
+#
+#   blocker-log '<what>' --fix '<paste-ready command or diff>' --source '<url or provenance>' [--unblocks '<what it unblocks>']
+#   blocker-log 'workspace allowlist line for blocker-log' \
+#     --fix 'add "Bash(bash .../tools/blocker-log *)" to permissions.allow' \
+#     --source 'obot.agent#NN' --unblocks 'ten-second capture from every session'
+#
+# The scope test (BL1, decision artifact 2026-08-15-blockers-list — approved
+# 2026-08-15): an item belongs on the list only if the fix is fully specified
+# and the sole missing ingredient is @jwildfire's physical access — his
+# keyboard, his account, his device. The counter-test: if a one-word "yes"
+# from him would let an agent do it, it is an approval ask or a decision, NOT
+# a blocker — route it to the decisions lane or the session todo instead.
+#
+# Semantics mirror tools/scratchpad-log: shelled dates (never modeled),
+# heading-anchored insert, one entry per call, never rewrite the file
+# wholesale — it is shared by every session, sibling, and ultracode job.
+# Lifecycle: resolved entries MOVE to `## Resolved` with a date, never
+# delete. The list is LOCAL-ONLY: it must never be committed to any repo or
+# published to any site (the hub deploy carries a sentinel guard).
+set -u
+usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+FILE="$WS/.claude/blockers.md"
+WHAT="${1:-}"; [ -z "$WHAT" ] && usage 1
+case "$WHAT" in -h|--help) usage 0;; esac
+shift
+FIX=""; SOURCE=""; UNBLOCKS=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fix)      FIX="${2:?--fix needs a value}"; shift 2;;
+    --source)   SOURCE="${2:?--source needs a value}"; shift 2;;
+    --unblocks) UNBLOCKS="${2:?--unblocks needs a value}"; shift 2;;
+    *) echo "blocker-log: unknown argument: $1" >&2; usage 1;;
+  esac
+done
+[ -z "$FIX" ] && { echo "blocker-log: --fix is required — a blocker without a paste-ready fix is a note, not a blocker" >&2; exit 1; }
+[ -z "$SOURCE" ] && { echo "blocker-log: --source is required (issue/PR/close-out URL or provenance note)" >&2; exit 1; }
+TODAY="$(date +%F)"
+python3 - "$FILE" "$TODAY" "$WHAT" "$FIX" "$SOURCE" "$UNBLOCKS" <<'PY'
+import sys, pathlib, re
+p = pathlib.Path(sys.argv[1]); today, what, fix, source, unblocks = sys.argv[2:7]
+# The local-only sentinel, composed from two halves so this script's own text
+# can never trip the hub deploy guard if it is ever rendered onto a page.
+sentinel = "LOCAL-ONLY: never publish" + ", never commit"
+if not p.exists():
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        f"<!-- {sentinel}. This file maps permission boundaries and missing\n"
+        f"     grants — a capability-gap disclosure if it ever reaches the public hub site. -->\n\n"
+        f"# Blockers — work only @jwildfire's hands can do\n\n"
+        f"**The test (BL1):** an item belongs here only if the fix is fully specified and\n"
+        f"the *only* missing ingredient is Jeremy's physical access. If a one-word \"yes\"\n"
+        f"would let an agent do it, it is an approval ask or a decision, not a blocker.\n\n"
+        f"## Open\n\n## Resolved\n\n## Near-misses\n")
+text = p.read_text()
+# Dedup: an existing entry mentioning the same headline is a re-file, not a new blocker.
+probe = what.strip().lower()[:60]
+if probe and probe in text.lower():
+    print(f"blocker-log: an entry matching '{probe}' already exists in {p} — not re-filing.\n"
+          f"If this is genuinely new, reword the headline; to re-verify an existing entry, "
+          f"update its 'verified' date in place.", file=sys.stderr)
+    sys.exit(2)
+entry = [f"- [ ] filed {today} · verified {today} — **{what.strip()}**.",
+         f"  Fix: {fix.strip()}",
+         f"  Source: {source.strip()}"]
+if unblocks.strip():
+    entry.append(f"  Unblocks: {unblocks.strip()}")
+lines = text.splitlines()
+if "## Open" not in lines:
+    lines += ["", "## Open"]
+i = lines.index("## Open") + 1
+j = i
+while j < len(lines) and not lines[j].startswith("## "):
+    j += 1
+while j > i and not lines[j-1].strip():
+    j -= 1
+lines[j:j] = [""] + entry
+p.write_text("\n".join(lines) + "\n")
+print(f"blocker-log: filed under ## Open in {p}")
+PY
