@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# blocker-log — capture one blocker to the workspace-local blockers list,
+# blocker-log — capture one config item to the workspace-local list,
 # inserted under the `## Open` heading of $WS/.claude/blockers.md.
+#
+# "Config" is what @jwildfire calls these on the Operations Dashboard
+# (2026-08-15: "let's call 'your hands' -> 'config' and give them IDs.
+# c0001, etc."). Same list, same test, same file — the vocabulary he reads
+# changed, the capture lane did not. Every entry is stamped with a permanent
+# id (c0001, c0002, …) allocated here, once, at capture time: it lives in the
+# file so it survives the item being reworded, and it is derived from the
+# highest id already in the file — including retired ones — so a number is
+# never reused. Mirrors the hub's decision ids (D0001), deliberately.
 #
 #   blocker-log '<what>' --fix '<paste-ready command or diff>' --source '<url or provenance>' [--unblocks '<what it unblocks>']
 #   blocker-log 'workspace allowlist line for blocker-log' \
@@ -21,7 +30,7 @@
 # delete. The list is LOCAL-ONLY: it must never be committed to any repo or
 # published to any site (the hub deploy carries a sentinel guard).
 set -u
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
 FILE="$WS/.claude/blockers.md"
 WHAT="${1:-}"; [ -z "$WHAT" ] && usage 1
@@ -63,7 +72,13 @@ if probe and probe in text.lower():
           f"If this is genuinely new, reword the headline; to re-verify an existing entry, "
           f"update its 'verified' date in place.", file=sys.stderr)
     sys.exit(2)
-entry = [f"- [ ] filed {today} · verified {today} — **{what.strip()}**.",
+# The permanent id: `c` + four digits, one higher than every id already in the
+# file. Retired entries keep their numbers, so scanning the whole file (not just
+# `## Open`) is what makes "never reused" true. Derived, never stored in a
+# counter — the same rule the hub's decision registry follows.
+nid = max([int(m.group(1)) for m in re.finditer(r"\bc(\d{4})\b", text, re.I)] + [0]) + 1
+cid = f"c{nid:04d}"
+entry = [f"- [ ] {cid} · filed {today} · verified {today} — **{what.strip()}**.",
          f"  Fix: {fix.strip()}",
          f"  Source: {source.strip()}"]
 if unblocks.strip():
@@ -79,5 +94,5 @@ while j > i and not lines[j-1].strip():
     j -= 1
 lines[j:j] = [""] + entry
 p.write_text("\n".join(lines) + "\n")
-print(f"blocker-log: filed under ## Open in {p}")
+print(f"blocker-log: filed {cid} under ## Open in {p}")
 PY

@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 // ops-dashboard — the Operations Dashboard.
 //
-// @jwildfire's local page: his todo list with blockers included, and the place he
-// answers decision artifacts instead of reading them on the public site and typing
-// the answer somewhere else. Requirement: jwildfire/obot.roadmap#180.
+// @jwildfire's local page: his todo list — release candidates, decisions, config —
+// and the place he answers decision artifacts instead of reading them on the public
+// site and typing the answer somewhere else. Requirement: jwildfire/obot.roadmap#180.
+//
+// It is also the site. Since 2026-08-15 ("I want the ops db and orginal ops hub to be
+// merged. just make them 2 different tabs on the same (local) site for now. new ops db
+// should be default view") this server carries both views: the dashboard at `/`, the
+// session hub's live render at `/live.html` inside the same header. One port, and the
+// serve marker the status line reads is written from here.
 //
 // Vocabulary, fixed by him on 2026-08-15: the **dashboard** is this local page; the
 // **hub** is the public site with the roadmap, news and artifacts.
@@ -24,7 +30,8 @@
 //
 //   --workspace <dir>  workspace root (default: cwd)
 //   --hub <dir>        obot.roadmap clone (default: <workspace>/obot.roadmap)
-//   --port <n>         loopback port (default 7326; rolls forward if taken)
+//   --port <n>         loopback port (default 7326; rolls forward if taken, and the
+//                      bound port is what lands in the status line's serve marker)
 //   --serve            run the server (without it, render once to stdout)
 //   --open             print the URL when the server is up
 import fs from 'node:fs';
@@ -33,11 +40,17 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { collectQueue, refreshRCs } from './lib/collect.mjs';
-import { render } from './lib/render.mjs';
+import { render, sessionShell, navigatorShell } from './lib/render.mjs';
+import { parseNavigatorState } from './lib/navigator.mjs';
 import { ensureStore, readAnswers, writeAnswer } from './lib/store.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 7326;
+
+// The session hub's live view, written by its own watch loop.
+const SESSION_DIR = ['.claude', 'session-hub'];
+const SESSION_LIVE = 'live.html';
+const WATCH_CMD = 'node obot.agent/tools/session-hub/session-hub.mjs --watch';
 
 export function parseArgs(argv) {
   const a = { port: DEFAULT_PORT, serve: false, open: false };
@@ -71,6 +84,39 @@ export function artifactPath(hub, url) {
   if (!/^[A-Za-z0-9._-]+$/.test(slug) || slug.startsWith('.')) return null;
   const file = path.join(hub, 'reports', 'decisions', slug, 'index.html');
   return fs.existsSync(file) ? file : null;
+}
+
+/** The session hub's rendered live view, or null when no watch loop has run yet. */
+export function sessionLivePath(workspace) {
+  const file = path.join(workspace, ...SESSION_DIR, SESSION_LIVE);
+  return fs.existsSync(file) ? file : null;
+}
+
+/**
+ * Advertise this server in the session hub's `serve.json`, the marker the status line
+ * reads for its link (tools/statusline). The two views are one site now, so the marker
+ * points here and `/live.html` lands on the session tab — the link keeps resolving
+ * without the status line knowing anything changed.
+ *
+ * Same contract as session-hub's own `serveHub`: `{port, pid, url, startedAt}`, and it
+ * is removed on exit only when the pid still matches, so a server that outlives this
+ * one keeps its own marker.
+ */
+export function writeServeMarker(workspace, { port, url }) {
+  const dir = path.join(workspace, ...SESSION_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  const marker = path.join(dir, 'serve.json');
+  fs.writeFileSync(marker, `${JSON.stringify({
+    port, pid: process.pid, url, startedAt: new Date().toISOString(), site: 'ops-dashboard',
+  }, null, 2)}\n`);
+  const cleanup = () => {
+    try {
+      if (JSON.parse(fs.readFileSync(marker, 'utf8')).pid === process.pid) fs.unlinkSync(marker);
+    } catch { /* already gone, or another server's marker — leave it */ }
+  };
+  process.on('exit', cleanup);
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(0); });
+  return marker;
 }
 
 async function page(args) {
@@ -113,6 +159,33 @@ export function serve(args) {
 
       const p = req.url.split('?')[0];
       if (p === '/' || p === '/index.html') return send(200, 'text/html; charset=utf-8', await page(args));
+
+      // The second tab. `/live.html` is the address the status line already builds;
+      // `/session` is the readable alias, and `/session/frame` is the session hub's
+      // own render, served byte-for-byte inside the shell.
+      if (p === '/live.html' || p === '/session' || p === '/session/') {
+        return send(200, 'text/html; charset=utf-8', sessionShell({
+          missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
+        }));
+      }
+      if (p === '/session/frame') {
+        const live = sessionLivePath(args.workspace);
+        if (!live) return send(404, 'text/plain', `no session view yet — run: ${WATCH_CMD}`);
+        return send(200, 'text/html; charset=utf-8', fs.readFileSync(live));
+      }
+
+      // The third tab: what the 🧭🤖 Navigator sweep has seen, read fresh on every
+      // request — the file is rewritten every five minutes and a cached copy of an
+      // observer's state is exactly the thing that must not go stale silently.
+      if (p === '/navigator' || p === '/navigator/') {
+        const file = path.join(args.workspace, ...SESSION_DIR, 'navigator-state.md');
+        let md = null;
+        try { md = fs.readFileSync(file, 'utf8'); } catch { /* no sweep yet */ }
+        return send(200, 'text/html; charset=utf-8', navigatorShell(
+          md ? { state: parseNavigatorState(md) } : { missing: file },
+        ));
+      }
+
       if (p === '/queue.json') {
         const q = await collectQueue(args.workspace, args.hub);
         return send(200, 'application/json', JSON.stringify({ items: q.items }, null, 2));
@@ -129,7 +202,14 @@ export function serve(args) {
         if (e.code === 'EADDRINUSE' && left > 0) return listen(port + 1, left - 1);
         throw e;
       });
-      server.listen(port, HOST, () => resolve({ server, url: `http://${HOST}:${port}/` }));
+      // Report the bound port, not the requested one — `--port 0` means "any free
+      // port", and the marker the status line reads has to name the real one.
+      server.listen(port, HOST, () => {
+        const bound = server.address().port;
+        const url = `http://${HOST}:${bound}/`;
+        writeServeMarker(args.workspace, { port: bound, url: `${url}live.html` });
+        resolve({ server, url });
+      });
     };
     listen(args.port, 20);
   });
