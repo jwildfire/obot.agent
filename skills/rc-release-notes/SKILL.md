@@ -20,6 +20,10 @@ where the notes live and how they are written.
   `(Upcoming)` suffix** and its section is the release body, copied verbatim — the
   `(Upcoming)` marker never appears in a published release. Keeping the section current is
   part of landing the change, not a release-time reconstruction.
+- **After the tag, promote and reset**: in the same release pass, the released section's
+  heading drops the suffix in the file too, and a fresh `vX.Y.Z (Upcoming)` heading for the
+  next version opens above it (a one-line "nothing yet" placeholder is fine). The worked
+  example is obot.agent v0.4.0 (2026-08-15, the first R2-model release).
 - The **current section is the draft of the release notes**: it lands on the integration
   branch during the RC window, flows into the open RC PR, and is what @jwildfire reads as
   "the release notes" when reviewing. On approval, the section is **copied verbatim as the
@@ -105,3 +109,10 @@ what the release pages already say — never invent history.
   demo-301's is `main → site`. The NEWS.md contract is identical — the current
   `(Upcoming)` section becomes the RC PR's notes and the tag's body. The draft-GitHub-release
   workaround is retired ([rc-framework.md](../../docs/rc-framework.md)).
+- **Publishing mechanics** (learned on obot.agent v0.4.0, the first end-to-end R2 release):
+  the tag goes on **the RC merge commit — the `stable` tip** — by publishing with
+  `target_commitish` set to that sha; a **draft** release cannot be addressed by tag
+  (`gh release edit <tag>` returns "release not found"), so edit it by **release id**
+  (`gh api -X PATCH repos/{owner}/{repo}/releases/{id} … -F draft=false`); and the attested
+  `obot-merge` call must be invoked directly, not wrapped in a helper script — the wrapped
+  spelling is what the permission allowlist does not cover.
