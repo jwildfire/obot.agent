@@ -184,6 +184,16 @@ failure. These lines make the ordering mechanical:
 
 ## Delegation lanes — pick per question, name the lane in the ack
 
+- **The routing rule** ([D0013](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-delegation-lanes/),
+  @jwildfire 2026-08-15: "good point about context. we can keep the current
+  model"): if the work's entire product is an answer for prime to relay, run it
+  as a background subagent; if it leaves anything behind — a commit, an
+  artifact, a PR, or state that must outlive prime — spawn a sibling. Short
+  form: **answers → subagent; anything with a URL, a path, or a lifetime →
+  sibling.** When in doubt, spawn the sibling: a wrongly-chosen sibling costs a
+  little ceremony, while a wrongly-chosen subagent's work dies with the front
+  door — and its full result lands in prime's context, which the
+  [durable-state contract](#durable-state-and-rehydration) exists to protect.
 - **Background subagent (Agent tool, background)** — research whose whole point is
   the *answer coming back here*: cross-repo status sweeps, "summarize the history
   of X", "what happened with Y and why". The report returns as a task
