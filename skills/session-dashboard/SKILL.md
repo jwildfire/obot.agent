@@ -10,25 +10,36 @@ and self-refreshing, in Chrome. Requirement:
 [obot.roadmap#24](https://github.com/jwildfire/obot.roadmap/issues/24) (D1: static
 watch loop).
 
+**Since 2026-08-15 this view is the second tab of one local site** (@jwildfire: "I want
+the ops db and orginal ops hub to be merged. just make them 2 different tabs on the same
+(local) site for now. new ops db should be default view"). The
+[ops-dashboard](../../tools/ops-dashboard/README.md) server owns the port and serves this
+view at `/live.html`; the watch loop below only renders `live.html` to disk — it runs
+**without** `--serve`, because two servers writing `.claude/session-hub/serve.json` is
+the one way to leave the status-line link pointing at the wrong one.
+
 ## Procedure
 
 Run everything from the **workspace root** (`~/Documents/obot2`). The generator is
 `obot.agent/tools/session-hub/session-hub.mjs`.
 
-**One idempotent compound call** — render, ensure exactly one watch loop, open
-Chrome. Do not split these into three round trips; the loop refreshes within 60s
-anyway, so the fresh render rides along rather than blocking on its own. `--serve`
-also publishes the view on loopback HTTP, which is what the status-line link opens,
-and the `open` below prefers that URL over the file:
+**One idempotent compound call** — render, ensure exactly one watch loop, ensure the
+site's server, open Chrome. Do not split these into round trips; the loop refreshes
+within 60s anyway, so the fresh render rides along rather than blocking on its own. The
+ops-dashboard server is what publishes the view on loopback HTTP, which is what the
+status-line link opens, and the `open` below prefers that URL over the file:
 
 ```bash
 cd ~/Documents/obot2 && \
 node obot.agent/tools/session-hub/session-hub.mjs --workspace ~/Documents/obot2 && \
 (pgrep -f "session-hub.mjs --watch" > /dev/null || \
-  { nohup node obot.agent/tools/session-hub/session-hub.mjs --watch --serve --workspace ~/Documents/obot2 \
+  { nohup node obot.agent/tools/session-hub/session-hub.mjs --watch --workspace ~/Documents/obot2 \
       >> ~/Documents/obot2/.claude/session-hub/watch.log 2>&1 & \
     echo $! > ~/Documents/obot2/.claude/session-hub/watch.pid; }) && \
-pgrep -f "session-hub.mjs --watch" && \
+(pgrep -f "ops-dashboard.mjs --serve" > /dev/null || \
+  { nohup node obot.agent/tools/ops-dashboard/ops-dashboard.mjs --serve --workspace ~/Documents/obot2 \
+      >> ~/Documents/obot2/.claude/ops/serve.log 2>&1 & }) && \
+sleep 1 && pgrep -f "session-hub.mjs --watch" && \
 open -a "Google Chrome" "$(python3 -c 'import json;print(json.load(open("/Users/jwildfire/Documents/obot2/.claude/session-hub/serve.json"))["url"])' \
   2>/dev/null || echo "file:///Users/jwildfire/Documents/obot2/.claude/session-hub/live.html")"
 ```
@@ -36,9 +47,9 @@ open -a "Google Chrome" "$(python3 -c 'import json;print(json.load(open("/Users/
 (macOS; a new `open` invocation makes a new tab — Chrome's tab search finds an
 existing one by the "Session hub" title.)
 
-If a loop is already running **without** `--serve` (no live
-`.claude/session-hub/serve.json`), restart it with the flag rather than leaving the
-status-line link on `file://`.
+If a loop is still running **with** `--serve` (from before the merge), kill it and
+restart it without the flag — otherwise it competes with the merged site for the port
+and the marker.
 
 **Confirm in the same message as the command**: the URL opened, whether a watch loop
 was started or reused (with PID), and how to stop it —
@@ -52,5 +63,5 @@ was started or reused (with PID), and how to stop it —
   runs the new code — a running loop keeps executing the file it started from.
 - The loopback server is why the [status-line link](../../tools/statusline/README.md)
   lands in Chrome: Ghostty hands a `file://` hyperlink to Finder, an `http://` one
-  to the browser. It binds 127.0.0.1 only and serves nothing outside
-  `.claude/session-hub/`.
+  to the browser. Since the merge it is the ops-dashboard server, binding 127.0.0.1
+  only, serving this view at `/live.html` and the dashboard at `/`.

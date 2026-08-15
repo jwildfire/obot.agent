@@ -1,6 +1,6 @@
 ---
 name: ops-dashboard
-description: "Open the Operations Dashboard in Chrome — @jwildfire's local todo list (release candidates, blockers, open decisions) and the place he answers decision artifacts. Starts the loopback server if it is not already up. Use when he says '/ops-dashboard', 'open the operations dashboard', 'open my todo list', 'what's waiting on me?', or asks to answer a decision in a UI rather than in chat. Do NOT use for the live session view (that is session-dashboard) or the public site (that is the hub)."
+description: "Open the Operations Dashboard in Chrome — @jwildfire's local todo list (release candidates, open decisions, config items) and the place he answers decision artifacts. Starts the loopback server if it is not already up. Use when he says '/ops-dashboard', 'open the operations dashboard', 'open my todo list', 'what's waiting on me?', or asks to answer a decision in a UI rather than in chat. The session hub is now the second tab of this same site, so this command reaches both. Do NOT use for the public site (that is the hub)."
 ---
 
 # Operations Dashboard
@@ -10,8 +10,16 @@ One command → his todo list, live, in Chrome. Requirement:
 [`tools/ops-dashboard`](../../tools/ops-dashboard/README.md).
 
 **Vocabulary matters here** (@jwildfire, 2026-08-15): the **dashboard** is this local
-page; the **hub** is the public site with the roadmap, news and artifacts. Do not use
-the words interchangeably in anything he reads.
+page; the **hub** is the public site with the roadmap, news and artifacts; a **config**
+item is one only his keyboard can apply (the label he replaced "your hands" with, each
+one carrying a permanent `c0001` id). Do not use the words interchangeably in anything
+he reads.
+
+**One site, three tabs** (his, 2026-08-15): this server carries the dashboard at `/` —
+the default view — the session hub at `/live.html`, and the Navigator's sweep at
+`/navigator`. `/session-dashboard` opens the same site on its second tab. The
+session-hub watch loop should run **without** `--serve`; this server owns the loopback
+port and writes the marker the status line reads.
 
 ## Procedure
 
@@ -27,7 +35,11 @@ sleep 1 && open -a "Google Chrome" "http://127.0.0.1:7326/"
 ```
 
 If the port rolled forward (7326 was taken), the chosen URL is the first line of
-`.claude/ops/serve.log`.
+`.claude/ops/serve.log` — and `.claude/session-hub/serve.json` carries the bound port,
+which is also where the status line looks.
+
+The session tab needs the session hub's watch loop running to have anything to show
+(`/session-dashboard` starts it); without one, the tab says so and names the command.
 
 ## Applying what he answered
 
@@ -48,8 +60,14 @@ A `verdict` of `adopt-all` means every recommendation on the page, as written.
 
 ## Rules
 
-- **Never publish anything from this page.** Blockers, staged answers, and the ops
+- **Never publish anything from this page.** Config items, staged answers, and the ops
   store are local only, permanently.
-- Blocker rows show headlines only. Do not render or copy an item's body anywhere.
+- Config rows show headlines only. Do not render or copy an item's body anywhere, and
+  count-only on any public surface.
+- **Never present a dead Navigator sweep as current.** The tab enforces the state
+  file's rule (a `swept:` stamp older than 15 minutes means the observer is dead);
+  say the same in chat rather than quoting its content as live.
+- **Config ids are permanent.** `tools/blocker-log` claims the next one at capture time;
+  never renumber an item, never reuse a retired number, never assign one by hand.
 - If he answered something the artifact does not cover, ask rather than guessing which
   questions it resolves.
