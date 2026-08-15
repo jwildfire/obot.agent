@@ -67,16 +67,24 @@ export const configFile = (workspace) => path.join(workspace, '.claude', 'blocke
 export const CONFIG_ID_RE = /\bc(\d{4})\b/i;
 
 /**
- * The next free config id, derived from the file and never from a stored counter —
- * the same rule the hub's decision registry follows (scripts/lib/decision-ids.mjs).
+ * The next free config id **as the file alone can tell it** — from the ids that open
+ * entries, open or resolved. A retired item keeps its number forever, because he may
+ * have approved `c0003` in chat months ago and a reused number makes that ambiguous.
  *
- * Derived from **every** id in the file, not just the open ones: a retired item keeps
- * its number forever, because he may have approved `c0003` in chat months earlier and
- * a reused number would make that record ambiguous.
+ * Anchored to entry headlines, and deliberately so (obot.agent#126). This used to
+ * match every `cNNNN` anywhere in the text, which cannot tell an identifier from a
+ * mention: on 2026-08-15 a forward cross-reference in an entry body — "See c0011 for
+ * the same problem" — set the mark before c0011 had been claimed, and the two numbers
+ * under it were burned with nothing left to show they ever meant anything.
+ *
+ * The authority is `tools/blocker-log`, which also consults the append-only journal
+ * and so still refuses an id whose entry was later deleted by hand. This function
+ * sees only the file, so it is the weaker of the two answers by construction — a
+ * display, never a claim.
  */
 export function nextConfigId(md = '') {
   let max = 0;
-  for (const m of String(md).matchAll(/\bc(\d{4})\b/gi)) max = Math.max(max, Number(m[1]));
+  for (const m of String(md).matchAll(/^-\s+\[[ xX]\]\s*c(\d{4})\b/gim)) max = Math.max(max, Number(m[1]));
   return `c${String(max + 1).padStart(4, '0')}`;
 }
 

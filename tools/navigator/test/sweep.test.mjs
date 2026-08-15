@@ -143,3 +143,35 @@ test('renderState: no answers pending still says so, rather than dropping the se
   assert.match(md, /## Decision answers/)
   assert.match(md, /none/i)
 })
+
+// The config list's ledger, carried by the sweep (obot.agent#126). The Navigator is
+// the only thing running when no session is, so it is where a check on a local,
+// history-less file actually fires. Rendering is what is pinned here; the reading
+// itself is `blocker-log --audit`, tested against the tool in ops-dashboard/test.
+test('renderState: a clean ledger is reported in one line, and reported at all', () => {
+  const md = renderState({
+    snapshot: {}, events: [], meta,
+    ledger: { ok: true, summary: 'ledger clean — 13 id(s) allocated, 13 present', detail: [] },
+  })
+  assert.match(md, /config ledger: ledger clean — 13 id\(s\) allocated, 13 present/)
+  // A detector that only ever speaks on failure cannot be told from a dead one.
+  assert.doesNotMatch(md, /CONFIG LEDGER GAP/)
+})
+
+test('renderState: a gap is shouted, and brings its explanation with it', () => {
+  const md = renderState({
+    snapshot: {}, events: [], meta,
+    ledger: {
+      ok: false,
+      summary: 'LEDGER GAP - 2 id(s) allocated with no entry: c0010, c0011',
+      detail: ['A resolved entry MOVES to ## Resolved and is never deleted.'],
+    },
+  })
+  assert.match(md, /\*\*CONFIG LEDGER GAP\*\* — LEDGER GAP - 2 id\(s\) allocated with no entry: c0010, c0011/)
+  assert.match(md, /A resolved entry MOVES to ## Resolved/)
+})
+
+test('renderState: no reading at all renders nothing rather than a false all-clear', () => {
+  const md = renderState({ snapshot: {}, events: [], meta })
+  assert.doesNotMatch(md, /config ledger/)
+})

@@ -41,10 +41,38 @@
 #     [--unblocks '<what it buys>'] [--blocks owner/repo#12] [--why '<mechanism>']
 #
 #   blocker-log --retire c0007 --reason 'folded into c0001'
+#   blocker-log --audit                 (read-only; exit 1 if the ledger has a gap)
 #
-# Every entry carries a permanent id (c0001, c0002, ...) allocated here, once,
-# derived from the highest id already in the file - including retired ones - so
-# a number is never reused. Mirrors the hub's decision ids (D0001).
+# Every entry carries a permanent id (c0001, c0002, ...) allocated here, once, and
+# never reused. Mirrors the hub's decision ids (D0001).
+#
+# THE LEDGER (obot.agent#126). This list is local-only, which is right for its
+# content and means it has no history, no backup and no integrity check - so
+# anything that goes wrong with it goes wrong silently. Two things did:
+#
+#   The allocator counted prose. The id came from the highest cNNNN ANYWHERE in
+#   the file, which cannot tell an identifier from a mention. A forward
+#   cross-reference written before its id was claimed ("See c0011 for the same
+#   problem") set the mark and burned the numbers under it; when the reference was
+#   corrected the only trace went with it, and the sequence was left lying about
+#   what had ever existed. The id now comes from the journal and from ENTRY
+#   HEADLINES. Prose has no vote.
+#
+#   There was no lock. Capture is read -> compute -> write the whole file and
+#   several sessions write it on a normal night. Measured with 24 concurrent
+#   captures against the unlocked tool: 20, 5 and 22 entries survived across three
+#   runs. The read-modify-write now happens inside an exclusive flock.
+#
+# Both are backed by an append-only journal beside the list,
+# `.claude/blockers.journal` - one JSON line per mutation, recording the id, the
+# actor and the file's digest. It is what makes "never reused" true even for an
+# entry someone deleted by hand, and it is what lets every run compare what was
+# allocated against what is present and SAY SO when they disagree. Set OBOT_ACTOR
+# to name the writer; a session id is used otherwise.
+#
+# Detection matters as much as prevention: an agent editing the file with ordinary
+# tools bypasses the lock, and nothing here can stop that. The digest notices on
+# the next run. Nothing is ever deleted or restored automatically.
 #
 # The scope test (BL1, approved 2026-08-15): an item belongs on the list only if
 # the fix is fully specified and the sole missing ingredient is @jwildfire's
@@ -57,12 +85,43 @@
 # The list is LOCAL-ONLY: never committed to any repo, never published (the hub
 # deploy carries a sentinel guard).
 set -u
-usage() { sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,79p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
 FILE="$WS/.claude/blockers.md"
+LIB="$(cd "$(dirname "$0")/lib" 2>/dev/null && pwd)"
+[ -z "$LIB" ] && { echo "blocker-log: cannot find tools/lib beside $0 - the ledger lives there" >&2; exit 1; }
 
 WHAT="${1:-}"; [ -z "$WHAT" ] && usage 1
 case "$WHAT" in -h|--help) usage 0;; esac
+
+# ---- audit lane: read-only, so the dashboard can run it on a click ----
+# The exit code is the verdict, the same contract every `Verify:` line follows:
+# 0 when the ledger and the file agree, 1 when an allocated id has no entry.
+if [ "$WHAT" = "--audit" ]; then
+  python3 - "$LIB" "$FILE" <<'PY'
+import sys, pathlib
+sys.path.insert(0, sys.argv[1])
+from blockers_ledger import journal_path, read_journal, audit, report
+p = pathlib.Path(sys.argv[2])
+if not p.exists():
+    print("blocker-log: no config list at %s - nothing to check." % p)
+    sys.exit(0)
+text = p.read_text()
+records = read_journal(journal_path(p))
+if not records:
+    print("blocker-log: %s has no journal yet, so there is nothing to check it\n"
+          "  against. The next capture adopts the list and starts one." % p)
+    sys.exit(0)
+a = audit(text, records)
+for line in report(a, p):
+    print(line)
+if not a["missing"]:
+    print("blocker-log: ledger clean - %d id(s) allocated, %d present in %s"
+          % (a["allocated"], a["present"], p))
+sys.exit(1 if a["missing"] else 0)
+PY
+  exit $?
+fi
 
 # ---- retire lane: the one writer allowed to move an entry out of ## Open ----
 if [ "$WHAT" = "--retire" ]; then
@@ -77,44 +136,61 @@ if [ "$WHAT" = "--retire" ]; then
     esac
   done
   [ -z "$REASON" ] && { echo "blocker-log: --reason is required - a retirement with no reason is a deletion" >&2; exit 1; }
-  python3 - "$FILE" "$RID" "$REASON" "$(date +%F)" <<'PY'
+  python3 - "$LIB" "$FILE" "$RID" "$REASON" "$(date +%F)" <<'PY'
 import sys, pathlib, re
-p = pathlib.Path(sys.argv[1]); rid, reason, today = sys.argv[2:5]
-lines = p.read_text().splitlines()
-try:
-    open_i = lines.index("## Open")
-except ValueError:
-    sys.exit("blocker-log: no ## Open section")
-# Bounded to the Open section: scanning to end-of-file would find the same id
-# already sitting in ## Resolved and "retire" it a second time.
-end_of_open = next((i for i in range(open_i + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-start = next((i for i in range(open_i + 1, end_of_open)
-              if re.match(rf"^-\s+\[ \]\s*{re.escape(rid)}\b", lines[i], re.I)), None)
-if start is None:
-    sys.exit(f"blocker-log: {rid} is not open in {p}")
-end = start + 1
-while end < len(lines) and not (lines[end].startswith("- ") or lines[end].startswith("## ")):
-    end += 1
-entry = lines[start:end]
-while entry and not entry[-1].strip():
-    entry.pop()
-del lines[start:end]
-# The list's convention: retire, never delete. The entry keeps its id and its
-# body; the checkbox closes and the reason is stamped on the headline.
-entry[0] = re.sub(r"^-\s+\[.\]", "- [x]", entry[0]) + f"  **RETIRED {today}: {reason}**"
-try:
-    res = lines.index(next(l for l in lines if l.startswith("## Resolved")))
-except StopIteration:
-    lines += ["", "## Resolved"]
-    res = len(lines) - 1
-j = res + 1
-while j < len(lines) and not lines[j].startswith("## "):
-    j += 1
-while j > res + 1 and not lines[j-1].strip():
-    j -= 1
-lines[j:j] = [""] + entry
-p.write_text("\n".join(lines) + "\n")
+sys.path.insert(0, sys.argv[1])
+from blockers_ledger import (locked, journal_path, ensure_seeded, append_journal,
+                             audit, report, actor, sha, now)
+p = pathlib.Path(sys.argv[2]); rid, reason, today = sys.argv[3:6]
+
+# Everything from here to the write is one critical section. `sys.exit` inside it
+# still releases the lock - the context manager's finally runs on the way out.
+with locked(p):
+    text = p.read_text()
+    records = ensure_seeded(journal_path(p), text)
+    lines = text.splitlines()
+    try:
+        open_i = lines.index("## Open")
+    except ValueError:
+        sys.exit("blocker-log: no ## Open section")
+    # Bounded to the Open section: scanning to end-of-file would find the same id
+    # already sitting in ## Resolved and "retire" it a second time.
+    end_of_open = next((i for i in range(open_i + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    start = next((i for i in range(open_i + 1, end_of_open)
+                  if re.match(rf"^-\s+\[ \]\s*{re.escape(rid)}\b", lines[i], re.I)), None)
+    if start is None:
+        sys.exit(f"blocker-log: {rid} is not open in {p}")
+    end = start + 1
+    while end < len(lines) and not (lines[end].startswith("- ") or lines[end].startswith("## ")):
+        end += 1
+    entry = lines[start:end]
+    while entry and not entry[-1].strip():
+        entry.pop()
+    del lines[start:end]
+    # The list's convention: retire, never delete. The entry keeps its id and its
+    # body; the checkbox closes and the reason is stamped on the headline.
+    entry[0] = re.sub(r"^-\s+\[.\]", "- [x]", entry[0]) + f"  **RETIRED {today}: {reason}**"
+    try:
+        res = lines.index(next(l for l in lines if l.startswith("## Resolved")))
+    except StopIteration:
+        lines += ["", "## Resolved"]
+        res = len(lines) - 1
+    j = res + 1
+    while j < len(lines) and not lines[j].startswith("## "):
+        j += 1
+    while j > res + 1 and not lines[j-1].strip():
+        j -= 1
+    lines[j:j] = [""] + entry
+    new = "\n".join(lines) + "\n"
+    p.write_text(new)
+    rec = {"ts": now(), "op": "retire", "id": rid.lower(), "actor": actor(),
+           "reason": reason, "sha256": sha(new)}
+    append_journal(journal_path(p), rec)
+    a = audit(new, records + [rec])
+
 print(f"blocker-log: retired {rid} to ## Resolved - {reason}")
+for line in report(a, p):
+    print(line, file=sys.stderr)
 PY
   exit $?
 fi
@@ -181,36 +257,16 @@ if [ -n "$BLOCKS" ]; then
 fi
 
 TODAY="$(date +%F)"
-python3 - "$FILE" "$TODAY" "$WHAT" "$DO" "$EXPECT" "$VERIFY" "$UNBLOCKS" "$SOURCE" "$BLOCKS_FIELD" "$WHY" <<'PY'
+python3 - "$LIB" "$FILE" "$TODAY" "$WHAT" "$DO" "$EXPECT" "$VERIFY" "$UNBLOCKS" "$SOURCE" "$BLOCKS_FIELD" "$WHY" <<'PY'
 import sys, pathlib, re
-p = pathlib.Path(sys.argv[1])
-today, what, do, expect, verify, unblocks, source, blocks, why = sys.argv[2:11]
+sys.path.insert(0, sys.argv[1])
+from blockers_ledger import (locked, journal_path, ensure_seeded, append_journal,
+                             next_id, audit, report, actor, sha, now)
+p = pathlib.Path(sys.argv[2])
+today, what, do, expect, verify, unblocks, source, blocks, why = sys.argv[3:12]
 # The local-only sentinel, composed from two halves so this script's own text
 # can never trip the hub deploy guard if it is ever rendered onto a page.
 sentinel = "LOCAL-ONLY: never publish" + ", never commit"
-if not p.exists():
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
-        f"<!-- {sentinel}. This file maps permission boundaries and missing\n"
-        f"     grants - a capability-gap disclosure if it ever reaches the public hub site. -->\n\n"
-        f"# Blockers - work only @jwildfire's hands can do\n\n"
-        f"**The test (BL1):** an item belongs here only if the fix is fully specified and\n"
-        f"the *only* missing ingredient is Jeremy's physical access. If a one-word \"yes\"\n"
-        f"would let an agent do it, it is an approval ask or a decision, not a blocker.\n\n"
-        f"## Open\n\n## Resolved\n\n## Near-misses\n")
-text = p.read_text()
-# Dedup: an existing entry mentioning the same headline is a re-file, not new.
-probe = what.strip().lower()[:60]
-if probe and probe in text.lower():
-    print(f"blocker-log: an entry matching '{probe}' already exists in {p} - not re-filing.\n"
-          f"If this is genuinely new, reword the headline; to re-verify an existing entry, "
-          f"update its 'verified' date in place.", file=sys.stderr)
-    sys.exit(2)
-# The permanent id: `c` + four digits, one higher than every id already in the
-# file. Retired entries keep their numbers, so scanning the whole file (not just
-# `## Open`) is what makes "never reused" true.
-nid = max([int(m.group(1)) for m in re.finditer(r"\bc(\d{4})\b", text, re.I)] + [0]) + 1
-cid = f"c{nid:04d}"
 
 def field(name, value):
     """One IQ field. A value carrying newlines keeps them as indented code -
@@ -220,29 +276,69 @@ def field(name, value):
     out += [f"      {r.strip()}" for r in rest if r.strip()]
     return out
 
-entry = [f"- [ ] {cid} · filed {today} · verified {today} — **{what.strip()}**"]
-entry += field("Do", do)
-entry += field("Expect", expect)
-entry += field("Verify", verify.replace("->", "→"))
-if unblocks.strip():
-    entry += field("Unblocks", unblocks)
-entry += field("Source", source)
-if blocks.strip():
-    entry += field("Blocks", blocks)
-# Last, always: the mechanism is the part he does not need to read to act.
-if why.strip():
-    entry += field("Why", why)
+# Read, allocate and write are one critical section. Before the lock this was a
+# plain read-modify-write, and with several sessions capturing on the same night
+# it lost entries wholesale - 24 concurrent captures left 20, 5 and 22 of them in
+# three measured runs (obot.agent#126).
+with locked(p):
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            f"<!-- {sentinel}. This file maps permission boundaries and missing\n"
+            f"     grants - a capability-gap disclosure if it ever reaches the public hub site. -->\n\n"
+            f"# Blockers - work only @jwildfire's hands can do\n\n"
+            f"**The test (BL1):** an item belongs here only if the fix is fully specified and\n"
+            f"the *only* missing ingredient is Jeremy's physical access. If a one-word \"yes\"\n"
+            f"would let an agent do it, it is an approval ask or a decision, not a blocker.\n\n"
+            f"## Open\n\n## Resolved\n\n## Near-misses\n")
+    text = p.read_text()
+    # Dedup: an existing entry mentioning the same headline is a re-file, not new.
+    # Checked before an id is claimed, so a refused re-file costs nothing.
+    probe = what.strip().lower()[:60]
+    if probe and probe in text.lower():
+        print(f"blocker-log: an entry matching '{probe}' already exists in {p} - not re-filing.\n"
+              f"If this is genuinely new, reword the headline; to re-verify an existing entry, "
+              f"update its 'verified' date in place.", file=sys.stderr)
+        sys.exit(2)
 
-lines = text.splitlines()
-if "## Open" not in lines:
-    lines += ["", "## Open"]
-i = lines.index("## Open") + 1
-j = i
-while j < len(lines) and not lines[j].startswith("## "):
-    j += 1
-while j > i and not lines[j-1].strip():
-    j -= 1
-lines[j:j] = [""] + entry
-p.write_text("\n".join(lines) + "\n")
+    # The permanent id, from the journal's high-water mark and the entry headlines -
+    # never from body prose, which is what burned c0010/c0011. A list with no
+    # journal yet is adopted here, once, with the old whole-text rule.
+    records = ensure_seeded(journal_path(p), text)
+    cid = next_id(text, records)
+
+    entry = [f"- [ ] {cid} · filed {today} · verified {today} — **{what.strip()}**"]
+    entry += field("Do", do)
+    entry += field("Expect", expect)
+    entry += field("Verify", verify.replace("->", "→"))
+    if unblocks.strip():
+        entry += field("Unblocks", unblocks)
+    entry += field("Source", source)
+    if blocks.strip():
+        entry += field("Blocks", blocks)
+    # Last, always: the mechanism is the part he does not need to read to act.
+    if why.strip():
+        entry += field("Why", why)
+
+    lines = text.splitlines()
+    if "## Open" not in lines:
+        lines += ["", "## Open"]
+    i = lines.index("## Open") + 1
+    j = i
+    while j < len(lines) and not lines[j].startswith("## "):
+        j += 1
+    while j > i and not lines[j-1].strip():
+        j -= 1
+    lines[j:j] = [""] + entry
+    new = "\n".join(lines) + "\n"
+    p.write_text(new)
+
+    rec = {"ts": now(), "op": "file", "id": cid, "actor": actor(),
+           "headline": what.strip()[:120], "sha256": sha(new)}
+    append_journal(journal_path(p), rec)
+    a = audit(new, records + [rec])
+
 print(f"blocker-log: filed {cid} under ## Open in {p}")
+for line in report(a, p):
+    print(line, file=sys.stderr)
 PY

@@ -30,7 +30,7 @@
 // Day-one scope (hub#157): bookkeeping only. Records and reports; never
 // judges, corrects, or touches other agents' work. Nothing it writes is
 // published.
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync, statSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -104,7 +104,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [] }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   const head = meta.ok
     ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · ok — ${meta.repoCount} repos, ${Object.keys(snapshot).length} RCs`
@@ -116,9 +116,22 @@ export function renderState({ snapshot, events, meta, answers = [] }) {
     '',
     head,
     '',
+  ]
+  // The config list's ledger (obot.agent#126). `.claude/blockers.md` is the record
+  // of everything only his hands can do, and it is local-only by design — no history,
+  // no backup, nothing that would notice an entry going missing. The capture tool
+  // keeps an append-only journal of every id it issues; this is the reading that
+  // fires without anyone running the tool. Reported even when clean, because a
+  // detector that only ever speaks up on failure is indistinguishable from a dead one.
+  if (ledger) {
+    lines.push(ledger.ok ? `config ledger: ${ledger.summary}` : `**CONFIG LEDGER GAP** — ${ledger.summary}`)
+    for (const d of ledger.detail || []) lines.push(`  ${d}`)
+    lines.push('')
+  }
+  lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
     '',
-  ]
+  )
   const rcs = Object.values(snapshot).sort((a, b) => a.repo.localeCompare(b.repo) || a.number - b.number)
   if (!rcs.length) lines.push(`**RC queue: EMPTY.** ${stamp}`)
   for (const rc of rcs) {
@@ -151,6 +164,25 @@ const nowStamp = () => {
 }
 const excerpt = body => (body || '').replace(/\s+/g, ' ').trim().slice(0, 180)
 
+// One reading of the config list's ledger, straight from the capture tool.
+//
+// Shelled rather than reimplemented here on purpose: `blocker-log --audit` already
+// owns this comparison, it is read-only, and its exit code is the verdict (0 agree,
+// 1 an allocated id has no entry). A second implementation in JS would be one more
+// thing to drift, which is the class of bug this whole capability exists to close.
+function auditLedger() {
+  const bin = join(REPO_ROOT, 'tools', 'blocker-log')
+  const r = spawnSync(bin, ['--audit'], {
+    env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 20000,
+  })
+  if (r.error || r.status === null) return null
+  const out = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter(Boolean)
+  const ok = r.status === 0
+  // Clean runs stay to one line; a gap brings its explanation with it, because the
+  // person reading this file will not go looking for the rest.
+  return { ok, summary: (out[0] || 'no reading').replace(/^blocker-log: /, ''), detail: ok ? [] : out.slice(1) }
+}
+
 function fetchRC(repo, pr) {
   const detail = JSON.parse(gh(['pr', 'view', String(pr.number), '-R', repo, '--json', 'reviews,comments,reviewDecision']))
   let inline = 0
@@ -175,6 +207,7 @@ function log(msg) {
 }
 
 const safePending = () => { try { return pendingAnswers(WS, { hub: HUB }) } catch { return [] } }
+const safeLedger = () => { try { return auditLedger() } catch { return null } }
 
 function main() {
   const sweptAt = nowStamp()
@@ -189,7 +222,7 @@ function main() {
     // A sweep that cannot read the policy still reports his answers: they come
     // from the local store, and a failed RC sweep is no reason to imply there is
     // nothing waiting on an agent.
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger() }))
     log(`FAILED policy.json: ${e.message}`)
     process.exit(0)
   }
@@ -241,10 +274,15 @@ function main() {
   ].map(e => ({ ...e, at: hhmm }))
   const allEvents = [...stamped.reverse(), ...(prevWrap.events || [])].slice(0, MAX_EVENTS)
 
+  // A broken ledger check must not break the RC sweep, exactly as a broken answer
+  // store must not: this is an extra pair of eyes, never a precondition.
+  let ledger = null
+  try { ledger = auditLedger() } catch (e) { errors.push(`ledger: ${String(e.message).slice(0, 120)}`) }
+
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger }))
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
