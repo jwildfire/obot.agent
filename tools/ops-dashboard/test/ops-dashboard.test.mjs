@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
-import { collectConfig, nextConfigId, rcLabel, upcomingVersion } from '../lib/collect.mjs';
+import { collectConfig, nextConfigId, parseRCBody, rcLabel, rcSub, upcomingVersion } from '../lib/collect.mjs';
 import { ensureStore, readCache, writeCache, SENTINEL } from '../lib/store.mjs';
 import {
   recordAnswer, readAnswers, currentAnswers, pendingAnswers, deliverAnswers,
@@ -246,31 +246,229 @@ test('queue text is escaped — artifact titles are not trusted markup', () => {
   assert.equal(esc('a&b<c>'), 'a&amp;b&lt;c&gt;');
 });
 
-test('a release candidate reads "package version — what it is"', () => {
-  // The rule (@jwildfire, 2026-08-15): every RC starts with a package name and a
-  // version number. The label is derived, so a PR titled any other way still reads
-  // right on the page.
+test('a release candidate reads "{package} vX.Y.Z-RCn" and carries no summary', () => {
+  // The rule (@jwildfire, 2026-08-15, superseding his own earlier same-day rule):
+  // "New rule for release candidate names: {package} Vx.x.x-RCx. No other summary
+  // allowed." The title now *is* the label, so the deriver's job shrank from
+  // synthesising a description to stripping one off legacy titles.
+  assert.equal(
+    rcLabel({ repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC1' }),
+    'gsm.safety v1.1.0-RC1',
+  );
+  // A legacy title carrying a summary loses it — no summary is allowed, and the
+  // page must not keep showing one the rule has retired.
   assert.equal(
     rcLabel({ repo: 'jwildfire/gsm.safety', title: 'Release candidate: gsm.safety v1.1.0 — the participant-level metrics phase' }),
-    'gsm.safety v1.1.0 — the participant-level metrics phase',
+    'gsm.safety v1.1.0-RC1',
   );
-  // Already correct: normalizing must not double the prefix.
   assert.equal(
     rcLabel({ repo: 'jwildfire/open.gismo', title: 'open.gismo v0.2.0 — local-first engine' }),
-    'open.gismo v0.2.0 — local-first engine',
+    'open.gismo v0.2.0-RC1',
+  );
+  // An -RCn already in the title is authoritative and is never renumbered.
+  assert.equal(
+    rcLabel({ repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC3 — leftover summary' }),
+    'gsm.safety v1.1.0-RC3',
+  );
+  // Idempotent: relabelling a correct label returns it unchanged.
+  assert.equal(
+    rcLabel({ repo: 'jwildfire/gsm.safety', title: rcLabel({ repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC2' }) }),
+    'gsm.safety v1.1.0-RC2',
   );
   // A version named in the title belongs to another package — the repo's own
   // version comes from the release it is heading for.
   assert.equal(
     rcLabel({ repo: 'jwildfire/gsm.safety', title: 'Adopt safety.viz v1.6.0: two new widgets', version: '1.1.0' }),
-    'gsm.safety v1.1.0 — Adopt safety.viz v1.6.0: two new widgets',
+    'gsm.safety v1.1.0-RC1',
   );
-  // No version anywhere: name the package, never invent a number.
+  // No version anywhere: name the package, never invent a number — and with no
+  // version there is no candidate to count either.
   assert.equal(
     rcLabel({ repo: 'jwildfire/obot.agent', title: 'The guardrail files stop being prose' }),
-    'obot.agent — The guardrail files stop being prose',
+    'obot.agent',
   );
   assert.equal(rcLabel({ repo: '', title: 'bare' }), 'bare');
+});
+
+test('the RC row keeps a second line, because the title no longer explains itself', () => {
+  // The cost of "no other summary allowed": `gsm.safety v1.1.0-RC1` in a queue of
+  // five tells him nothing about which release it is. The description moves to a
+  // second line taken from the PR body's one-sentence exec summary, which the RC
+  // body contract (@jwildfire, 2026-08-15, item 2) guarantees is there and first.
+  assert.equal(
+    rcSub({ lead: 'Adds the participant-level metrics phase: six widgets and their workflows.' }),
+    'Adds the participant-level metrics phase: six widgets and their workflows.',
+  );
+  // Markdown emphasis and links are stripped — this is one plain line on a phone.
+  assert.equal(
+    rcSub({ lead: '**Adds** the [metrics phase](https://example.com/x) end to end.' }),
+    'Adds the metrics phase end to end.',
+  );
+  // reviews-queue's own miss marker is not a sentence; show nothing rather than it.
+  assert.equal(rcSub({ lead: '(no summary in the body)' }), null);
+  assert.equal(rcSub({}), null);
+  // Long leads are cut at a word boundary — the row is one line, not a paragraph.
+  const long = rcSub({ lead: 'w'.repeat(30) + ' ' + 'x'.repeat(30) + ' ' + 'y'.repeat(60) + ' tail' });
+  assert.ok(long.length <= 121, `sub was ${long.length} chars`);
+  assert.ok(long.endsWith('…'));
+});
+
+test('the RC second line renders under the title, and is escaped like everything else', () => {
+  const html = render({
+    queue: {
+      ...emptyQueue,
+      rcs: { items: [{ kind: 'rc', key: 'jwildfire/gsm.safety#52', title: 'gsm.safety v1.1.0-RC1', sub: 'Adds the participant-level metrics phase.', url: 'https://example.com/pr/52' }], refreshing: false },
+    },
+    staged: [],
+  });
+  assert.ok(html.includes('gsm.safety v1.1.0-RC1'));
+  assert.ok(html.includes('<span class="q-sub">'));
+  assert.ok(html.includes('Adds the participant-level metrics phase.'));
+  // A row with no second line keeps exactly the markup it had before.
+  const bare = render({
+    queue: { ...emptyQueue, rcs: { items: [{ kind: 'rc', key: 'r#1', title: 'obot.agent v0.5.0-RC1' }], refreshing: false } },
+    staged: [],
+  });
+  // Matched on the markup, not the stylesheet — the CSS always defines .q-sub.
+  assert.ok(!bare.includes('<span class="q-sub">'));
+  // The lead comes off a PR body, so it is no more trusted than any other title.
+  const nasty = render({
+    queue: { ...emptyQueue, rcs: { items: [{ kind: 'rc', key: 'r#1', title: 'x v1.0.0-RC1', sub: '<img src=x onerror=alert(1)>' }], refreshing: false } },
+    staged: [],
+  });
+  assert.ok(!nasty.includes('<img src=x'));
+  assert.ok(nasty.includes('&lt;img src=x'));
+});
+
+const RC_BODY = `## \u26d4 Release candidate — merges only on @jwildfire's approval, via the attested lane
+
+Adds the participant-level metrics phase: six widgets and their workflows.
+
+- **See it move:** [annotated demo](https://jwildfire.github.io/obot.roadmap/reports/gs-v1.1-demo/)
+- **Release notes:** [NEWS.md](https://github.com/jwildfire/gsm.safety/blob/dev/NEWS.md) — the v1.1.0 (Upcoming) section
+- [the widget parity matrix](https://jwildfire.github.io/obot.roadmap/reports/parity/)
+
+### Requirements this release closes
+- Closes #12 — the six safety.viz widgets, wrapped as R htmlwidgets
+- Closes #14 — the qcthat qualification evidence bundle
+
+**The ask:** approve and I tag v1.1.0.
+
+### Technical briefing
+Details nobody reads on a phone.
+`;
+
+test('the RC body parses into the panel the dashboard renders instead of an iframe', () => {
+  // github.com sends `x-frame-options: deny`, so a PR cannot be framed at all
+  // (verified 2026-08-15). The panel is therefore built from the body, which the RC
+  // body contract (@jwildfire, 2026-08-15, item 2) gives a fixed shape.
+  const rc = parseRCBody(RC_BODY);
+  assert.equal(rc.summary, 'Adds the participant-level metrics phase: six widgets and their workflows.');
+  assert.equal(rc.demo, 'https://jwildfire.github.io/obot.roadmap/reports/gs-v1.1-demo/');
+  assert.equal(rc.news, 'https://github.com/jwildfire/gsm.safety/blob/dev/NEWS.md');
+  assert.deepEqual(rc.requirements, [
+    { ref: '#12', text: 'the six safety.viz widgets, wrapped as R htmlwidgets' },
+    { ref: '#14', text: 'the qcthat qualification evidence bundle' },
+  ]);
+  // Every above-the-fold link is kept, in order, so the panel shows what he linked.
+  assert.equal(rc.links.length, 3);
+  assert.equal(rc.links[0].label, 'annotated demo');
+  assert.equal(rc.ask, 'approve and I tag v1.1.0.');
+});
+
+test('a body that ignores the contract degrades instead of throwing', () => {
+  // Legacy RCs predate the contract, and the panel must still open for them.
+  const rc = parseRCBody('Some prose with no structure at all.');
+  assert.equal(rc.summary, 'Some prose with no structure at all.');
+  assert.equal(rc.demo, null);
+  assert.equal(rc.news, null);
+  assert.deepEqual(rc.requirements, []);
+  assert.deepEqual(parseRCBody('').requirements, []);
+  assert.equal(parseRCBody(null).summary, null);
+});
+
+test('only a Pages demo is framed — a demo link off Pages is a link, never an iframe', () => {
+  // Anything that is not a jwildfire.github.io page either refuses to frame
+  // (x-frame-options) or is not ours to embed. `frameable` is what the client keys on.
+  assert.equal(parseRCBody(RC_BODY).frameable, true);
+  const offsite = parseRCBody('x\n\n- **See it move:** [demo](https://example.com/demo/)\n');
+  assert.equal(offsite.demo, 'https://example.com/demo/');
+  assert.equal(offsite.frameable, false);
+  // A GitHub PR link is never frameable, whatever it is labelled.
+  const gh = parseRCBody('x\n\n- **See it move:** [demo](https://github.com/jwildfire/x/pull/1)\n');
+  assert.equal(gh.frameable, false);
+});
+
+test('the RC panel ships its data to the client, and an RC no longer bounces to GitHub', () => {
+  const html = render({
+    queue: {
+      ...emptyQueue,
+      rcs: { items: [{
+        kind: 'rc', key: 'jwildfire/gsm.safety#52', repo: 'jwildfire/gsm.safety',
+        title: 'gsm.safety v1.1.0-RC1', sub: 'Adds the metrics phase.',
+        url: 'https://github.com/jwildfire/gsm.safety/pull/52',
+        checks: { state: 'green', passed: 4, failing: 0, pending: 0 },
+        rc: parseRCBody(RC_BODY),
+      }], refreshing: false },
+    },
+    staged: [],
+  });
+  // The panel renders client-side from an embedded blob, so it opens from the cache
+  // with the network down.
+  assert.ok(html.includes('id="rc-data"'));
+  assert.ok(html.includes('gs-v1.1-demo'));
+  assert.ok(html.includes('renderRC'));
+  // The old behaviour was to bounce him to GitHub on click. It is gone.
+  assert.ok(!html.includes("window.open(li.dataset.url"));
+  // Approving still happens on GitHub — the RC gate stays deliberate.
+  assert.ok(html.includes('Open on GitHub to approve'));
+  // The embedded JSON must never be able to close its own script tag.
+  const nasty = render({
+    queue: { ...emptyQueue, rcs: { items: [{ kind: 'rc', key: 'r#1', title: 'x', rc: parseRCBody('</script><img src=x onerror=alert(1)>') }], refreshing: false } },
+    staged: [],
+  });
+  assert.ok(!nasty.includes('</script><img'));
+});
+
+test('a real pre-contract RC body parses without picking up the wrong links', () => {
+  // Shape taken from open.gismo#10 (2026-08-15), written before the body contract:
+  // "See it move:" and "The ask:" are bold paragraphs rather than bullets, and later
+  // bullets mention a demo and NEWS.md while linking somewhere else entirely. Naive
+  // "first link on a line matching /demo/" picks the roadmap issue; naive "first prose
+  // line" picks the See-it-move line as the summary. Both are wrong.
+  const body = [
+    "## \u26d4 Release candidate — merges only on @jwildfire's approval, via the attested lane",
+    '',
+    '**See it move:** the [annotated v0.2 demo](https://jwildfire.github.io/obot.roadmap/reports/og-v0.2-demo/) walks it live as the [study site](https://jwildfire.github.io/demo-301/).',
+    '',
+    '**The ask:** approve this RC (or request changes).',
+    '',
+    '## Summary',
+    '',
+    'Promotes dev to main for v0.2.0 — the first release cut on open.gismo.',
+    '',
+    '## Roadmap context',
+    '',
+    '- This is the app-goal arc under [obot.roadmap#134](https://github.com/jwildfire/obot.roadmap/issues/134) (DEMO-301 demo study).',
+    '- Publishes the release with the NEWS.md section via [#8](https://github.com/jwildfire/open.gismo/pull/8).',
+  ].join('\n');
+  const rc = parseRCBody(body);
+  // The demo comes off the See-it-move line, not off a later bullet mentioning "demo".
+  assert.equal(rc.demo, 'https://jwildfire.github.io/obot.roadmap/reports/og-v0.2-demo/');
+  assert.equal(rc.frameable, true);
+  // A line that merely mentions NEWS.md while linking a PR is not a NEWS.md link.
+  assert.equal(rc.news, null);
+  // The summary is the prose, not the See-it-move line and not the ask.
+  assert.equal(rc.summary, 'Promotes dev to main for v0.2.0 — the first release cut on open.gismo.');
+  assert.equal(rc.ask, 'approve this RC (or request changes).');
+});
+
+test('the NEWS.md link is recognised by its target, not by a passing mention', () => {
+  const rc = parseRCBody([
+    'One sentence.',
+    '- **Release notes:** [NEWS.md](https://github.com/jwildfire/gsm.safety/blob/dev/NEWS.md)',
+  ].join('\n'));
+  assert.equal(rc.news, 'https://github.com/jwildfire/gsm.safety/blob/dev/NEWS.md');
 });
 
 test('the version comes off the NEWS (Upcoming) heading in the local clone', () => {

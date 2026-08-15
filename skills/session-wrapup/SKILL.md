@@ -84,10 +84,13 @@ he scans first.
 One bullet per RC awaiting his decision — **this session's and every earlier one
 still open**. The list is a standing queue, not a session delta.
 
-- **Shape:** `- **{repo} {version}** — {one line: what a person can now do that
-  they could not before}. [RC PR #{n}]({pr url}) · [demo]({hub demo url}) ·
+- **Shape:** `- **{package} vX.Y.Z-RCn** — {one line: what a person can now do
+  that they could not before}. [RC PR #{n}]({pr url}) · [demo]({hub demo url}) ·
   ask: {publish and tag | merge and hold}`, plus `*(carried from MM-DD)*` when
-  the item is not new this session.
+  the item is not new this session. The bold lead is the **RC PR's title
+  verbatim** (@jwildfire, 2026-08-15 — [AGENTS.md](../../AGENTS.md#release-candidate-prs-title-and-body)),
+  so the diary, his queue and the PR all name the candidate the same way; the
+  sentence after the dash is the description the title no longer carries.
 - **Draft-release RCs** — obot.agent, obot.roadmap and demo-301, the repos where
   `main` *is* the integration branch — link the draft GitHub release in place of
   the PR (rc-framework, *Repos where integration is the release branch*).

@@ -72,6 +72,24 @@ def lead_line(body):
     return "(no summary in the body)"
 
 
+def checks_summary(pr):
+    """CI in one line for the dashboard's RC panel: {state, passed, failing, pending}."""
+    checks = pr.get("statusCheckRollup") or []
+    states = [c.get("conclusion") or c.get("state") for c in checks]
+    failing = len([s for s in states if s in FAIL])
+    pending = len([s for s in states if s in PENDING])
+    passed = len([s for s in states if s == "SUCCESS"])
+    if not checks:
+        state = "none"
+    elif failing:
+        state = "failing"
+    elif pending:
+        state = "pending"
+    else:
+        state = "green"
+    return {"state": state, "passed": passed, "failing": failing, "pending": pending}
+
+
 def classify(pr):
     checks = pr.get("statusCheckRollup") or []
     states = [c.get("conclusion") or c.get("state") for c in checks]
@@ -143,6 +161,12 @@ def main():
                 detail["additions"], detail["deletions"], detail["changedFiles"]
             ),
             "lead": lead_line(detail.get("body")),
+            # The whole body, for the Operations Dashboard's RC panel: it renders the
+            # review inline (github.com sends x-frame-options: deny, so the PR itself
+            # cannot be framed) out of the RC body contract's fixed shape - exec
+            # summary, demo and NEWS.md links, requirements closed.
+            "body": detail.get("body") or "",
+            "checks": checks_summary(detail),
         })
 
     rows.sort(key=lambda r: (BUCKET_ORDER[r["bucket"]], r["updated"]))

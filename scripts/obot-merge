@@ -235,6 +235,35 @@ else
 fi
 if [ -n "$MILESTONE_REPORT" ]; then printf '%s\n' "$MILESTONE_REPORT"; fi
 
+# ---- RC title check (warn only) -------------------------------------------
+#
+# "New rule for release candidate names: {package} Vx.x.x-RCx. No other summary
+# allowed." (@jwildfire, 2026-08-15 - docs/rc-framework.md). A release-role merge
+# whose title is off-shape gets a WARN line, never a refusal.
+#
+# Deliberately not a gate. The refusals above protect the release's *record* - an
+# issue with no milestone, a release naming no issue - which is wrong and
+# unrecoverable once the merge lands. A title is cosmetic and fixable afterwards
+# with one 'gh pr edit --title', and this script runs on the attested lane after
+# he has already approved: refusing there would stall an approved release at its
+# last step over a string. Warn, merge, fix the title after.
+if [ "$ROLE" = "release" ]; then
+  PR_TITLE="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title",""))' 2>/dev/null || true)"
+  PKG="${REPO##*/}"
+  case "$PR_TITLE" in
+    "$PKG v"*) TITLE_OK=1 ;;
+    *) TITLE_OK="" ;;
+  esac
+  if [ -n "$TITLE_OK" ] && ! printf '%s' "$PR_TITLE" | grep -Eq "^${PKG} v[0-9]+(\.[0-9]+)*-RC[0-9]+$"; then
+    TITLE_OK=""
+  fi
+  if [ -z "$TITLE_OK" ]; then
+    printf 'obot-merge: WARN - RC title is off-shape: "%s"\n' "$PR_TITLE"
+    printf '  expected exactly "%s vX.Y.Z-RCn" with no summary (@jwildfire, 2026-08-15).\n' "$PKG"
+    printf '  Not blocking the merge - fix it with: gh pr edit %s -R %s --title "%s vX.Y.Z-RCn"\n' "$PR" "$REPO" "$PKG"
+  fi
+fi
+
 if [ -n "$CHECK" ]; then
   if [ "$LANE" = "approval" ]; then
     printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s on the approval tier (explicit Jeremy approval + --jeremy-approved required)\n' "$PR" "$REPO"

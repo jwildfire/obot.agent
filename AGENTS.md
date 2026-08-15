@@ -106,6 +106,29 @@ upstream [`tdd`](https://github.com/Gilead-BioStats/gsm.agent/blob/main/skills/t
 skill; how the two relate will be settled when gsm.agent's Q3 skills-library work lands
 (D1, deferred 2026-07-11).
 
+## Release-candidate PRs: title and body
+
+**Title: `{package} vX.Y.Z-RCn`, and nothing else** — `gsm.safety v1.1.0-RC1`. No summary,
+no `Release candidate:` lead, no em-dash tail (@jwildfire, 2026-08-15: *"New rule for
+release candidate names: {package} Vx.x.x-RCx. No other summary allowed."*). This
+supersedes the earlier same-day rule (title *starts with* package and version, then
+describes the release); those titles are legacy and get retitled on their next touch.
+
+`n` counts candidates put in front of him: first is `-RC1`; it increments **only** when
+review is re-requested after a `CHANGES_REQUESTED` decision; the **same PR is retitled**,
+never replaced, so the review thread survives; it resets per version; and the tag drops
+the suffix — the release is `v1.1.0`.
+
+**Body order**: one-sentence exec summary → bulleted links (**demo page and `NEWS.md`, the
+`NEWS.md` link mandatory in every RC PR**) → the list of requirements closed, each carrying
+its `Closes #N` keyword → details as needed. That is the five-section obot PR body
+reordered, not a second template, and the `Closes` keywords must stay in it or issues stop
+closing and `obot-merge` refuses the release merge.
+
+Full rules, the template, and the `-RCn` edge cases:
+[`docs/rc-framework.md`](docs/rc-framework.md#what-an-rc-pr-must-carry) and
+[`skills/rc-release-notes/SKILL.md`](skills/rc-release-notes/SKILL.md).
+
 ## Milestone before work
 
 **No work starts on an issue until a milestone is assigned** (@jwildfire, 2026-08-14).
