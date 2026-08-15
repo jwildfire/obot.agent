@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// ops-answers — the decision answers @jwildfire has recorded, and what has
+// happened to them (obot.agent#120).
+//
+// The one bounded read that answers "has he decided anything I haven't acted
+// on?". A staged answer nobody watches is what cost him the evening of
+// 2026-08-15, so the states here name their consumer:
+//
+//   captured   he clicked; nothing has seen it yet
+//   delivered  the 🧭🤖 Navigator sweep announced it; an agent has it
+//   applied    the artifact, the log and the index were updated — with evidence
+//   superseded he answered again; the record is kept, not deleted
+//
+// Usage (from the workspace root):
+//   node obot.agent/tools/ops-answers pending [--json] [--exit-code]
+//   node obot.agent/tools/ops-answers deliver            # what the sweep calls
+//   node obot.agent/tools/ops-answers apply <id> --evidence <url> [--by <who>]
+//   node obot.agent/tools/ops-answers show <id>
+//
+//   OBOT_WORKSPACE  workspace root (default ~/Documents/obot2)
+//   OBOT_HUB        obot.roadmap clone (default <workspace>/obot.roadmap)
+//   --exit-code     1 if anything is pending, 2 if anything is overdue
+//
+// LOCAL ONLY, like everything in `.claude/ops/`: this prints his verbatim words
+// to the terminal, which is the point — an agent applying a decision needs them
+// — but nothing here is committed or published by this tool, and the artifact is
+// the only place those words are ever meant to be quoted.
+import path from 'node:path';
+import process from 'node:process';
+
+import {
+  readAnswers, currentAnswers, pendingAnswers, deliverAnswers, markApplied,
+  answersSection, ageMin, ago, OVERDUE_MIN,
+} from './ops-dashboard/lib/answers.mjs';
+
+const WS = path.resolve(process.env.OBOT_WORKSPACE || path.join(process.env.HOME ?? '', 'Documents/obot2'));
+const HUB = path.resolve(process.env.OBOT_HUB || path.join(WS, 'obot.roadmap'));
+
+const argv = process.argv.slice(2);
+const cmd = argv[0] ?? 'pending';
+const flags = {};
+const positional = [];
+for (let i = 1; i < argv.length; i++) {
+  const a = argv[i];
+  if (!a.startsWith('--')) { positional.push(a); continue; }
+  const next = argv[i + 1];
+  if (next && !next.startsWith('--')) { flags[a] = next; i++; } else flags[a] = true;
+}
+const flag = (name) => Boolean(flags[name]);
+const value = (name) => (typeof flags[name] === 'string' ? flags[name] : null);
+
+const line = (a) => {
+  const min = ageMin(a.at);
+  const overdue = min > OVERDUE_MIN && a.status !== 'applied' ? ' OVERDUE' : '';
+  const qs = Object.entries(a.questions ?? {})
+    .map(([id, q]) => `    ${id}${q.code ? ` (${q.code})` : ''}: ${q.verdict}`).join('\n');
+  return [
+    `${a.decisionId ?? a.artifact ?? a.id}  ${a.verdict}  [${a.status}${overdue}]  recorded ${(a.at || '').slice(0, 16).replace('T', ' ')} (${ago(min)} ago)`,
+    `    artifact: ${a.artifact ?? '(none)'}${a.decisionId ? '' : `  — id lookup failed: ${a.decisionIdError ?? 'unknown'}`}`,
+    qs,
+    a.words ? `    words: ${a.words}` : '',
+    (a.supersedes ?? []).length ? `    supersedes ${a.supersedes.length} earlier answer(s)${a.afterApplied ? ' — one of them was already APPLIED, so update the artifact rather than adding to it' : ''}` : '',
+    (a.clicks ?? 1) > 1 ? `    clicked ${a.clicks} times — one decision` : '',
+    `    id: ${a.id}`,
+  ].filter(Boolean).join('\n');
+};
+
+function main() {
+  if (cmd === 'pending' || cmd === 'list') {
+    const items = cmd === 'list' ? currentAnswers(WS, { hub: HUB }) : pendingAnswers(WS, { hub: HUB });
+    if (flag('--json')) {
+      process.stdout.write(`${JSON.stringify({ workspace: WS, hub: HUB, pending: items }, null, 2)}\n`);
+    } else if (!items.length) {
+      process.stdout.write('nothing pending — every answer he has recorded has been applied.\n');
+    } else {
+      process.stdout.write(`${items.length} answer(s) he has recorded and nobody has applied:\n\n${items.map(line).join('\n\n')}\n\nApply one, then: ops-answers apply <id> --evidence <url> --by <who>\n`);
+    }
+    if (flag('--exit-code')) {
+      const overdue = items.some((a) => ageMin(a.at) > OVERDUE_MIN);
+      process.exit(overdue ? 2 : (items.length ? 1 : 0));
+    }
+    return;
+  }
+
+  if (cmd === 'deliver') {
+    const { delivered, events } = deliverAnswers(WS, { hub: HUB });
+    process.stdout.write(delivered.length
+      ? `${events.map((e) => e.line).join('\n')}\n`
+      : 'nothing new to hand over.\n');
+    return;
+  }
+
+  if (cmd === 'section') { process.stdout.write(answersSection(pendingAnswers(WS, { hub: HUB }))); return; }
+
+  if (cmd === 'apply') {
+    const id = positional[0];
+    const evidence = value('--evidence');
+    if (!id || !evidence) {
+      process.stderr.write('usage: ops-answers apply <id> --evidence <url> [--by <who>]\n'
+        + 'evidence is required: "applied" means the artifact changed and here is where to see it.\n');
+      process.exit(2);
+    }
+    const rec = markApplied(WS, id, { by: value('--by') ?? 'an agent', evidence });
+    process.stdout.write(`${rec.decisionId ?? rec.artifact} applied — ${evidence}\n`);
+    return;
+  }
+
+  if (cmd === 'show') {
+    const rec = readAnswers(WS, { hub: HUB }).find((a) => a.id === positional[0] || a.decisionId === positional[0]);
+    if (!rec) { process.stderr.write(`no answer ${positional[0]}\n`); process.exit(1); }
+    process.stdout.write(`${JSON.stringify(rec, null, 2)}\n`);
+    return;
+  }
+
+  process.stderr.write('usage: ops-answers pending|list|deliver|apply|show|section — see the header of this file\n');
+  process.exit(2);
+}
+
+main();

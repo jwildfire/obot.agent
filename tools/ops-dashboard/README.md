@@ -147,12 +147,63 @@ Two things it is careful about:
   "which agent" needs a join against the scratchpad's per-sibling lines. When the sweep
   starts writing a `## By agent` section, this tab shows it unchanged.
 
+## What happens when he answers a decision
+
+The evening of 2026-08-15 is why this section exists. He answered a decision at 22:22
+and asked twice whether it had landed; it had not, and nothing in the system knew.
+Three files existed for that one decision, 19 seconds apart, each with `decisionId:
+null` and `status: "staged"` — a state with no consumer. [#120](https://github.com/jwildfire/obot.agent/issues/120)
+replaced all of it with a pipeline that says who has his answer:
+
+| state | meaning | who moves it on |
+|---|---|---|
+| `captured` | he clicked; it is on this machine and nothing has seen it | the Navigator |
+| `delivered` | announced in `navigator-state.md` and the scratchpad; an agent has it | the agent that applies it |
+| `applied` | the artifact, the log and the index were updated — with an evidence link | — |
+| `superseded` | he answered again; the record is kept, never deleted | — |
+
+- **A repeat click is the same answer.** Same artifact, same verdict, same words, same
+  per-question calls: the record already on disk gets a `clicks` count, not a sibling.
+  A *different* answer writes a new record naming what it supersedes, and the older one
+  is stamped rather than removed — a changed mind is a fact worth keeping, and which
+  answer is his *now* has to be readable from the data, not inferred from mtimes.
+- **The `D####` id is joined at capture time** from the hub's
+  `reports/decisions/registry.json`, and per-question answers are keyed by sub-id
+  (`D0003.1`) with the code he reads (`S1`). A slug the registry does not know records
+  the lookup failure on the record instead of writing a silent `null`.
+- **The deliverer is the [Navigator sweep](../navigator/)** — launchd, every five
+  minutes, session-independent. It is the only observer that runs when no session does,
+  which is exactly the condition under which the original hand-off failed.
+- **When nothing is listening, the page says so.** If an answer is `captured` and the
+  sweep is not running, the sidebar leads with it and carries the restart command. A
+  hand-off with no consumer must never render as success — the same failure class as a
+  green CI run over a stale evidence baseline.
+
+Agents read the queue with one bounded command (`prime-rehydrate` bundles it):
+
+```bash
+node obot.agent/tools/ops-answers pending          # what he decided that nobody applied
+node obot.agent/tools/ops-answers pending --json   # same, machine-readable
+node obot.agent/tools/ops-answers apply <id> --evidence <url> --by "a sibling"
+```
+
+An answer unapplied for more than an hour is marked `OVERDUE` in the Navigator's
+section, on the page, and in the CLI. `pending --exit-code` exits 1 when anything is
+pending and 2 when anything is overdue, so a wrapper can act on it.
+
+**Not automated on purpose:** nothing launches an agent by itself. The sweep announces;
+a session applies. Closing that last gap unattended means letting a scheduled job start
+an agent, which is @jwildfire's call to make, not a code detail — until he makes it, an
+unapplied answer ages loudly rather than silently.
+
 ## The ops store
 
 `<workspace>/.claude/ops/` — local only, never committed, never published.
 
-- `answers/` — one file per answer, **append-only**. Nothing is ever edited in place,
-  so "what did he say, and when" survives an agent that applies it badly.
+- `answers/` — one file per answer. The **content** of an answer (his verdict, his
+  words, his per-question calls) is written once and never edited; only status, history
+  and supersede pointers move. So "what did he say, and when" survives an agent that
+  applies it badly.
 - `cache/` — GitHub sweeps.
 - Every file opens with the same local-only sentinel the hub's deploy greps for, so
   if one ever reaches an assembled site the build fails instead of publishing it.
@@ -165,8 +216,10 @@ list lives.
 
 - Reviewing a release candidate inside the dashboard (it links out).
 - Anything reachable from his phone.
-- The apply step that pushes a staged answer to the hub — staged answers accumulate in
-  `answers/` until an agent applies them.
+- The apply step itself. The dashboard records and hands over; an agent still writes the
+  artifact's Decisions section, the log and the index, then stamps the answer `applied`.
+- An agent that starts itself. The Navigator delivers within five minutes whether or not
+  a session is running, but nothing launches the session that applies.
 - Notification. How pending work reaches him when he is *not* looking at this page is
   the daily-briefing design, not this.
 

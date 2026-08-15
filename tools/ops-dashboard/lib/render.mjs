@@ -164,9 +164,27 @@ const DASHBOARD_CSS = `
   .qq button { flex:1 1 auto; font-size:0.68rem; padding:0.2rem 0.3rem; border-radius:6px;
                border:1px solid var(--line); background:var(--paper); color:var(--ink); cursor:pointer; }
   .qq button[aria-pressed="true"] { border-color:var(--accent); background:var(--accent-soft); }
-  .staged { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.5rem; }
-  .staged li { font-size:0.72rem; color:var(--muted); margin:0.15rem 0; list-style:none; }
+  .answers { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.5rem; }
+  .answers li { font-size:0.72rem; color:var(--muted); margin:0.15rem 0; list-style:none; }
   .ok { color:var(--good); font-size:0.78rem; margin:0.35rem 0 0; }
+
+  /* Where his answers are. One row per decision — three clicks on the same one
+     is one answer with a history, not three rows — and each row says which of
+     the three states it is in, because "did it land?" is the question the page
+     failed to answer on 2026-08-15. */
+  .ans-list { list-style:none; margin:0; padding:0; }
+  .ans { font-size:0.74rem; margin:0.3rem 0; padding-left:0.45rem; border-left:3px solid var(--line); }
+  .ans[data-status="captured"] { border-left-color:var(--warn); }
+  .ans[data-status="delivered"] { border-left-color:var(--accent); }
+  .ans[data-status="applied"] { border-left-color:var(--good); }
+  .ans .ans-head { display:flex; gap:0.35rem; align-items:baseline; flex-wrap:wrap; }
+  .ans .ans-id { font-family:var(--mono); font-size:0.68rem; color:var(--faint); }
+  .ans .ans-v { font-weight:600; }
+  .ans .ans-st { display:block; color:var(--muted); }
+  .ans .ans-hist { display:block; color:var(--faint); font-size:0.68rem; }
+  .alarm { border:1px solid var(--accent); background:var(--accent-soft); border-radius:7px;
+           padding:0.35rem 0.45rem; margin:0.4rem 0; font-size:0.72rem; }
+  .alarm code { font-family:var(--mono); font-size:0.66rem; }
 `;
 
 /**
@@ -266,7 +284,71 @@ ${body}
 </html>`;
 }
 
-export function render({ queue, staged = [], workspace, hub, generated = new Date() }) {
+/**
+ * What the page says when nothing is listening for his answers.
+ *
+ * Shared with the server so the sentence he reads after clicking and the sentence
+ * on the row are the same sentence. This is the failure the program keeps paying
+ * for in other forms — green CI over a stale evidence baseline, a widget
+ * rendering a pre-fix calculation for three weeks — so a hand-off with no
+ * consumer has to look like a problem, not like success.
+ */
+export const NOT_LISTENING = 'Nothing is listening: the Navigator sweep is not running, so no agent will pick this up. Restart it with launchctl kickstart -k gui/$UID/com.obot.navigator-sweep';
+
+const AGO = (at, now) => {
+  const min = Math.max(0, Math.round((now.getTime() - Date.parse(at)) / 60000));
+  if (!Number.isFinite(min)) return '';
+  return min < 60 ? `${min}m ago` : `${Math.floor(min / 60)}h ago`;
+};
+
+const VERDICT = {
+  'adopt-all': 'adopt all',
+  'words-only': 'in your words',
+  'per-question': 'question by question',
+};
+
+/**
+ * One answer, with where it is in the pipeline. The three states are his three
+ * questions: did the machine take it (captured), did anything see it (delivered),
+ * did the artifact change (applied — and here is the link, go look).
+ */
+const answerRow = (a, now) => {
+  const state = {
+    captured: 'the Navigator picks it up within five minutes',
+    delivered: 'an agent has it; the artifact updates next',
+    applied: 'the artifact was updated',
+  }[a.status] ?? a.status;
+  const when = a.status === 'applied' ? (a.appliedAt ?? a.at) : a.at;
+  const evidence = a.status === 'applied' && a.evidence
+    ? ` — <a href="${esc(a.evidence)}" target="_blank" rel="noopener">see it</a>`
+    : '';
+  const history = (a.supersedes ?? []).length
+    ? `<span class="ans-hist">replaced an earlier answer${(a.clicks ?? 1) > 1 ? `, clicked ${a.clicks} times` : ''}</span>`
+    : ((a.clicks ?? 1) > 1 ? `<span class="ans-hist">clicked ${a.clicks} times — one answer</span>` : '');
+  return `<li class="ans" data-status="${esc(a.status)}">
+      <span class="ans-head"><span class="ans-id mono">${esc(a.decisionId ?? a.artifact ?? '')}</span><span class="ans-v">${esc(VERDICT[a.verdict] ?? a.verdict ?? '')}</span></span>
+      <span class="ans-st">${esc(a.status)} ${esc(AGO(when, now))} · ${state}${evidence}</span>
+      ${history}
+    </li>`;
+};
+
+const answersPanel = (answers, deliverer, now) => {
+  const waiting = answers.filter((a) => a.status === 'captured');
+  const alarm = waiting.length && !deliverer?.alive
+    ? `<p class="alarm"><strong>${waiting.length} answer${waiting.length === 1 ? '' : 's'} of yours ${waiting.length === 1 ? 'is' : 'are'} going nowhere.</strong>
+      Nothing is listening — the Navigator sweep is not running${deliverer?.sweptAt ? ` (last swept ${esc(deliverer.sweptAt)})` : ''}, so no agent will pick ${waiting.length === 1 ? 'it' : 'them'} up.<br>
+      <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`
+    : '';
+  return `<div class="answers">
+      <h2>Your answers <span class="q-n">${answers.length}</span></h2>
+      ${alarm}
+      <ul class="ans-list">${answers.length
+    ? answers.map((a) => answerRow(a, now)).join('')
+    : '<li class="q-empty">Nothing recorded yet. Answer a decision and it appears here with its state.</li>'}</ul>
+    </div>`;
+};
+
+export function render({ queue, answers = [], deliverer = null, workspace, hub, generated = new Date() }) {
   const counts = {
     rc: queue.rcs.items.length,
     config: queue.config.items.length,
@@ -328,15 +410,10 @@ export function render({ queue, staged = [], workspace, hub, generated = new Dat
       </div>
       <textarea id="words" placeholder="In your words — quoted verbatim in the artifact's Decisions section."></textarea>
       <button class="send" id="send" disabled>Record this decision</button>
-      <p class="note">Staged locally; an agent applies it to the artifact, the log and the index.</p>
+      <p class="note">Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.</p>
       <p class="ok" id="ok" hidden></p>
     </div>
-    <div class="staged">
-      <h2>Staged answers <span class="q-n">${staged.length}</span></h2>
-      <ul id="staged-list">${staged.length
-    ? staged.slice(0, 8).map((a) => `<li>${esc((a.at || '').slice(0, 16).replace('T', ' '))} — ${esc(a.verdict ?? 'answered')} · ${esc(a.artifact ?? '')}</li>`).join('')
-    : '<li>None waiting to be applied.</li>'}</ul>
-    </div>
+    ${answersPanel(answers, deliverer, generated)}
   </aside>
 
 </div>
@@ -407,16 +484,38 @@ export function render({ queue, staged = [], workspace, hub, generated = new Dat
 
   $('words').addEventListener('input', () => { $('send').disabled = !(state.verdict || $('words').value.trim()); });
 
+  // What a click did, said on the page. He clicked three times on 2026-08-15 and
+  // then asked twice whether it had landed, because the page named a state with
+  // no consumer and said nothing else — so the reply now names the decision, the
+  // state it is in, and what happens next, and a repeat click says so.
   async function post(body) {
     const r = await fetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
-    $('ok').hidden = false;
-    $('ok').textContent = r.ok ? 'Recorded — staged for the apply step.' : ('Could not record: ' + (j.error || r.status));
-    if (r.ok) {
-      const li = document.createElement('li');
-      li.textContent = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' — ' + body.verdict + ' · ' + (body.artifact || '');
-      $('staged-list').prepend(li);
+    const ok = $('ok');
+    ok.hidden = false;
+    if (!r.ok) {
+      ok.style.color = 'var(--accent)';
+      ok.textContent = 'Not recorded — ' + (j.error || r.status) + '. Nothing was saved; try again.';
+      return;
     }
+    const name = j.decisionId || body.artifact || 'this decision';
+    ok.style.color = j.warning ? 'var(--accent)' : 'var(--good)';
+    ok.textContent = (j.duplicate
+      ? 'Same answer as the one already recorded for ' + name + ' — still one decision, not two. '
+      : 'Recorded as ' + name + '. ')
+      + (j.warning || j.next);
+    // The row appears in its real state, with its real handle.
+    const li = document.createElement('li');
+    li.className = 'ans';
+    li.dataset.status = j.status || 'captured';
+    li.innerHTML = '<span class="ans-head"><span class="ans-id mono"></span><span class="ans-v"></span></span>'
+      + '<span class="ans-st"></span>';
+    li.querySelector('.ans-id').textContent = name;
+    li.querySelector('.ans-v').textContent = body.verdict || 'answered';
+    li.querySelector('.ans-st').textContent = j.duplicate
+      ? 'already recorded — refresh to see its state'
+      : 'captured just now — the Navigator picks it up within five minutes';
+    if (!j.duplicate) document.querySelector('.ans-list').prepend(li);
   }
 
   $('adopt').addEventListener('click', () => {
@@ -425,7 +524,12 @@ export function render({ queue, staged = [], workspace, hub, generated = new Dat
   });
   $('send').addEventListener('click', () => {
     if (!state.item) return;
-    post({ artifact: state.item.artifact, verdict: state.verdict || 'per-question', words: $('words').value, questions: state.perQuestion });
+    // Never call prose "per-question": on 2026-08-15 that mislabel was written to
+    // disk with an empty questions map, which is the record that held his actual
+    // reasoning. The verdict now describes what he did.
+    const answered = Object.keys(state.perQuestion).length > 0;
+    const verdict = state.verdict || (answered ? 'per-question' : ($('words').value.trim() ? 'words-only' : null));
+    post({ artifact: state.item.artifact, verdict, words: $('words').value, questions: state.perQuestion });
   });
 </script>
 </body>

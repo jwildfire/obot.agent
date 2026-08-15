@@ -8,12 +8,40 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { collectConfig, nextConfigId, rcLabel, upcomingVersion } from '../lib/collect.mjs';
-import { ensureStore, writeAnswer, readAnswers, readCache, writeCache, SENTINEL } from '../lib/store.mjs';
+import { ensureStore, readCache, writeCache, SENTINEL } from '../lib/store.mjs';
+import {
+  recordAnswer, readAnswers, currentAnswers, pendingAnswers, deliverAnswers,
+  markApplied, resolveDecision, answersSection, OVERDUE_MIN,
+} from '../lib/answers.mjs';
 import { artifactPath, parseArgs, serve } from '../ops-dashboard.mjs';
 import { render, sessionShell, navigatorShell, TABS, esc } from '../lib/render.mjs';
 import { parseNavigatorState } from '../lib/navigator.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'opsdash-'));
+
+// A hub clone with the two files the answer pipeline joins against: the id
+// registry and an artifact page for the applied link.
+function hubWith(artifacts) {
+  const hub = tmp();
+  const dir = path.join(hub, 'reports', 'decisions');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'registry.json'), JSON.stringify({ prefix: 'D', artifacts }));
+  for (const a of artifacts) {
+    fs.mkdirSync(path.join(dir, a.slug), { recursive: true });
+    fs.writeFileSync(path.join(dir, a.slug, 'index.html'), `<title>${a.title ?? a.slug}</title>`);
+  }
+  return hub;
+}
+
+const D3 = {
+  id: 'D0003',
+  slug: '2026-08-14-demo-301-site-size',
+  title: "demo-301's site branch — what the fork actually costs",
+  questions: [
+    { id: 'D0003.1', code: 'S1', question: 'Drop the duplicate root tree?' },
+    { id: 'D0003.2', code: 'S2', question: 'Shrink the data extracts?' },
+  ],
+};
 
 const emptyQueue = {
   rcs: { items: [], refreshing: false },
@@ -24,20 +52,28 @@ const emptyQueue = {
 
 test('the ops store carries the local-only sentinel on everything it writes', () => {
   const ws = tmp();
-  const rec = writeAnswer(ws, { artifact: 'a-slug', verdict: 'adopt-all', words: 'go' });
-  const onDisk = fs.readFileSync(path.join(ws, '.claude', 'ops', 'answers', `${rec.id}.json`), 'utf8');
+  const { record } = recordAnswer(ws, { artifact: 'a-slug', verdict: 'adopt-all', words: 'go' });
+  const onDisk = fs.readFileSync(path.join(ws, '.claude', 'ops', 'answers', `${record.id}.json`), 'utf8');
   assert.ok(onDisk.includes(SENTINEL), 'answer file must carry the sentinel the hub deploy greps for');
   assert.ok(fs.readFileSync(path.join(ws, '.claude', 'ops', 'README.md'), 'utf8').includes(SENTINEL));
 });
 
-test('answers are append-only — a second answer never overwrites the first', () => {
+test('a changed answer supersedes the earlier one and never deletes it', () => {
   const ws = tmp();
-  writeAnswer(ws, { artifact: 'a', verdict: 'defer', words: 'not yet' });
-  writeAnswer(ws, { artifact: 'a', verdict: 'approve', words: 'now' });
+  const first = recordAnswer(ws, { artifact: 'a', verdict: 'defer', words: 'not yet' }).record;
+  const second = recordAnswer(ws, { artifact: 'a', verdict: 'approve', words: 'now' }).record;
+
+  // Both files survive — he decided the first one too, and a changed mind is a fact.
   const all = readAnswers(ws);
   assert.equal(all.length, 2);
   assert.deepEqual(all.map((a) => a.verdict).sort(), ['approve', 'defer']);
-  assert.equal(all.every((a) => a.status === 'staged'), true);
+
+  // And which one is his *now* is in the data, not in the mtimes.
+  const older = all.find((a) => a.id === first.id);
+  assert.equal(older.status, 'superseded');
+  assert.equal(older.supersededBy, second.id);
+  assert.deepEqual(second.supersedes, [first.id]);
+  assert.deepEqual(currentAnswers(ws).map((a) => a.id), [second.id]);
 });
 
 test('a fresh store has no answers and does not throw reading them', () => {
@@ -368,4 +404,288 @@ test('the tab strip is data-driven — a fourth tab is one entry', () => {
   assert.ok(/href="\/navigator"[^>]*aria-current="page"/.test(html));
   assert.equal((html.match(/class="tabs"/g) || []).length, 1);
   assert.equal((render({ queue: fullQueue, staged: [] }).match(/<a href="\/(live\.html|navigator)?"/g) || []).length, 3);
+});
+
+// ---------------------------------------------------------------------------
+// The decision lane: capture → deliver → apply (#120).
+//
+// The evening of 2026-08-15 is the spec. He answered one decision, three files
+// appeared 19 seconds apart, every one of them carried `decisionId: null` and a
+// status nothing was watching, and he asked twice whether it had landed.
+// ---------------------------------------------------------------------------
+
+test('three clicks on the same answer are one decision, not three', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  const words = 'I am good with the recommendations here.';
+  const a = recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words }, { hub });
+  const b = recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words }, { hub });
+  const c = recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words }, { hub });
+
+  assert.equal(b.duplicate, true, 'an identical re-click is the same answer');
+  assert.equal(c.record.id, a.record.id, 'and it does not write a second file');
+  assert.equal(fs.readdirSync(path.join(ws, '.claude', 'ops', 'answers')).filter((n) => n.endsWith('.json')).length, 1);
+  assert.equal(readAnswers(ws)[0].clicks, 3, 'the repeat clicks are counted, so the double-click is legible');
+});
+
+test('the decision id is joined from the hub registry when the answer is written', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  const { record } = recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+  assert.equal(record.decisionId, 'D0003', 'the field that exists for this must not be null');
+  assert.equal(record.decisionIdSource, 'registry');
+  assert.equal(record.decisionIdError, null);
+  assert.deepEqual(resolveDecision(hub, D3.slug).questions.map((q) => q.code), ['S1', 'S2']);
+});
+
+test('a slug the registry does not know records the failure instead of a silent null', () => {
+  const ws = tmp();
+  const { record } = recordAnswer(ws, { artifact: 'not-a-decision', verdict: 'approve', words: 'x' }, { hub: hubWith([D3]) });
+  assert.equal(record.decisionId, null);
+  assert.equal(record.decisionIdSource, 'none');
+  assert.match(record.decisionIdError, /registry/i, 'the lookup failure is on the record, not lost');
+});
+
+test('per-question answers are keyed by sub-id and carry the code he reads', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  const { record } = recordAnswer(ws, {
+    artifact: D3.slug,
+    verdict: 'per-question',
+    questions: { 'D0003.1': 'approve', 'D0003.2': 'defer' },
+    words: 'S1 yes, S2 later',
+  }, { hub });
+  assert.deepEqual(record.questions['D0003.1'], { verdict: 'approve', code: 'S1' });
+  assert.deepEqual(record.questions['D0003.2'], { verdict: 'defer', code: 'S2' });
+  assert.deepEqual(record.unknownQuestions, []);
+});
+
+test('a per-question verdict holding no questions is refused at the door', () => {
+  const ws = tmp();
+  // The 22:21:57 record: a verdict naming per-question answers, with none in it.
+  assert.throws(
+    () => recordAnswer(ws, { artifact: D3.slug, verdict: 'per-question', questions: {}, words: 'prose' }),
+    /per-question/i,
+  );
+  assert.throws(() => recordAnswer(ws, { artifact: D3.slug }), /empty/i);
+});
+
+test('a question id the decision does not have is flagged rather than swallowed', () => {
+  const ws = tmp();
+  const { record } = recordAnswer(ws, {
+    artifact: D3.slug, verdict: 'per-question', questions: { 'D0003.9': 'approve' },
+  }, { hub: hubWith([D3]) });
+  assert.deepEqual(record.unknownQuestions, ['D0003.9']);
+});
+
+test('prose with no verdict records as what it is, not as "per-question"', () => {
+  const ws = tmp();
+  const { record } = recordAnswer(ws, { artifact: D3.slug, verdict: null, words: 'do the first two only' });
+  assert.equal(record.verdict, 'words-only');
+  assert.ok(record.words.includes('first two'));
+});
+
+test('captured, delivered, applied — "did it land" is answerable from the store alone', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  const { record } = recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+  assert.equal(record.status, 'captured', 'nothing has seen it yet, and the status says so');
+  assert.deepEqual(pendingAnswers(ws).map((a) => a.id), [record.id]);
+
+  const delivered = deliverAnswers(ws).delivered;
+  assert.deepEqual(delivered.map((a) => a.id), [record.id]);
+  assert.equal(readAnswers(ws)[0].status, 'delivered');
+  assert.equal(deliverAnswers(ws).delivered.length, 0, 'delivering twice is not two hand-offs');
+  assert.equal(pendingAnswers(ws).length, 1, 'delivered is not done — it is still waiting on an agent');
+
+  const applied = markApplied(ws, record.id, { by: 'a sibling', evidence: 'https://example.test/pr/1' });
+  assert.equal(applied.status, 'applied');
+  assert.equal(applied.evidence, 'https://example.test/pr/1');
+  assert.deepEqual(pendingAnswers(ws), [], 'applied is the only state that clears the queue');
+});
+
+test('a status change never edits what he said', () => {
+  const ws = tmp();
+  const { record } = recordAnswer(ws, {
+    artifact: D3.slug, verdict: 'per-question', questions: { 'D0003.1': 'approve' }, words: 'his words',
+  }, { hub: hubWith([D3]) });
+  deliverAnswers(ws);
+  const after = markApplied(ws, record.id, { by: 'x', evidence: 'https://example.test/1' });
+  assert.equal(after.words, 'his words');
+  assert.equal(after.verdict, 'per-question');
+  assert.deepEqual(after.questions, record.questions);
+  assert.deepEqual(after.history.map((h) => h.status), ['captured', 'delivered', 'applied']);
+});
+
+test('changing his mind after an answer was applied does not rewrite the applied one', () => {
+  const ws = tmp();
+  const first = recordAnswer(ws, { artifact: 'a', verdict: 'approve', words: 'yes' }).record;
+  deliverAnswers(ws);
+  markApplied(ws, first.id, { by: 'x', evidence: 'https://example.test/1' });
+  const second = recordAnswer(ws, { artifact: 'a', verdict: 'reject', words: 'actually no' }).record;
+
+  assert.equal(readAnswers(ws).find((a) => a.id === first.id).status, 'applied', 'what landed stays landed');
+  assert.equal(second.afterApplied, true, 'the new answer says it changes something already applied');
+  assert.deepEqual(second.supersedes, [first.id]);
+  assert.deepEqual(currentAnswers(ws).map((a) => a.id), [second.id]);
+});
+
+test('a legacy "staged" record reads as captured rather than as a state nobody watches', () => {
+  const ws = tmp();
+  ensureStore(ws);
+  // The three records on disk the evening this was written.
+  fs.writeFileSync(path.join(ws, '.claude', 'ops', 'answers', 'legacy.json'), JSON.stringify({
+    _note: SENTINEL, id: 'legacy', at: '2026-08-15T20:22:13.836Z', status: 'staged',
+    artifact: D3.slug, decisionId: null, verdict: 'adopt-all', questions: {}, words: 'go',
+  }));
+  const [a] = readAnswers(ws);
+  assert.equal(a.status, 'captured');
+  assert.deepEqual(pendingAnswers(ws).map((x) => x.id), ['legacy']);
+});
+
+test('the deliverer announces answers by name and marks the old ones overdue', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+  const { delivered, events } = deliverAnswers(ws);
+  assert.equal(delivered.length, 1);
+  assert.match(events[0].line, /D0003/, 'an event names the decision he can quote');
+  assert.equal(events[0].type, 'answer-new');
+
+  const section = answersSection(pendingAnswers(ws));
+  assert.match(section, /Decision answers/i);
+  assert.match(section, /D0003/);
+
+  // Old and still unapplied: the section must escalate rather than list it quietly.
+  const old = new Date(Date.now() - (OVERDUE_MIN + 5) * 60000).toISOString();
+  assert.match(answersSection([{ ...pendingAnswers(ws)[0], at: old }]), /OVERDUE/);
+});
+
+test('the deliverer is honest about an empty queue instead of writing nothing', () => {
+  assert.match(answersSection([]), /none/i);
+});
+
+const withAnswers = (answers, deliverer) => render({
+  queue: fullQueue, answers, deliverer, workspace: '/w', hub: '/w/obot.roadmap',
+});
+
+test('the page says what happened to his click and what happens next', () => {
+  const html = withAnswers([{
+    id: 'a1', decisionId: 'D0003', artifact: D3.slug, verdict: 'adopt-all',
+    status: 'captured', at: new Date().toISOString(), words: 'go',
+  }], { alive: true, sweptAt: '2026-08-15 23:30', ageMin: 2 });
+  assert.match(html, /D0003/);
+  assert.match(html, /captured/i);
+  // The sentence he gets after clicking — the pipeline in his words, on the page.
+  assert.match(html, /five minutes/i, 'the page states when the hand-off happens');
+  assert.ok(!/staged/i.test(html), 'the word for a state nobody watches is gone');
+});
+
+test('a decision he clicked three times shows one row, with the history behind it', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  recordAnswer(ws, { artifact: D3.slug, verdict: 'defer', words: 'later' }, { hub });
+  recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+  recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+  const current = currentAnswers(ws);
+  assert.equal(current.length, 1, 'one decision, one row');
+  assert.equal(current[0].verdict, 'adopt-all');
+  assert.equal(current[0].supersedes.length, 1);
+
+  const html = withAnswers(current, { alive: true, sweptAt: 'x', ageMin: 1 });
+  assert.equal((html.match(/class="ans"/g) || []).length, 1, 'the superseded answer is not a second row');
+  assert.match(html, /replaced an earlier answer|superseded/i);
+});
+
+test('when nothing is listening the page says so instead of looking like success', () => {
+  const dead = withAnswers([{
+    id: 'a1', decisionId: 'D0003', artifact: D3.slug, verdict: 'adopt-all',
+    status: 'captured', at: new Date(Date.now() - 90 * 60000).toISOString(), words: 'go',
+  }], { alive: false, sweptAt: '2026-08-15 19:00', ageMin: 260 });
+  assert.match(dead, /nothing is listening/i, 'the failure is named on the page');
+  assert.match(dead, /launchctl kickstart/, 'and the page carries the restart command');
+
+  // No answer waiting: a dead deliverer is not an alarm about nothing.
+  assert.ok(!/nothing is listening/i.test(withAnswers([], { alive: false, ageMin: 260 })));
+});
+
+test('an applied answer links the artifact so he can confirm it himself', () => {
+  const html = withAnswers([{
+    id: 'a1', decisionId: 'D0003', artifact: D3.slug, verdict: 'adopt-all', status: 'applied',
+    at: new Date().toISOString(), appliedAt: new Date().toISOString(),
+    evidence: 'https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-14-demo-301-site-size/',
+  }], { alive: true, ageMin: 1 });
+  assert.match(html, /applied/i);
+  assert.match(html, /href="https:\/\/jwildfire\.github\.io[^"]*demo-301-site-size/);
+});
+
+test('the answer POST refuses a verdict that would be a lie, and reports the id it joined', async () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  const { server, url } = await serve({ workspace: ws, hub, port: 0 });
+  const post = async (body) => {
+    const r = await fetch(new URL('/answer', url), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    return { status: r.status, json: await r.json() };
+  };
+  try {
+    const bad = await post({ artifact: D3.slug, verdict: 'per-question', questions: {}, words: 'prose' });
+    assert.equal(bad.status, 400);
+    assert.match(bad.json.error, /per-question/i);
+
+    const ok = await post({ artifact: D3.slug, verdict: 'adopt-all', words: 'go' });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.decisionId, 'D0003', 'the answer comes back with the id he can quote');
+    assert.equal(ok.json.status, 'captured');
+    assert.match(ok.json.next, /five minutes/i, 'and with the sentence about what happens next');
+
+    const again = await post({ artifact: D3.slug, verdict: 'adopt-all', words: 'go' });
+    assert.equal(again.json.duplicate, true, 'a double-click is the same answer');
+    assert.equal(again.json.id, ok.json.id);
+  } finally {
+    server.close();
+  }
+});
+
+test('pending is one bounded read an agent can run without a session', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'his verbatim words' }, { hub });
+  const cli = new URL('../../ops-answers', import.meta.url).pathname;
+  const run = (...a) => execFileSync(cli, a, { env: { ...process.env, OBOT_WORKSPACE: ws, OBOT_HUB: hub }, encoding: 'utf8' });
+
+  const text = run('pending');
+  assert.match(text, /D0003/);
+  assert.match(text, /his verbatim words/, 'the answer itself is the payload an agent needs');
+
+  const json = JSON.parse(run('pending', '--json'));
+  assert.equal(json.pending.length, 1);
+  assert.equal(json.pending[0].decisionId, 'D0003');
+  assert.equal(json.pending[0].status, 'captured');
+
+  run('deliver');
+  assert.equal(JSON.parse(run('pending', '--json')).pending[0].status, 'delivered');
+  run('apply', JSON.parse(run('pending', '--json')).pending[0].id, '--evidence', 'https://example.test/1', '--by', 'a sibling');
+  assert.equal(JSON.parse(run('pending', '--json')).pending.length, 0);
+  assert.match(run('pending'), /nothing/i);
+});
+
+test('an answer written before the join still gets its id from the registry', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  ensureStore(ws);
+  fs.writeFileSync(path.join(ws, '.claude', 'ops', 'answers', 'legacy.json'), JSON.stringify({
+    _note: SENTINEL, id: 'legacy', at: '2026-08-15T20:22:13.836Z', status: 'staged',
+    artifact: D3.slug, decisionId: null, verdict: 'adopt-all', questions: {}, words: 'go',
+  }));
+  assert.equal(readAnswers(ws)[0].decisionId, null, 'the file itself is not rewritten by a read');
+  const [joined] = readAnswers(ws, { hub });
+  assert.equal(joined.decisionId, 'D0003', 'the slug is right there — the registry answers it');
+  assert.match(joined.decisionIdSource, /backfill/i, 'and the record says where the id came from');
+  assert.deepEqual(pendingAnswers(ws, { hub }).map((a) => a.decisionId), ['D0003']);
+
+  // The deliverer writes anyway, so it is where the repair is persisted.
+  deliverAnswers(ws, { hub });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'ops', 'answers', 'legacy.json'), 'utf8')).decisionId, 'D0003');
 });
