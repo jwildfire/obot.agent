@@ -66,13 +66,26 @@ it must never be six.
 
 ### Release-candidate labels
 
-A release candidate reads `package version — what it is` (`gsm.safety v1.1.0 — the
-participant-level metrics phase`). That is the naming rule for RC PRs — it is in the
-[RC framework](../../docs/rc-framework.md) — but the queue also carries PRs written
-before it, so the label is *derived*: package from the repo, version from the title
-when the title names this package's version, otherwise from the `(Upcoming)` heading of
-the local clone's `NEWS.md`. It is idempotent, so a correctly-titled PR is not doubled,
-and a version is never invented — with no evidence, the label is the package alone.
+A release candidate reads `{package} vX.Y.Z-RCn` — `gsm.safety v1.1.0-RC1` — and carries
+no summary at all (@jwildfire, 2026-08-15, superseding his own earlier rule the same day;
+the rule is in the [RC framework](../../docs/rc-framework.md)). A correctly-titled RC is
+therefore already its own label, and `rcLabel`'s remaining job is to *normalise* what the
+queue still holds: PRs written before the rule, whose titles carry a summary it retired.
+The summary is stripped rather than kept — a page that keeps rendering descriptions makes
+a title that has one look correct. The version comes from the title when the title names
+this package's version, otherwise from the `(Upcoming)` heading of the local clone's
+`NEWS.md`; a version is never invented, and with none the label is the package alone. An
+`-RCn` already in the title is authoritative and never renumbered: the counter is a
+review-round fact this page cannot see.
+
+**The second line.** Because the title no longer explains itself, an RC row carries a
+subtitle: the one-sentence executive summary the
+[RC body contract](../../docs/rc-framework.md#what-an-rc-pr-must-carry) puts first in every
+RC body, which `reviews-queue --json` already extracts as `lead` (so it costs no extra
+call). It is the better line — the old summary was whatever an author typed into a title,
+while this sentence is contract-mandated and has to be accurate, since it also heads the
+PR he opens. It truncates to about 325px on a 390px phone, so the sentence's **first
+words** are what he actually reads.
 
 ### Config ids
 

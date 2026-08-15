@@ -58,10 +58,43 @@ Full rule and its history: [`AGENTS.md` → Milestone before work](../../AGENTS.
 
 ## The RC PR's title
 
-`{package} v{X.Y.Z} — {what the release is}`, e.g. `gsm.safety v1.1.0 — the
-participant-level metrics phase`. The package and the version come first, always
-(@jwildfire, 2026-08-15) — that line is how he tells five release candidates apart in a
-queue on his phone. No `Release candidate:` lead; the base branch already says it is one.
+**`{package} vX.Y.Z-RCn`, and nothing else** — `gsm.safety v1.1.0-RC1`. No summary, no
+`Release candidate:` lead, no em-dash tail (@jwildfire, 2026-08-15: *"New rule for release
+candidate names: {package} Vx.x.x-RCx. No other summary allowed."*). This supersedes the
+earlier same-day shape `{package} vX.Y.Z — {what the release is}`; titles in that shape are
+legacy and get retitled on their next touch.
+
+The description is not lost — it becomes the one-sentence exec summary that opens the body,
+which is what the Operations Dashboard renders under the title in his queue.
+
+**The `-RCn` counter** — `n` counts candidates put in front of him, not PR objects or pushes:
+
+- The first candidate for a version is **`-RC1`**; there is no unnumbered RC.
+- **Increment when review is re-requested after a `CHANGES_REQUESTED` decision**, and only
+  then. Pushes before he reviews do not move it; a round ending in approval does not either.
+- **Retitle the same PR — never open a new one.** The thread holds his comments, the review
+  decisions and the CI history, and he reviews `-RC2` by re-reading `-RC1`. One
+  `gh pr edit --title`. A *mechanical* re-open (authorship, so he can hold the reviewer
+  role — open.gismo #9 → #10) is not a re-cut and does not increment.
+- **Resets per version**: `v1.1.0-RC1`, `v1.1.0-RC2`, then `v1.2.0-RC1`.
+- **The tag drops the suffix** — the release is `v1.1.0`. `-RCn` never reaches a tag, a
+  release body, or a `NEWS.md` heading.
+
+`scripts/obot-merge` warns (never refuses) on a release merge whose title is off-shape.
+
+## The RC PR's body
+
+One sentence → links → requirements closed → details, per @jwildfire (2026-08-15). The
+full template and its rules live in
+[`docs/rc-framework.md`](../../docs/rc-framework.md#what-an-rc-pr-must-carry). Two things
+this skill owns:
+
+- **Every RC PR links `NEWS.md`** — mandatory, in the bullet list above the fold, pointing
+  at the **file on the RC's head branch** (sections are newest-first, so it opens on the
+  right one; the `#...-upcoming` anchor breaks when the suffix drops at tag time).
+- **The exec summary and the `NEWS.md` section must say the same thing.** The sentence is
+  the section's headline claim in one line — if revising one leaves the other stale, his
+  queue row and his release notes disagree.
 
 ## The section shape
 

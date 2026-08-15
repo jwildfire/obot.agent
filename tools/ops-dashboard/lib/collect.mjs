@@ -167,18 +167,22 @@ export function upcomingVersion(workspace, repo) {
 }
 
 /**
- * A release candidate's label: `package version — what it is`.
+ * A release candidate's label: `{package} vX.Y.Z-RCn`, and nothing else.
  *
- * @jwildfire, 2026-08-15: "release candidate PRs should all start with a package name
- * and a version number." That is a naming rule for PRs written from here on (it is in
- * the RC framework), but the queue also carries PRs written before it — and a PR title
- * is not something this page can fix. So the label is derived: package from the repo,
- * version from the title when the title names *this* package's version, otherwise from
- * the release the repo is heading for.
+ * @jwildfire, 2026-08-15: "New rule for release candidate names: {package} Vx.x.x-RCx.
+ * No other summary allowed." This supersedes his own earlier rule the same day ("RC PRs
+ * should all start with a package name and a version number"), under which this function
+ * *synthesised* `package version — what it is` from a messy title. A correctly-titled RC
+ * now already is its label, so the work here is only to normalise what the queue still
+ * carries: PRs written before the rule, whose titles hold a summary the rule has retired.
  *
- * Idempotent by construction — a title that already reads correctly is stripped of its
- * lead and given the same one back, so nothing is ever doubled. And a version is never
- * invented: with no evidence of one, the label is the package alone.
+ * Stripping rather than keeping that summary is the point — a page that keeps rendering
+ * descriptions makes a title that has one look correct.
+ *
+ * Idempotent by construction. A version is never invented: with no evidence of one the
+ * label is the package alone, and with no version there is no candidate to number either.
+ * An `-RCn` already in the title is authoritative — the counter is a review-round fact
+ * this page cannot see, so it is read, never derived.
  */
 export function rcLabel({ repo, title, version = null } = {}) {
   const pkg = String(repo || '').split('/').pop() || '';
@@ -186,13 +190,43 @@ export function rcLabel({ repo, title, version = null } = {}) {
   if (!pkg) return rest;
 
   rest = rest.replace(/^(release candidate|rc)\s*[:—–-]\s*/i, '');
-  const lead = new RegExp(`^${escapeRe(pkg)}\\s+v?(\\d+(?:\\.\\d+)*)\\s*[:—–-]?\\s*`, 'i');
+  const lead = new RegExp(`^${escapeRe(pkg)}\\s+v?(\\d+(?:\\.\\d+)*)(?:-RC(\\d+))?\\s*[:—–-]?\\s*`, 'i');
   const named = lead.exec(rest);
-  if (named) rest = rest.slice(named[0].length);
 
   const v = named?.[1] ?? version ?? null;
-  const head = v ? `${pkg} v${v}` : pkg;
-  return rest ? `${head} — ${rest}` : head;
+  if (!v) return pkg;
+  return `${pkg} v${v}-RC${named?.[2] ?? 1}`;
+}
+
+// One plain line: markdown emphasis, inline links and trailing punctuation-noise off.
+const SUB_MAX = 120;
+const plain = (s) => String(s)
+  .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  .replace(/[*_`]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+/**
+ * The RC row's second line — the cost of "no other summary allowed" paid back.
+ *
+ * A bare `gsm.safety v1.1.0-RC1` in a queue of five says nothing about which release it
+ * is, and the queue is read on a phone. So the description moves off the title and onto
+ * a second line taken from the PR body's one-sentence executive summary, which the RC
+ * body contract (@jwildfire, 2026-08-15, item 2) requires and puts first. `reviews-queue`
+ * already extracts it as `lead`, so this costs no extra network call.
+ *
+ * That is a better line than the old derived label: the old summary was whatever an
+ * author typed into a title, while this sentence is contract-mandated and has to be
+ * accurate, because it is also the first thing he reads when he opens the PR.
+ */
+export function rcSub({ lead } = {}) {
+  const text = plain(lead ?? '');
+  // reviews-queue's own miss marker is not a sentence — show nothing rather than it.
+  if (!text || text === '(no summary in the body)') return null;
+  if (text.length <= SUB_MAX) return text;
+  const cut = text.slice(0, SUB_MAX);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > 40 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, '')}…`;
 }
 
 /**
@@ -206,9 +240,12 @@ export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
   const cached = readCache(workspace, 'rcs', maxAgeMin);
   // Relabelled on the way out as well as on the way in, so a cache written before the
   // naming rule existed still reads right. `rcLabel` is idempotent, so this is free.
+  // `sub` is rebuilt the same way: a cache predating the second line has a `lead` but
+  // no `sub`, and this fills it in without a refresh.
   const label = (items) => (items ?? []).map((it) => ({
     ...it,
     title: rcLabel({ repo: it.repo ?? String(it.key || '').split('#')[0], title: it.title, version: it.version }),
+    sub: it.sub ?? rcSub({ lead: it.lead }),
   }));
   if (cached && !cached.stale) return { items: label(cached.value), ageMin: cached.ageMin, refreshing: false };
   if (agent) refreshRCs(workspace, agent);
@@ -237,6 +274,10 @@ export function refreshRCs(workspace, script) {
           version,
           rawTitle: pr.title,
           title: rcLabel({ repo: pr.repo, title: pr.title, version }),
+          // Kept on the item so a relabel on the way out of the cache can rebuild the
+          // second line without going back to the network.
+          lead: pr.lead ?? null,
+          sub: rcSub({ lead: pr.lead }),
           // `why` is the field reviews-queue emits; the old `reason` never existed, so
           // every row read "ready for your call" whatever the sweep actually said.
           detail: `${pr.repo} — ${pr.why ?? 'ready for your call'}`,

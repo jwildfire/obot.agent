@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
-import { collectConfig, nextConfigId, rcLabel, upcomingVersion } from '../lib/collect.mjs';
+import { collectConfig, nextConfigId, rcLabel, rcSub, upcomingVersion } from '../lib/collect.mjs';
 import { ensureStore, readCache, writeCache, SENTINEL } from '../lib/store.mjs';
 import {
   recordAnswer, readAnswers, currentAnswers, pendingAnswers, deliverAnswers,
@@ -246,31 +246,98 @@ test('queue text is escaped — artifact titles are not trusted markup', () => {
   assert.equal(esc('a&b<c>'), 'a&amp;b&lt;c&gt;');
 });
 
-test('a release candidate reads "package version — what it is"', () => {
-  // The rule (@jwildfire, 2026-08-15): every RC starts with a package name and a
-  // version number. The label is derived, so a PR titled any other way still reads
-  // right on the page.
+test('a release candidate reads "{package} vX.Y.Z-RCn" and carries no summary', () => {
+  // The rule (@jwildfire, 2026-08-15, superseding his own earlier same-day rule):
+  // "New rule for release candidate names: {package} Vx.x.x-RCx. No other summary
+  // allowed." The title now *is* the label, so the deriver's job shrank from
+  // synthesising a description to stripping one off legacy titles.
+  assert.equal(
+    rcLabel({ repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC1' }),
+    'gsm.safety v1.1.0-RC1',
+  );
+  // A legacy title carrying a summary loses it — no summary is allowed, and the
+  // page must not keep showing one the rule has retired.
   assert.equal(
     rcLabel({ repo: 'jwildfire/gsm.safety', title: 'Release candidate: gsm.safety v1.1.0 — the participant-level metrics phase' }),
-    'gsm.safety v1.1.0 — the participant-level metrics phase',
+    'gsm.safety v1.1.0-RC1',
   );
-  // Already correct: normalizing must not double the prefix.
   assert.equal(
     rcLabel({ repo: 'jwildfire/open.gismo', title: 'open.gismo v0.2.0 — local-first engine' }),
-    'open.gismo v0.2.0 — local-first engine',
+    'open.gismo v0.2.0-RC1',
+  );
+  // An -RCn already in the title is authoritative and is never renumbered.
+  assert.equal(
+    rcLabel({ repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC3 — leftover summary' }),
+    'gsm.safety v1.1.0-RC3',
+  );
+  // Idempotent: relabelling a correct label returns it unchanged.
+  assert.equal(
+    rcLabel({ repo: 'jwildfire/gsm.safety', title: rcLabel({ repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC2' }) }),
+    'gsm.safety v1.1.0-RC2',
   );
   // A version named in the title belongs to another package — the repo's own
   // version comes from the release it is heading for.
   assert.equal(
     rcLabel({ repo: 'jwildfire/gsm.safety', title: 'Adopt safety.viz v1.6.0: two new widgets', version: '1.1.0' }),
-    'gsm.safety v1.1.0 — Adopt safety.viz v1.6.0: two new widgets',
+    'gsm.safety v1.1.0-RC1',
   );
-  // No version anywhere: name the package, never invent a number.
+  // No version anywhere: name the package, never invent a number — and with no
+  // version there is no candidate to count either.
   assert.equal(
     rcLabel({ repo: 'jwildfire/obot.agent', title: 'The guardrail files stop being prose' }),
-    'obot.agent — The guardrail files stop being prose',
+    'obot.agent',
   );
   assert.equal(rcLabel({ repo: '', title: 'bare' }), 'bare');
+});
+
+test('the RC row keeps a second line, because the title no longer explains itself', () => {
+  // The cost of "no other summary allowed": `gsm.safety v1.1.0-RC1` in a queue of
+  // five tells him nothing about which release it is. The description moves to a
+  // second line taken from the PR body's one-sentence exec summary, which the RC
+  // body contract (@jwildfire, 2026-08-15, item 2) guarantees is there and first.
+  assert.equal(
+    rcSub({ lead: 'Adds the participant-level metrics phase: six widgets and their workflows.' }),
+    'Adds the participant-level metrics phase: six widgets and their workflows.',
+  );
+  // Markdown emphasis and links are stripped — this is one plain line on a phone.
+  assert.equal(
+    rcSub({ lead: '**Adds** the [metrics phase](https://example.com/x) end to end.' }),
+    'Adds the metrics phase end to end.',
+  );
+  // reviews-queue's own miss marker is not a sentence; show nothing rather than it.
+  assert.equal(rcSub({ lead: '(no summary in the body)' }), null);
+  assert.equal(rcSub({}), null);
+  // Long leads are cut at a word boundary — the row is one line, not a paragraph.
+  const long = rcSub({ lead: 'w'.repeat(30) + ' ' + 'x'.repeat(30) + ' ' + 'y'.repeat(60) + ' tail' });
+  assert.ok(long.length <= 121, `sub was ${long.length} chars`);
+  assert.ok(long.endsWith('…'));
+});
+
+test('the RC second line renders under the title, and is escaped like everything else', () => {
+  const html = render({
+    queue: {
+      ...emptyQueue,
+      rcs: { items: [{ kind: 'rc', key: 'jwildfire/gsm.safety#52', title: 'gsm.safety v1.1.0-RC1', sub: 'Adds the participant-level metrics phase.', url: 'https://example.com/pr/52' }], refreshing: false },
+    },
+    staged: [],
+  });
+  assert.ok(html.includes('gsm.safety v1.1.0-RC1'));
+  assert.ok(html.includes('<span class="q-sub">'));
+  assert.ok(html.includes('Adds the participant-level metrics phase.'));
+  // A row with no second line keeps exactly the markup it had before.
+  const bare = render({
+    queue: { ...emptyQueue, rcs: { items: [{ kind: 'rc', key: 'r#1', title: 'obot.agent v0.5.0-RC1' }], refreshing: false } },
+    staged: [],
+  });
+  // Matched on the markup, not the stylesheet — the CSS always defines .q-sub.
+  assert.ok(!bare.includes('<span class="q-sub">'));
+  // The lead comes off a PR body, so it is no more trusted than any other title.
+  const nasty = render({
+    queue: { ...emptyQueue, rcs: { items: [{ kind: 'rc', key: 'r#1', title: 'x v1.0.0-RC1', sub: '<img src=x onerror=alert(1)>' }], refreshing: false } },
+    staged: [],
+  });
+  assert.ok(!nasty.includes('<img src=x'));
+  assert.ok(nasty.includes('&lt;img src=x'));
 });
 
 test('the version comes off the NEWS (Upcoming) heading in the local clone', () => {

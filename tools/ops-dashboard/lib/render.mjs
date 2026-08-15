@@ -63,7 +63,10 @@ const item = (it) => {
   // "is this really critical" by reading what it says is stuck behind it.
   const claim = it.critical && it.criticalClaim
     ? `<span class="q-claim">critical &middot; ${esc(it.criticalClaim)}</span>` : '';
-  return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${claim}</li>`;
+  // An RC title carries no summary any more (@jwildfire, 2026-08-15), so the
+  // sentence sits under it - the same second-line shape as a critical claim.
+  const sub = it.sub ? `<span class="q-sub">${esc(it.sub)}</span>` : '';
+  return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${sub}${claim}</li>`;
 };
 
 const group = (title, items, empty, moved = 0) => `<h2 class="q-h">${esc(title)} <span class="q-n">${items.length}</span>${
@@ -165,6 +168,12 @@ const DASHBOARD_CSS = `
      in a list he scrolls on a phone. The full title is the panel's heading. */
   .q-title { font-size:0.82rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
              overflow:hidden; }
+  /* An RC title carries no summary any more (@jwildfire, 2026-08-15), so the row runs to
+     a second line under it. `.q` is already a column and `.q-line` already carries
+     min-width:0, so this only has to be the line itself: one line, ellipsized, because
+     he reads this list on a 390px phone. */
+  .q-sub { font-size:0.72rem; color:var(--muted); line-height:1.25; min-width:0;
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; }
   .q-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
   .q-moved { font-size:0.62rem; color:var(--faint); text-transform:none; letter-spacing:0; }

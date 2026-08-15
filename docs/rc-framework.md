@@ -69,13 +69,45 @@ review queue.
 An RC is not "the accumulated diff." It is a release proposed for publication,
 and it stands or falls on whether he can see what changed without reading code.
 
-**Its title starts with the package name and the version** — `gsm.safety v1.1.0 —
-the participant-level metrics phase`, never a bare sentence and never `Release
-candidate:` as the first words (@jwildfire, 2026-08-15: "release candidate PRs should
-all start with a package name and a version number"). That is what he sees in a queue
-of five, on a phone, with nothing else to tell them apart. The Operations Dashboard
-derives the same label for PRs written before the rule, but a derived label is a
-repair, not the convention.
+### The title
+
+**`{package} vX.Y.Z-RCn`, and nothing else** — `gsm.safety v1.1.0-RC1`. No summary, no
+`Release candidate:` lead, no em-dash tail (@jwildfire, 2026-08-15: *"New rule for release
+candidate names: {package} Vx.x.x-RCx. No other summary allowed."*). This supersedes his
+own earlier rule the same day, under which the title *started* with the package and
+version and then described the release; titles written to that shape are legacy and get
+retitled on their next touch.
+
+The description does not disappear, it moves: it becomes the one-sentence executive
+summary that opens the body (below), which is where the Operations Dashboard now reads
+the second line of an RC row from.
+
+#### The `-RCn` counter
+
+`n` counts **candidates put in front of @jwildfire**, not PR objects and not pushes.
+
+1. **The first candidate for a version is `-RC1`.** Always — there is no unnumbered RC.
+2. **Increment when review is re-requested after a `CHANGES_REQUESTED` decision**, and
+   only then. Commits pushed before he has reviewed do not move the counter; a round of
+   review that ends in approval does not either. One increment per review round.
+3. **Retitle the same PR — never open a new one.** The review thread is the record: his
+   comments, the review decisions, the Development links and the CI history all live on
+   it, and he reviews `-RC2` by reading what he asked for on `-RC1`. A replacement PR
+   throws that away. Retitling costs one `gh pr edit --title`.
+   - A **mechanical** re-open is not a re-cut and does not move the counter — e.g.
+     open.gismo #9 → #10 (2026-08-15), closed 33 seconds in and reopened under the bot so
+     @jwildfire could hold the reviewer role. #10 is still `-RC1`.
+4. **The counter resets per version**: `v1.1.0-RC1`, `v1.1.0-RC2`, then `v1.2.0-RC1`.
+5. **The tag drops the suffix.** The release is `v1.1.0`. `-RCn` never appears on a tag, a
+   release title, a release body, or a `NEWS.md` heading — it names a *candidate*, and
+   what ships is the release.
+
+`scripts/obot-merge` **warns** on a release-role merge whose title is not in this shape;
+it does not refuse. The refusals in that script protect the release's record — an issue
+with no milestone, a release naming no issue — which is wrong-and-unrecoverable once the
+merge lands. A title is cosmetic and fixable afterwards in one command, and obot-merge
+runs on the attested lane *after* he has approved: blocking there would stall an approved
+release at its last step over a string.
 
 1. **Release notes, house style, drafted in `NEWS.md`.** Functionality-first
    and user-facing: what a person can now do that they could not do before, and
@@ -101,9 +133,46 @@ repair, not the convention.
    The deployed URL goes **above the fold** in the PR body and in the release
    notes as a `**See it move:**` line. A PR without a working deployed demo link
    is not an RC and must not be put in front of him.
-3. **The five-section obot PR body**: executive summary (with `Closes #X`) →
-   roadmap context (goal, requirements delivered) → evidence as HTML links →
-   technical briefing → next steps.
+3. **The RC body, in this order** (@jwildfire, 2026-08-15: *"1 sentence exec summary
+   then bulleted list with relevant links to demo page and news.md. then a list of all
+   requirements closed in the PR. Then get in to the details as needed."*). This is the
+   five-section obot PR body reordered and tightened, not a second template — the
+   sections are the same, the links come above the fold, and the `Closes` keywords now
+   live in the requirements list:
+
+   ```markdown
+   ## ⛔ Release candidate — merges only on @jwildfire's approval, via the attested lane
+
+   {One sentence: what this release lets someone do that they could not do before.}
+
+   - **See it move:** [annotated demo]({deployed hub URL})
+   - **Release notes:** [NEWS.md]({repo}/blob/{head branch}/NEWS.md) — the `vX.Y.Z
+     (Upcoming)` section, which publishes verbatim as the release body
+   - {any other link he needs before deciding}
+
+   ### Requirements this release closes
+   - Closes #12 — {what it delivered}
+   - Closes #14 — {what it delivered}
+
+   **The ask:** {the decision, and what happens on approval}
+
+   ### Evidence
+   ### Technical briefing
+   ### Next steps
+   ```
+
+   - **The one sentence is the row on his phone.** The Operations Dashboard shows it
+     under the title, truncated near 325px on a 390px screen — front-load it, and do not
+     open with "This PR".
+   - **The `NEWS.md` link is mandatory in every RC PR**, no exceptions. Link the **file
+     on the RC's head branch**, not an anchor: sections are newest-first so the file
+     opens on the right one, and the `#...-upcoming` anchor breaks at tag time when the
+     suffix drops.
+   - **The requirements list carries the `Closes #N` keywords** — it does not replace
+     them. Prose like "closes the metrics requirement" does not close anything, and
+     `obot-merge` refuses a release merge whose body names no issue (item 4).
+   - Everything under **Evidence** onward is "details as needed": as deep as the release
+     warrants, never above the requirements list.
 4. **A milestone, and a `Closes #N` line per issue the release ships.** The
    milestone groups the release; the keyword closes the issue — **both**, never
    either. Create the release's milestone before the window opens, assign it to
@@ -119,7 +188,8 @@ repair, not the convention.
    the `gsm.safety` R widget delivered or filed as a milestoned requirement
    (the widget-parity pillar, @jwildfire 2026-08-15).
 6. **One line stating the ask**: what decision is being requested, and what
-   happens on approval (tag and publish, or merge and hold).
+   happens on approval (tag and publish, or merge and hold). It sits directly under
+   the requirements list, above the details — see the template in item 3.
 
 After the release is tagged, the hub requirements it delivered move stage on the
 ["obot Roadmap" project](https://github.com/users/jwildfire/projects/1) — to
