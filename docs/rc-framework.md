@@ -102,7 +102,9 @@ and it stands or falls on whether he can see what changed without reading code.
    [`scripts/obot-merge`](../scripts/obot-merge) refuses a release merge that
    names no issue, and any merge whose `Closes` target has no milestone.
 5. **A green gate**: CI passing on the head commit; for safety.viz renderers the
-   done-gate as well — gallery demo, evidence page, API reference all live.
+   done-gate as well — gallery demo, evidence page, API reference all live, and
+   the `gsm.safety` R widget delivered or filed as a milestoned requirement
+   (the widget-parity pillar, @jwildfire 2026-08-15).
 6. **One line stating the ask**: what decision is being requested, and what
    happens on approval (tag and publish, or merge and hold).
 

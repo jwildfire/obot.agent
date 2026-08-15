@@ -152,7 +152,12 @@ repo's actual branch model. Established 2026-07-08 alongside the documentation-s
   and `/pr/{N}/` per open PR (removed on close).
 - **Definition of done:** a renderer module is not done — and its migration
   requirement is not Released — until its site entry is complete: gallery demo,
-  test-evidence page (requirements → tests → screenshots), and API reference.
+  test-evidence page (requirements → tests → screenshots), and API reference —
+  **and its `gsm.safety` R widget is delivered or filed as a milestoned hub
+  requirement** (@jwildfire, 2026-08-15: "Every renderer gets an R widget";
+  the fourth pillar, enforced by gsm.safety's `safety-viz-parity` CI against
+  every safety.viz release, with requirement-cited deferrals in that repo's
+  `.github/parity-allowlist.yaml`).
 
 ## Preferred migration sequence
 
