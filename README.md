@@ -29,9 +29,11 @@ tested library, mirroring the gsm.kri ↔ gsm.viz architecture:
   pilot renderer, 2026-07-11).
 - **[gsm.safety](https://github.com/jwildfire/gsm.safety)** — R package with `Widget_*()`
   htmlwidget bindings over safety.viz, and later the static safety charts.
-- Legacy forks (e.g. [safety-histogram](https://github.com/jwildfire/safety-histogram))
-  hold baseline and requirements-harvesting work; the remaining RhoInc renderers stay
-  upstream until their migration starts.
+- Legacy forks held baseline and requirements-harvesting work; the
+  [safety-histogram](https://github.com/jwildfire/safety-histogram) fork (the P004 pilot)
+  was archived 2026-08-15 on @jwildfire's call — its renderer lives on as safety.viz's
+  histogram module. The remaining RhoInc renderers stay upstream until their migration
+  starts.
 
 For current status — which renderers are live, what's in review, what's next — see the
 [roadmap site](https://jwildfire.github.io/obot.roadmap/) and the hub's project board.
