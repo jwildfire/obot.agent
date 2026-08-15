@@ -1,0 +1,34 @@
+# policy.json v3 - every verdict it can produce.
+# Regenerate with scripts/test/policy-sweep --update; a diff is a policy change.
+
+merge jwildfire/demo-301         main                 -> standard/exit0     unattended=yes
+merge jwildfire/demo-301         site                 -> attested/exit0     unattended=no
+merge jwildfire/demo-301         some-feature-branch  -> refused/exit2      unattended=no
+merge jwildfire/gsm.safety       dev                  -> standard/exit0     unattended=yes
+merge jwildfire/gsm.safety       main                 -> attested/exit0     unattended=no
+merge jwildfire/gsm.safety       some-feature-branch  -> refused/exit2      unattended=no
+merge jwildfire/obot.agent       main                 -> standard/exit0     unattended=yes
+merge jwildfire/obot.agent       stable               -> attested/exit0     unattended=no
+merge jwildfire/obot.agent       some-feature-branch  -> refused/exit2      unattended=no
+merge jwildfire/obot.roadmap     main                 -> standard/exit0     unattended=yes
+merge jwildfire/obot.roadmap     some-feature-branch  -> refused/exit2      unattended=no
+merge jwildfire/open.csr         dev                  -> standard/exit0     unattended=yes
+merge jwildfire/open.csr         main                 -> attested/exit0     unattended=no
+merge jwildfire/open.csr         some-feature-branch  -> refused/exit2      unattended=no
+merge jwildfire/open.gismo       dev                  -> standard/exit0     unattended=yes
+merge jwildfire/open.gismo       main                 -> attested/exit0     unattended=no
+merge jwildfire/open.gismo       some-feature-branch  -> refused/exit2      unattended=no
+merge jwildfire/safety.viz       dev                  -> standard/exit0     unattended=yes
+merge jwildfire/safety.viz       main                 -> attested/exit0     unattended=no
+merge jwildfire/safety.viz       some-feature-branch  -> refused/exit2      unattended=no
+merge jwildfire/not-a-real-repo  main                 -> refused/exit2      unattended=no
+merge jwildfire/not-a-real-repo  dev                  -> refused/exit2      unattended=no
+
+carve-out jwildfire/obot.agent   scripts/policy.json              scripts/policy.json -> GUARDED; scripts/policy.json.bak -> open
+carve-out jwildfire/obot.agent   scripts/merge-policy.json        scripts/merge-policy.json -> GUARDED; scripts/merge-policy.json.bak -> open
+carve-out jwildfire/obot.agent   scripts/autonomy-grants.json     scripts/autonomy-grants.json -> GUARDED; scripts/autonomy-grants.json.bak -> open
+carve-out jwildfire/obot.agent   scripts/obot-merge               scripts/obot-merge -> GUARDED; scripts/obot-merge.bak -> open
+carve-out jwildfire/obot.agent   scripts/obot-policy              scripts/obot-policy -> GUARDED; scripts/obot-policy.bak -> open
+carve-out jwildfire/obot.agent   goals/                           goals/deep/file.txt -> GUARDED; goals-elsewhere/file.txt -> open
+carve-out jwildfire/obot.agent   hooks/                           hooks/deep/file.txt -> GUARDED; hooks-elsewhere/file.txt -> open
+carve-out jwildfire/not-a-real-repo (no list)                        scripts/policy.json -> open

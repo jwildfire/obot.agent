@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""policy-sweep — every merge verdict the policy file can produce, in one table,
+compared against a recorded baseline.
+
+The sweep that made the profile migration trustworthy (2026-07-29) existed only
+as evidence pasted into a pull request body. It was never committed, so it
+proved the policy correct once and protected nothing afterwards. @jwildfire
+settled that on 2026-08-15 (decision D0005.2/W2, adopting the design's D8):
+commit it, and run it in CI.
+
+What it covers, for every declared repo:
+
+  * each declared branch, by role -> the merge lane it resolves to
+  * a branch with no declared role -> refused, under every profile
+  * whether an unattended --auto session may merge it
+  * the repo's guardrail paths, and one probe per path proving the matcher
+    still recognises it (prefix rules probed with a file inside them)
+
+Plus the cases that have no repo: an undeclared repo is refused, and an
+undeclared repo has no guardrail list.
+
+A difference against the baseline is not automatically wrong - widening the
+policy is a legitimate thing @jwildfire can approve - but it must be a change
+someone chose. Re-record with --update, and the diff belongs in the PR.
+
+  scripts/test/policy-sweep            # compare, exit 1 on any difference
+  scripts/test/policy-sweep --update   # re-record the baseline
+  scripts/test/policy-sweep --print    # just print the table
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS = os.path.dirname(HERE)
+POLICY_FILE = os.path.join(SCRIPTS, "policy.json")
+RESOLVER = os.path.join(SCRIPTS, "obot-policy")
+BASELINE = os.path.join(HERE, "policy-sweep.baseline")
+
+UNDECLARED_REPO = "jwildfire/not-a-real-repo"
+UNROLED_BRANCH = "some-feature-branch"
+
+
+def resolver(*args):
+    out = subprocess.run([sys.executable, RESOLVER, *args],
+                         capture_output=True, text=True)
+    return out.stdout.strip(), out.returncode
+
+
+def lane(repo, base):
+    out, code = resolver("resolve", repo, base, "--json")
+    try:
+        verdict = json.loads(out)
+    except json.JSONDecodeError:
+        return f"ERROR({code})"
+    return f"{verdict['lane']}/exit{code}"
+
+
+def unattended_map():
+    """repo+branch -> whether an --auto session may merge it, read from `matrix`.
+
+    Read from the resolver's own output rather than recomputed here: a sweep
+    that reimplements the rule it is checking proves only that it agrees with
+    itself.
+    """
+    out, _ = resolver("matrix")
+    seen = {}
+    for line in out.splitlines():
+        cols = line.split()
+        if len(cols) == 7 and "/" in cols[0]:
+            seen[(cols[0], cols[3])] = cols[6]
+    return seen
+
+
+def probes_for(rule):
+    """A path that must match the rule, and one that must not."""
+    if rule.endswith("/"):
+        return f"{rule}deep/file.txt", f"{rule.rstrip('/')}-elsewhere/file.txt"
+    return rule, f"{rule}.bak"
+
+
+def sweep():
+    policy = json.load(open(POLICY_FILE))
+    unattended = unattended_map()
+    rows = [f"# policy.json v{policy.get('version')} - every verdict it can produce.",
+            "# Regenerate with scripts/test/policy-sweep --update; a diff is a policy change.",
+            ""]
+
+    for repo in sorted(policy.get("repos", {})):
+        entry = policy["repos"][repo]
+        branches = [entry["branches"]["integration"]] + list(entry["branches"].get("release") or [])
+        for base in branches + [UNROLED_BRANCH]:
+            rows.append(f"merge {repo:<26} {base:<20} -> {lane(repo, base):<18} "
+                        f"unattended={unattended.get((repo, base), 'no')}")
+    for base in ("main", "dev"):
+        rows.append(f"merge {UNDECLARED_REPO:<26} {base:<20} -> {lane(UNDECLARED_REPO, base):<18} "
+                    f"unattended=no")
+    rows.append("")
+
+    # The guardrail matcher, probed rule by rule. A rule that stops matching is
+    # how a gate silently opens.
+    for repo in sorted((policy.get("carveOut") or {}).get("repos") or {}):
+        for rule in policy["carveOut"]["repos"][repo]:
+            hit, miss = probes_for(rule)
+            out_hit, _ = resolver("carve-out", repo, "--path", hit)
+            out_miss, _ = resolver("carve-out", repo, "--path", miss)
+            rows.append(f"carve-out {repo:<22} {rule:<32} "
+                        f"{hit} -> {'GUARDED' if out_hit else 'open'}; "
+                        f"{miss} -> {'GUARDED' if out_miss else 'open'}")
+    out_none, _ = resolver("carve-out", UNDECLARED_REPO, "--path", "scripts/policy.json")
+    rows.append(f"carve-out {UNDECLARED_REPO:<22} {'(no list)':<32} "
+                f"scripts/policy.json -> {'GUARDED' if out_none else 'open'}")
+    return "\n".join(rows) + "\n"
+
+
+def main():
+    args = sys.argv[1:]
+    table = sweep()
+
+    if "--print" in args:
+        print(table, end="")
+        return 0
+    if "--update" in args:
+        with open(BASELINE, "w") as fh:
+            fh.write(table)
+        print(f"policy-sweep: baseline re-recorded ({len(table.splitlines())} lines). "
+              f"Put the diff in the PR - a verdict change is a policy change.")
+        return 0
+
+    if not os.path.exists(BASELINE):
+        print("policy-sweep: no baseline recorded - run with --update", file=sys.stderr)
+        return 1
+    with open(BASELINE) as fh:
+        recorded = fh.read()
+    if recorded == table:
+        print(f"policy-sweep: {len([l for l in table.splitlines() if l and not l.startswith('#')])} "
+              f"verdicts, all identical to the baseline")
+        return 0
+
+    import difflib
+    print("policy-sweep: VERDICTS CHANGED against the baseline\n", file=sys.stderr)
+    sys.stderr.writelines(difflib.unified_diff(
+        recorded.splitlines(True), table.splitlines(True),
+        fromfile="policy-sweep.baseline", tofile="now"))
+    print("\npolicy-sweep: if this change is intended and approved, re-record with --update.",
+          file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

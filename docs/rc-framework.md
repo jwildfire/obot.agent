@@ -57,12 +57,14 @@ issues "appear".
 | Body | short: what changed, why, evidence link | the full five sections below |
 | Demo | not required | **required** |
 
-Increment PRs are working paper. Keep them small, land them, move on. Do not
-mark them ready for review, do not request review, do not ping. If an increment
-cannot merge unattended — it touches a carve-out path in
-[`scripts/policy.json`](../scripts/policy.json), or its repo is `protected` —
-it is a *blocker*, and blockers go to a decision artifact (below), not to his
-review queue.
+Increment PRs are working paper. Keep them small, land them, move on. **Open
+them non-draft** — `obot-merge` refuses drafts, and a draft on GitHub means
+"unfinished", which an increment is not — and keep him out of the queue the way
+that actually works: never assign him, never request his review, never ping. If
+an increment cannot merge — it touches a guardrail path in
+[`scripts/policy.json`](../scripts/policy.json)'s carve-out, or its repo is
+`protected` — it is a *blocker*, and blockers go to a decision artifact (below),
+not to his review queue.
 
 ## What an RC PR must carry
 

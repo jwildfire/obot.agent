@@ -46,7 +46,10 @@ that `--auto` selection reads first:
   @jwildfire's approval, as everywhere).
 - The registry sits inside the policy-file carve-out (with
   [`scripts/policy.json`](../scripts/policy.json)): **PRs touching `goals/`
-  always wait for @jwildfire**, even at autonomy level A1.
+  always wait for @jwildfire**, even at autonomy level A1. Since 2026-08-15
+  `obot-merge` enforces that itself — it reads the PR's changed files and
+  refuses without his sign-off flag, rather than trusting a session to have
+  read this line.
 - **Autonomous sessions never edit goal issues** — not the body, not the
   sub-issue links. Membership changes are proposed as comments on the goal
   issue for @jwildfire to apply (the weekly goal review, hub #87, formalizes

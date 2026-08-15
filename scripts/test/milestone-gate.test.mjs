@@ -1,71 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.join(HERE, '..', 'obot-merge');
+import { pr, runMerge } from './gh-stub.mjs';
 
 /**
- * obot-merge reaches GitHub through exactly two `gh` calls before it decides:
- * `gh pr view` for the PR, and `gh issue view` per closing reference. Stubbing
- * `gh` on PATH lets the milestone gate be exercised over crafted PR bodies
- * without a network, a token, or a real PR to spoil.
+ * The milestone gate — @jwildfire, 2026-08-14, after a release shipped grouping
+ * nothing: "there should be a rule that no work is done on an issue until a
+ * milestone is assigned." These cases run the real obot-merge over crafted PR
+ * bodies against a stubbed `gh` (see gh-stub.mjs), always with --check, so the
+ * gate is exercised and nothing can be merged.
  */
-function stubGh() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'obot-merge-gate-'));
-  const bin = path.join(dir, 'bin');
-  fs.mkdirSync(bin);
-  fs.writeFileSync(
-    path.join(bin, 'gh'),
-    [
-      '#!/usr/bin/env bash',
-      'if [ "$1" = "pr" ] && [ "$2" = "view" ]; then printf \'%s\' "$FAKE_PR_JSON"; exit 0; fi',
-      'if [ "$1" = "issue" ] && [ "$2" = "view" ]; then',
-      '  n="$3"',
-      '  case ",$FAKE_MILESTONED," in *",$n,"*) echo "v1.6.0"; exit 0;; esac',
-      '  case ",$FAKE_UNREADABLE," in *",$n,"*) exit 1;; esac',
-      '  echo "NONE"; exit 0',
-      'fi',
-      'exit 1',
-    ].join('\n'),
-    { mode: 0o755 },
-  );
-  return bin;
-}
 
-const BIN = stubGh();
-
-function pr({ base = 'dev', body = '', milestone = null } = {}) {
-  return JSON.stringify({
-    baseRefName: base,
-    isDraft: false,
-    state: 'OPEN',
-    mergeable: 'MERGEABLE',
-    headRefOid: 'abc1234',
-    url: 'https://example.invalid/pr/1',
-    title: 'test PR',
-    body,
-    milestone,
-  });
-}
-
-/** Always --check: the gate must be evaluated, nothing may ever be merged. */
+/** Always --check, and always with a file list, so only the milestone gate can refuse. */
 function check({ prJson, milestoned = '', unreadable = '', args = [] }) {
-  const r = spawnSync(SCRIPT, ['1', '-R', 'jwildfire/safety.viz', '--check', ...args], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PATH: `${BIN}:${process.env.PATH}`,
-      FAKE_PR_JSON: prJson,
-      FAKE_MILESTONED: milestoned,
-      FAKE_UNREADABLE: unreadable,
-    },
+  return runMerge({
+    repo: 'jwildfire/safety.viz',
+    prJson,
+    files: ['R/chart.R'],
+    milestoned,
+    unreadable,
+    args: ['--check', ...args],
   });
-  return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
 test('refuses a merge whose closing target carries no milestone', () => {

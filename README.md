@@ -98,9 +98,27 @@ scripts/obot-policy validate                       # structural + policy consist
 scripts/obot-policy add jwildfire/new-repo         # scaffold at 'protected'
 ```
 
-`policy.json` sits inside its own carve-out: PRs touching it never merge unattended, and
-never merge at all without @jwildfire's sign-off. It replaced the `merge-policy.json` +
-`autonomy-grants.json` pair, which had to be edited separately per repo and had drifted.
+`policy.json` sits inside its own **carve-out**, and since 2026-08-15 that is mechanical
+rather than prose. The guardrail files — the policy file, `obot-merge`, `obot-policy`,
+`goals/`, `hooks/` — are listed per repo under `carveOut.repos`, and a PR touching any of
+them is forced onto the attested lane whatever its profile says: it merges **only** with
+`--jeremy-approved '<where/when he said so>'`, on every lane, attended or not
+([his decision](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-14-hub140-one-question/),
+2026-08-15). A repo's class does not enter into it: obot.agent is operational and
+self-merges everything else on the standard lane; these files still stop. `obot-policy
+explain <repo>` prints the list, `obot-policy carve-out <repo> --path <p>` tests one path,
+and `scripts/test/policy-sweep` checks every verdict the file can produce against a
+recorded baseline (run in CI).
+
+Two things follow from the same decision. The tool checks that the policy file it just
+read matches the `authority` ref declared inside it — otherwise a session working in a
+worktree would resolve the lane from the rules its own branch is proposing to change —
+and forces attestation on any mismatch. And `--check` reports **policy** and
+**mergeability** as two separate verdicts, so "policy permits merging" is never heard as
+"this will merge".
+
+`policy.json` replaced the `merge-policy.json` + `autonomy-grants.json` pair, which had to
+be edited separately per repo and had drifted.
 
 ## Agent identity
 
