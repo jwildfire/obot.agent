@@ -18,6 +18,9 @@ import { execFile } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 import { readCache, writeCache } from './store.mjs';
+import { parseIQ, iqComplete } from './iq.mjs';
+import { fingerprint, applyTriage } from './triage.mjs';
+import { rankQueue } from './rank.mjs';
 
 /**
  * Open decisions, read from the hub clone's own collector.
@@ -45,6 +48,9 @@ export async function collectDecisions(hub) {
         artifact: a.slug,
         questions: a.questions ?? [],
         url: a.discussion?.url ?? null,
+        // What a snooze watches: a decision that gets reworded or restated comes
+        // back rather than staying asleep under an answer he has not seen.
+        fingerprint: fingerprint({ kind: 'decision', key: a.slug, title: a.title, body: a.statusPlain ?? '', date: a.date }),
       })),
     };
   } catch (e) {
@@ -77,10 +83,17 @@ export function nextConfigId(md = '') {
 /**
  * Config items, from the workspace-local file and nowhere else.
  *
- * The file is a flat markdown list under `## Open`; this reads the headline and the id
- * of each item and never the body, because the body is the part that describes exactly
- * which control stopped an agent. Even on a local page there is no reason to render
- * more than the line he needs to act on.
+ * Since 2026-08-16 (obot.agent#122) this reads the **whole entry**, not just the
+ * headline. The old version deliberately stopped at the first bold run and set
+ * `detail: ''` — and that is the largest reason he called these items useless:
+ * the entries already carried a paste-ready command, and the page threw it away,
+ * leaving one line of prose and no way to reach the instruction underneath it.
+ *
+ * The body is still kept off the row itself. It goes on the item as a parsed
+ * installation qualification (`iq`), which the page shows only when he opens
+ * that item. The containment rule is unchanged and unaffected: this page is
+ * served on loopback from his own machine, the store carries the sentinel the
+ * hub deploy greps for, and nothing here is ever published or committed.
  */
 export function collectConfig(workspace) {
   const file = configFile(workspace);
@@ -91,30 +104,34 @@ export function collectConfig(workspace) {
   const start = lines.findIndex((l) => /^##\s+.*\bopen\b/i.test(l));
   if (start === -1) return { items: [], error: 'config file has no "## Open" section' };
 
-  // The list's own schema is `- [ ] filed DATE · verified DATE — **the headline** — …`,
-  // and an entry wraps across several lines. So an item is gathered up to the next
-  // bullet or heading, and the headline is the first bold run in it — reading only
-  // the first line gives you the dates, which is not a thing anyone can act on.
+  // An entry runs from its bullet to the next bullet or heading, and its own
+  // lines are load-bearing: an indented line inside a field is the literal thing
+  // he pastes. So the raw text is handed to the IQ parser intact rather than
+  // being flattened into one string, which is what the previous pass did.
   const items = [];
   let buf = null;
   const flush = () => {
     if (!buf) return;
-    const done = /^-\s+\[[xX]\]/.test(buf);
-    const headline = buf.match(/\*\*(.+?)\*\*/s)?.[1]
-      ?? buf.replace(/^-\s+\[.\]\s*/, '').split(/\s+—\s+/)[1];
-    if (!done && headline) {
+    const entry = buf.join('\n');
+    const iq = parseIQ(entry);
+    if (!iq.done && iq.title) {
       // The id is read from the entry, never assigned here: it is claimed once at
       // capture time (tools/blocker-log) and lives in the file so it survives the
       // item being reworded. A pre-id entry still renders — with a positional key,
       // so it stays selectable until it is backfilled.
-      const id = buf.match(/^-\s+\[.\]\s*(c\d{4})\b/i)?.[1]?.toLowerCase() ?? null;
+      const key = iq.id ?? `config-${items.length + 1}`;
       items.push({
         kind: 'config',
-        id,
-        key: id ?? `config-${items.length + 1}`,
-        title: headline.replace(/[*`]/g, '').replace(/\s+/g, ' ').trim(),
+        id: iq.id,
+        key,
+        title: iq.title,
         detail: '',
-        date: buf.match(/filed\s+(\d{4}-\d{2}-\d{2})/)?.[1] ?? null,
+        date: iq.filed,
+        verified: iq.verified,
+        iq,
+        blocks: iq.blocks,
+        complete: iqComplete(iq),
+        fingerprint: fingerprint({ kind: 'config', key, title: iq.title, body: iq.body }),
       });
     }
     buf = null;
@@ -123,8 +140,8 @@ export function collectConfig(workspace) {
   for (let i = start + 1; i < lines.length; i++) {
     const l = lines[i];
     if (/^##\s/.test(l)) break;
-    if (/^-\s/.test(l) || /^###\s/.test(l)) { flush(); buf = l.replace(/^###\s+/, '- [ ] — '); }
-    else if (buf !== null) buf += ` ${l.trim()}`;
+    if (/^-\s/.test(l) || /^###\s/.test(l)) { flush(); buf = [l.replace(/^###\s+/, '- [ ] — ')]; }
+    else if (buf !== null) buf.push(l);
   }
   flush();
   return { items };
@@ -225,6 +242,9 @@ export function refreshRCs(workspace, script) {
           detail: `${pr.repo} — ${pr.why ?? 'ready for your call'}`,
           url: pr.url,
           date: (pr.updated ?? pr.updatedAt ?? '').slice(0, 10) || null,
+          // A push to a snoozed pull request wakes it: the updated date is what
+          // changes when there is something new to look at.
+          fingerprint: fingerprint({ kind: 'rc', key: `${pr.repo}#${pr.number}`, title: pr.title, date: pr.updated ?? pr.updatedAt ?? '' }),
         });
       } catch { /* a non-JSON line is the human table; skip it */ }
     }
@@ -232,16 +252,29 @@ export function refreshRCs(workspace, script) {
   });
 }
 
-/** The whole queue, in the order he should see it. */
+/**
+ * The whole queue, in the order he should see it.
+ *
+ * Three passes, each owned by one module: collect (here), triage (what he has
+ * snoozed or cleared), rank (what is critical and what comes first). Keeping
+ * them separate is what lets the ordering rules change without the collectors
+ * learning anything about importance.
+ */
 export async function collectQueue(workspace, hub, opts = {}) {
   const decisions = await collectDecisions(hub);
   const config = collectConfig(workspace);
   const rcs = collectRCs(workspace, opts);
-  return {
-    decisions, config, rcs,
-    // His order, 2026-08-15: "RCs first. then decisions, then config items." Release
-    // candidates hold up a release someone is waiting on; a decision unblocks work
-    // already queued behind it; a config item is his keyboard and can wait for it.
-    items: [...rcs.items, ...decisions.items, ...config.items],
-  };
+
+  // His triage first: a dismissed row should not be ranked, counted, or pinned.
+  const t = applyTriage(workspace, [...rcs.items, ...decisions.items, ...config.items]);
+  const live = new Set(t.items.map((i) => i.key));
+  const only = (g) => ({ ...g, items: (g.items ?? []).filter((i) => live.has(i.key)) });
+
+  // His order, 2026-08-15: "RCs first. then decisions, then config items."
+  // Release candidates hold up a release someone is waiting on; a decision
+  // unblocks work already queued behind it; a config item is his keyboard and
+  // can wait for it. Above all three sits the critical pin — see rank.mjs for
+  // why that is cross-section and what it costs.
+  const ranked = rankQueue({ decisions: only(decisions), config: only(config), rcs: only(rcs) });
+  return { ...ranked, snoozed: t.snoozed, cleared: t.cleared };
 }

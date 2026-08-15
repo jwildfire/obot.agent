@@ -326,8 +326,12 @@ test('the capture tool claims the next id, and never an id the file has seen', (
   const log = new URL('../../blocker-log', import.meta.url).pathname;
   const file = (...a) => execFileSync(log, a, { env: { ...process.env, OBOT_WORKSPACE: ws }, encoding: 'utf8' });
 
-  file('first item', '--fix', 'type this', '--source', 'a session');
-  file('second item', '--fix', 'type that', '--source', 'a session');
+  // The IQ flags, not the retired `--fix` one-liner: since obot.agent#122 the
+  // capture tool refuses an entry with no expected result and no proof.
+  const iq = (n) => ['--do', `type ${n}`, '--expect', `${n} is there`,
+    '--verify', `test -f /tmp/${n} -> the file exists`, '--source', 'a session'];
+  file('first item', ...iq('one'));
+  file('second item', ...iq('two'));
   const md = fs.readFileSync(path.join(ws, '.claude', 'blockers.md'), 'utf8');
   assert.match(md, /- \[ \] c0001 · filed \d{4}-\d{2}-\d{2}/);
   assert.match(md, /- \[ \] c0002 · filed \d{4}-\d{2}-\d{2}/);
@@ -338,7 +342,7 @@ test('the capture tool claims the next id, and never an id the file has seen', (
 
   // A retired item still owns its number: the next claim clears it.
   fs.appendFileSync(path.join(ws, '.claude', 'blockers.md'), '\n## Resolved\n\n- [x] c0009 — **retired** — done.\n');
-  file('third item', '--fix', 'type the other', '--source', 'a session');
+  file('third item', ...iq('three'));
   assert.match(fs.readFileSync(path.join(ws, '.claude', 'blockers.md'), 'utf8'), /- \[ \] c0010 · filed/);
 });
 

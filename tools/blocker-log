@@ -1,56 +1,187 @@
 #!/usr/bin/env bash
-# blocker-log — capture one config item to the workspace-local list,
-# inserted under the `## Open` heading of $WS/.claude/blockers.md.
+# blocker-log - capture one config item to the workspace-local list as an
+# INSTALLATION QUALIFICATION, inserted under the `## Open` heading of
+# $WS/.claude/blockers.md.
 #
 # "Config" is what @jwildfire calls these on the Operations Dashboard
-# (2026-08-15: "let's call 'your hands' -> 'config' and give them IDs.
-# c0001, etc."). Same list, same test, same file — the vocabulary he reads
-# changed, the capture lane did not. Every entry is stamped with a permanent
-# id (c0001, c0002, …) allocated here, once, at capture time: it lives in the
-# file so it survives the item being reworded, and it is derived from the
-# highest id already in the file — including retired ones — so a number is
-# never reused. Mirrors the hub's decision ids (D0001), deliberately.
+# (2026-08-15). Same list, same test, same file. What changed on 2026-08-16
+# (obot.agent#122) is the shape of an entry: he read the old ones and called
+# them "pretty useless" - they said what to run and never what he should see
+# when it worked, offered nothing to run afterwards that proved it, and left no
+# pass/fail behind. "They need to be an installation qualification" is his term
+# and it is the specification, not a metaphor.
 #
-#   blocker-log '<what>' --fix '<paste-ready command or diff>' --source '<url or provenance>' [--unblocks '<what it unblocks>']
-#   blocker-log 'workspace allowlist line for blocker-log' \
-#     --fix 'add "Bash(bash .../tools/blocker-log *)" to permissions.allow' \
-#     --source 'obot.agent#NN' --unblocks 'ten-second capture from every session'
+# So an entry is a protocol:
+#   --do        the exact command, or the exact click-path when there is none
+#   --expect    what he should see when it worked
+#   --verify    a command that PROVES it, and what its output should say:
+#               'grep -c foo /path/file -> prints 1 or more'
+#               (use 'manual - <what to look at>' when nothing can be scripted)
+#   --unblocks  what it buys, in his terms
+#   --source    where the item came from (url or provenance)
+#   --blocks    filed work stuck behind it: 'owner/repo#12' (repeatable)
+#   --why       the mechanism, optional and LAST - an item that opens with the
+#               mechanism is written agent-to-agent, and he triages by skimming
 #
-# The scope test (BL1, decision artifact 2026-08-15-blockers-list — approved
-# 2026-08-15): an item belongs on the list only if the fix is fully specified
-# and the sole missing ingredient is @jwildfire's physical access — his
-# keyboard, his account, his device. The counter-test: if a one-word "yes"
-# from him would let an agent do it, it is an approval ask or a decision, NOT
-# a blocker — route it to the decisions lane or the session todo instead.
+# The three required flags are --do, --expect and --verify. This is enforced
+# HERE, at capture, and not patched up in the renderer: a tool that accepts a
+# free-text one-liner gets fed free-text one-liners forever.
+#
+# THE VERIFY CONTRACT: the command must exit 0 exactly when the item is done.
+# `grep -c`, `test -f` and a `gh api` read all do this naturally. The dashboard
+# runs read-only verifies for him on a click and records a real pass/fail.
+#
+# CRITICAL IS EARNED, NEVER CLAIMED. There is no --critical flag. An item earns
+# the tag only when --blocks names work that GitHub confirms is open; this
+# script asks, and writes '(verified open <date>)' only on a real answer. No gh,
+# a closed reference, or a missing one - no stamp, and the item is ordinary.
+#
+#   blocker-log '<what>' --do '<exact action>' --expect '<what he sees>' \
+#     --verify '<command> -> <expected output>' --source '<url>' \
+#     [--unblocks '<what it buys>'] [--blocks owner/repo#12] [--why '<mechanism>']
+#
+#   blocker-log --retire c0007 --reason 'folded into c0001'
+#
+# Every entry carries a permanent id (c0001, c0002, ...) allocated here, once,
+# derived from the highest id already in the file - including retired ones - so
+# a number is never reused. Mirrors the hub's decision ids (D0001).
+#
+# The scope test (BL1, approved 2026-08-15): an item belongs on the list only if
+# the fix is fully specified and the sole missing ingredient is @jwildfire's
+# physical access - his keyboard, his account, his device. If a one-word "yes"
+# would let an agent do it, it is an approval ask or a decision, NOT a blocker.
 #
 # Semantics mirror tools/scratchpad-log: shelled dates (never modeled),
-# heading-anchored insert, one entry per call, never rewrite the file
-# wholesale — it is shared by every session, sibling, and ultracode job.
-# Lifecycle: resolved entries MOVE to `## Resolved` with a date, never
-# delete. The list is LOCAL-ONLY: it must never be committed to any repo or
-# published to any site (the hub deploy carries a sentinel guard).
+# heading-anchored insert, one entry per call, never rewrite the file wholesale.
+# Lifecycle: resolved entries MOVE to `## Resolved` with a date, never delete.
+# The list is LOCAL-ONLY: never committed to any repo, never published (the hub
+# deploy carries a sentinel guard).
 set -u
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
 FILE="$WS/.claude/blockers.md"
+
 WHAT="${1:-}"; [ -z "$WHAT" ] && usage 1
 case "$WHAT" in -h|--help) usage 0;; esac
+
+# ---- retire lane: the one writer allowed to move an entry out of ## Open ----
+if [ "$WHAT" = "--retire" ]; then
+  shift
+  RID="${1:-}"; [ -z "$RID" ] && { echo "blocker-log: --retire needs an id (c0007)" >&2; exit 1; }
+  shift
+  REASON=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --reason) REASON="${2:?--reason needs a value}"; shift 2;;
+      *) echo "blocker-log: unknown argument: $1" >&2; exit 1;;
+    esac
+  done
+  [ -z "$REASON" ] && { echo "blocker-log: --reason is required - a retirement with no reason is a deletion" >&2; exit 1; }
+  python3 - "$FILE" "$RID" "$REASON" "$(date +%F)" <<'PY'
+import sys, pathlib, re
+p = pathlib.Path(sys.argv[1]); rid, reason, today = sys.argv[2:5]
+lines = p.read_text().splitlines()
+try:
+    open_i = lines.index("## Open")
+except ValueError:
+    sys.exit("blocker-log: no ## Open section")
+start = next((i for i in range(open_i + 1, len(lines))
+              if re.match(rf"^-\s+\[.\]\s*{re.escape(rid)}\b", lines[i], re.I)), None)
+if start is None:
+    sys.exit(f"blocker-log: {rid} is not open in {p}")
+end = start + 1
+while end < len(lines) and not (lines[end].startswith("- ") or lines[end].startswith("## ")):
+    end += 1
+entry = lines[start:end]
+while entry and not entry[-1].strip():
+    entry.pop()
+del lines[start:end]
+# The list's convention: retire, never delete. The entry keeps its id and its
+# body; the checkbox closes and the reason is stamped on the headline.
+entry[0] = re.sub(r"^-\s+\[.\]", "- [x]", entry[0]) + f"  **RETIRED {today}: {reason}**"
+try:
+    res = lines.index(next(l for l in lines if l.startswith("## Resolved")))
+except StopIteration:
+    lines += ["", "## Resolved"]
+    res = len(lines) - 1
+j = res + 1
+while j < len(lines) and not lines[j].startswith("## "):
+    j += 1
+while j > res + 1 and not lines[j-1].strip():
+    j -= 1
+lines[j:j] = [""] + entry
+p.write_text("\n".join(lines) + "\n")
+print(f"blocker-log: retired {rid} to ## Resolved - {reason}")
+PY
+  exit $?
+fi
+
 shift
-FIX=""; SOURCE=""; UNBLOCKS=""
+DO=""; EXPECT=""; VERIFY=""; SOURCE=""; UNBLOCKS=""; WHY=""; BLOCKS=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --fix)      FIX="${2:?--fix needs a value}"; shift 2;;
+    --do)       DO="${2:?--do needs a value}"; shift 2;;
+    --expect)   EXPECT="${2:?--expect needs a value}"; shift 2;;
+    --verify)   VERIFY="${2:?--verify needs a value}"; shift 2;;
     --source)   SOURCE="${2:?--source needs a value}"; shift 2;;
     --unblocks) UNBLOCKS="${2:?--unblocks needs a value}"; shift 2;;
+    --why)      WHY="${2:?--why needs a value}"; shift 2;;
+    --blocks)   BLOCKS="${BLOCKS}${BLOCKS:+ }${2:?--blocks needs a value}"; shift 2;;
+    --fix)      echo "blocker-log: --fix is retired. An installation qualification needs --do (the exact action), --expect (what you should see) and --verify (a command that proves it). See --help." >&2; exit 1;;
+    --critical) echo "blocker-log: there is no --critical flag. The tag is earned, not claimed: pass --blocks owner/repo#12 naming the filed work stuck behind this, and it is marked only if GitHub confirms that work is open." >&2; exit 1;;
     *) echo "blocker-log: unknown argument: $1" >&2; usage 1;;
   esac
 done
-[ -z "$FIX" ] && { echo "blocker-log: --fix is required — a blocker without a paste-ready fix is a note, not a blocker" >&2; exit 1; }
+
+MISSING=""
+[ -z "$DO" ]     && MISSING="$MISSING --do"
+[ -z "$EXPECT" ] && MISSING="$MISSING --expect"
+[ -z "$VERIFY" ] && MISSING="$MISSING --verify"
+if [ -n "$MISSING" ]; then
+  echo "blocker-log: missing$MISSING." >&2
+  echo "  An entry on this list is an installation qualification, not a note: the exact" >&2
+  echo "  action, what he should see when it worked, and a command that proves it." >&2
+  echo "  Without all three he cannot tell success from silent failure. See --help." >&2
+  exit 1
+fi
 [ -z "$SOURCE" ] && { echo "blocker-log: --source is required (issue/PR/close-out URL or provenance note)" >&2; exit 1; }
+
+# The verify contract, checked as far as a shell can check it.
+case "$VERIFY" in
+  manual*|Manual*) ;;
+  *"->"*|*"→"*) ;;
+  *) echo "blocker-log: --verify needs the expected result after '->', e.g." >&2
+     echo "  --verify 'grep -c foo /path/file -> prints 1 or more'" >&2
+     echo "  A command with no stated expectation is not a verification. Use" >&2
+     echo "  'manual - <what to look at>' when nothing can be scripted." >&2
+     exit 1;;
+esac
+
+# --blocks: ask GitHub. The stamp is written only on a real, open answer, so a
+# reference that does not resolve earns exactly nothing.
+BLOCKS_FIELD=""
+if [ -n "$BLOCKS" ]; then
+  for ref in $BLOCKS; do
+    repo="${ref%%#*}"; num="${ref##*#}"
+    [ -z "$repo" ] && repo="jwildfire/obot.roadmap"
+    case "$repo" in */*) ;; *) repo="jwildfire/$repo";; esac
+    state=""
+    if command -v gh >/dev/null 2>&1; then
+      state="$(gh api "repos/$repo/issues/$num" --jq .state 2>/dev/null)"
+    fi
+    if [ "$state" = "open" ]; then
+      BLOCKS_FIELD="$BLOCKS_FIELD${BLOCKS_FIELD:+, }$ref (verified open $(date +%F))"
+    else
+      BLOCKS_FIELD="$BLOCKS_FIELD${BLOCKS_FIELD:+, }$ref (unverified${state:+, $state})"
+    fi
+  done
+fi
+
 TODAY="$(date +%F)"
-python3 - "$FILE" "$TODAY" "$WHAT" "$FIX" "$SOURCE" "$UNBLOCKS" <<'PY'
+python3 - "$FILE" "$TODAY" "$WHAT" "$DO" "$EXPECT" "$VERIFY" "$UNBLOCKS" "$SOURCE" "$BLOCKS_FIELD" "$WHY" <<'PY'
 import sys, pathlib, re
-p = pathlib.Path(sys.argv[1]); today, what, fix, source, unblocks = sys.argv[2:7]
+p = pathlib.Path(sys.argv[1])
+today, what, do, expect, verify, unblocks, source, blocks, why = sys.argv[2:11]
 # The local-only sentinel, composed from two halves so this script's own text
 # can never trip the hub deploy guard if it is ever rendered onto a page.
 sentinel = "LOCAL-ONLY: never publish" + ", never commit"
@@ -58,31 +189,47 @@ if not p.exists():
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
         f"<!-- {sentinel}. This file maps permission boundaries and missing\n"
-        f"     grants — a capability-gap disclosure if it ever reaches the public hub site. -->\n\n"
-        f"# Blockers — work only @jwildfire's hands can do\n\n"
+        f"     grants - a capability-gap disclosure if it ever reaches the public hub site. -->\n\n"
+        f"# Blockers - work only @jwildfire's hands can do\n\n"
         f"**The test (BL1):** an item belongs here only if the fix is fully specified and\n"
         f"the *only* missing ingredient is Jeremy's physical access. If a one-word \"yes\"\n"
         f"would let an agent do it, it is an approval ask or a decision, not a blocker.\n\n"
         f"## Open\n\n## Resolved\n\n## Near-misses\n")
 text = p.read_text()
-# Dedup: an existing entry mentioning the same headline is a re-file, not a new blocker.
+# Dedup: an existing entry mentioning the same headline is a re-file, not new.
 probe = what.strip().lower()[:60]
 if probe and probe in text.lower():
-    print(f"blocker-log: an entry matching '{probe}' already exists in {p} — not re-filing.\n"
+    print(f"blocker-log: an entry matching '{probe}' already exists in {p} - not re-filing.\n"
           f"If this is genuinely new, reword the headline; to re-verify an existing entry, "
           f"update its 'verified' date in place.", file=sys.stderr)
     sys.exit(2)
 # The permanent id: `c` + four digits, one higher than every id already in the
 # file. Retired entries keep their numbers, so scanning the whole file (not just
-# `## Open`) is what makes "never reused" true. Derived, never stored in a
-# counter — the same rule the hub's decision registry follows.
+# `## Open`) is what makes "never reused" true.
 nid = max([int(m.group(1)) for m in re.finditer(r"\bc(\d{4})\b", text, re.I)] + [0]) + 1
 cid = f"c{nid:04d}"
-entry = [f"- [ ] {cid} · filed {today} · verified {today} — **{what.strip()}**.",
-         f"  Fix: {fix.strip()}",
-         f"  Source: {source.strip()}"]
+
+def field(name, value):
+    """One IQ field. A value carrying newlines keeps them as indented code -
+    the literal thing he pastes, which reflowing into prose would break."""
+    head, *rest = value.strip().split("\n")
+    out = [f"  {name}: {head.strip()}"]
+    out += [f"      {r.strip()}" for r in rest if r.strip()]
+    return out
+
+entry = [f"- [ ] {cid} · filed {today} · verified {today} — **{what.strip()}**"]
+entry += field("Do", do)
+entry += field("Expect", expect)
+entry += field("Verify", verify.replace("->", "→"))
 if unblocks.strip():
-    entry.append(f"  Unblocks: {unblocks.strip()}")
+    entry += field("Unblocks", unblocks)
+entry += field("Source", source)
+if blocks.strip():
+    entry += field("Blocks", blocks)
+# Last, always: the mechanism is the part he does not need to read to act.
+if why.strip():
+    entry += field("Why", why)
+
 lines = text.splitlines()
 if "## Open" not in lines:
     lines += ["", "## Open"]

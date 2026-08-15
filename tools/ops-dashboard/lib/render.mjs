@@ -14,6 +14,9 @@
 //
 // One page, no build step, no dependencies: the markup below is served as-is and the
 // only script is the handful of lines that select a queue item and post an answer.
+import { wakeText, DISMISS_MEANS } from './triage.mjs';
+import { CRITICAL_BUDGET } from './rank.mjs';
+
 export const esc = (s = '') => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -56,11 +59,29 @@ const chip = (it) => {
 
 const item = (it) => {
   const c = chip(it);
-  return `<li class="q ${KIND[it.kind]?.tone ?? ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}>${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></li>`;
+  // The critical claim rides with the row rather than in a legend: he judges
+  // "is this really critical" by reading what it says is stuck behind it.
+  const claim = it.critical && it.criticalClaim
+    ? `<span class="q-claim">critical &middot; ${esc(it.criticalClaim)}</span>` : '';
+  return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${claim}</li>`;
 };
 
-const group = (title, items, empty) => `<h2 class="q-h">${esc(title)} <span class="q-n">${items.length}</span></h2>
+const group = (title, items, empty, moved = 0) => `<h2 class="q-h">${esc(title)} <span class="q-n">${items.length}</span>${
+  moved ? `<span class="q-moved">${moved} pinned above</span>` : ''}</h2>
 ${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="q-empty">${esc(empty)}</p>`}`;
+
+/**
+ * Snoozed and cleared rows: on the page, collapsed.
+ *
+ * Nothing he acts on may vanish. A snooze he cannot see is a silent delete, and
+ * a dismissal he cannot undo is the deletion the workspace rules forbid. Both
+ * live in a `<details>`, so a long list costs one line of vertical space on a
+ * phone until he opens it.
+ */
+const collapsed = (title, rows, describe) => (rows.length ? `<details class="q-fold">
+<summary>${esc(title)} <span class="q-n">${rows.length}</span></summary>
+<ul class="q-list">${rows.map((it) => `<li class="q ${KIND[it.kind]?.tone ?? ''} q-off" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"><span class="q-line"><span class="q-title">${esc(it.title)}</span></span><span class="q-claim">${esc(describe(it))} &middot; <button class="q-restore" data-key="${esc(it.key)}" data-kind="${esc(it.kind)}">restore</button></span></li>`).join('')}</ul>
+</details>` : '');
 
 // Palette, header and tab strip — shared by both tabs so the header is genuinely
 // persistent: the same markup and the same styles whichever view is on screen.
@@ -68,7 +89,7 @@ const SHELL_CSS = `
   :root {
     --paper:#F4F1EC; --card:#FDFCFA; --ink:#26211B; --muted:#6F6558; --faint:#9C917F;
     --line:#E2DACC; --accent:#B4470E; --accent-soft:#F4E2D2; --good:#2F6B4F; --good-soft:#E2EFE7;
-    --warn:#8A5A00; --warn-soft:#F6ECD8;
+    --warn:#8A5A00; --warn-soft:#F6ECD8; --crit:#A8201A;
     --sans:"Instrument Sans","Avenir Next","Segoe UI",system-ui,sans-serif;
     --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
     --header:40px;
@@ -76,7 +97,7 @@ const SHELL_CSS = `
   @media (prefers-color-scheme: dark) { :root {
     --paper:#1A1611; --card:#232019; --ink:#EAE4D8; --muted:#A69B89; --faint:#7E7462;
     --line:#383126; --accent:#E8843C; --accent-soft:#3C2A18; --good:#7FBF9B; --good-soft:#1E2E25;
-    --warn:#D9A441; --warn-soft:#33280F;
+    --warn:#D9A441; --warn-soft:#33280F; --crit:#F0736B;
   } }
   * { box-sizing:border-box; }
   html, body { height:100%; }
@@ -141,6 +162,56 @@ const DASHBOARD_CSS = `
   .q-id { color:var(--faint); font-size:0.68rem; flex:none; }
   .q-title { font-size:0.82rem; }
   .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; }
+  .q-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
+  .q-moved { font-size:0.62rem; color:var(--faint); text-transform:none; letter-spacing:0; }
+
+  /* Critical: a red edge and the claim under the title. Only ever three rows,
+     so the second line costs at most three lines of the phone's budget. */
+  .q { flex-direction:column; align-items:stretch; gap:0; }
+  .q.crit { border-left-color:var(--crit); }
+  .q-claim { font-size:0.66rem; color:var(--muted); font-family:var(--mono); }
+  .q.crit .q-claim { color:var(--crit); }
+  .q-fold { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.4rem; }
+  .q-fold summary { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase;
+                    color:var(--faint); cursor:pointer; }
+  .q-off .q-title { color:var(--muted); }
+  .q-restore { font-size:0.66rem; padding:0 0.25rem; border:1px solid var(--line); border-radius:5px;
+               background:var(--paper); color:var(--accent); cursor:pointer; font-family:var(--mono); }
+  .overbudget { font-size:0.7rem; color:var(--warn); border:1px solid var(--warn); border-radius:6px;
+                padding:0.2rem 0.4rem; margin:0 0 0.5rem; }
+
+  /* The installation qualification, in the main pane. */
+  .iq { padding:0.9rem 1rem; overflow-y:auto; max-width:60rem; }
+  .iq h2 { font-size:1rem; margin:0 0 0.1rem; }
+  .iq .iq-meta { font-size:0.7rem; color:var(--faint); font-family:var(--mono); margin:0 0 0.8rem; }
+  .iq-f { margin:0 0 0.7rem; }
+  .iq-f > .lab { font-size:0.62rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
+                 display:block; margin-bottom:0.1rem; }
+  .iq-f p { margin:0; font-size:0.86rem; }
+  .iq-f pre { margin:0.3rem 0 0; padding:0.45rem 0.55rem; background:var(--paper); border:1px solid var(--line);
+              border-radius:7px; font-family:var(--mono); font-size:0.74rem; overflow-x:auto; white-space:pre; }
+  .iq-f .copy { font-size:0.66rem; padding:0.1rem 0.4rem; border:1px solid var(--line); border-radius:5px;
+                background:var(--card); color:var(--accent); cursor:pointer; margin-left:0.35rem; }
+  .iq-check { display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap; margin-top:0.35rem; }
+  .iq-check button { font-size:0.76rem; padding:0.25rem 0.6rem; border-radius:7px; border:1px solid var(--accent);
+                     background:var(--accent-soft); color:var(--accent); cursor:pointer; }
+  .iq-check button[disabled] { opacity:0.5; cursor:not-allowed; border-color:var(--line); color:var(--muted);
+                               background:var(--paper); }
+  .iq-res { font-size:0.76rem; font-family:var(--mono); }
+  .iq-res.pass { color:var(--good); }
+  .iq-res.fail { color:var(--crit); }
+  .iq-res.refused { color:var(--warn); }
+  .iq-warn { font-size:0.72rem; color:var(--warn); margin:0.5rem 0 0; }
+
+  /* Triage: one bar, in the sidebar, for whatever is selected. */
+  .triage { border-top:1px solid var(--line); margin-top:0.7rem; padding-top:0.5rem; }
+  .triage .row { display:flex; gap:0.25rem; flex-wrap:wrap; }
+  .triage button { flex:1 1 auto; font-size:0.72rem; padding:0.25rem 0.3rem; border-radius:7px;
+                   border:1px solid var(--line); background:var(--paper); color:var(--ink); cursor:pointer; }
+  .triage button[disabled] { opacity:0.4; cursor:not-allowed; }
+  .triage .means { font-size:0.68rem; color:var(--muted); margin:0.3rem 0 0; }
+  .snooze-menu { display:flex; gap:0.25rem; flex-wrap:wrap; margin-top:0.25rem; }
+  .snooze-menu button { font-size:0.68rem; }
 
   .side h2 { font-size:0.85rem; margin:0 0 0.15rem; }
   .side .hint { font-size:0.74rem; color:var(--muted); margin:0 0 0.6rem; }
@@ -349,12 +420,33 @@ const answersPanel = (answers, deliverer, now) => {
 };
 
 export function render({ queue, answers = [], deliverer = null, workspace, hub, generated = new Date() }) {
+  const critical = queue.critical ?? [];
+  const snoozed = queue.snoozed ?? [];
+  const cleared = queue.cleared ?? [];
+  // The header pills count what is actually waiting on him, pinned rows
+  // included — the critical section moves rows between sections, and a count
+  // that moved with them would make the queue look shorter than it is.
   const counts = {
-    rc: queue.rcs.items.length,
-    config: queue.config.items.length,
-    decision: queue.decisions.items.length,
+    rc: queue.rcs.items.length + critical.filter((i) => i.kind === 'rc').length,
+    config: queue.config.items.length + critical.filter((i) => i.kind === 'config').length,
+    decision: queue.decisions.items.length + critical.filter((i) => i.kind === 'decision').length,
   };
   const total = counts.rc + counts.config + counts.decision;
+
+  // Everything the page needs to show an item without another round trip: the
+  // installation qualification for config rows, and how a check may be run.
+  const iqs = Object.fromEntries([...critical, ...queue.config.items]
+    .filter((it) => it.kind === 'config' && it.iq)
+    .map((it) => [it.key, {
+      id: it.id, title: it.title, filed: it.date, verified: it.verified,
+      complete: it.complete ?? null,
+      claim: it.criticalClaim ?? null,
+      fields: ['do', 'expect', 'verify', 'unblocks', 'blocks', 'source', 'why']
+        .map((f) => (it.iq[f] ? { name: f, text: it.iq[f].text, code: it.iq[f].code ?? [] } : null))
+        .filter(Boolean),
+      verify: { command: it.iq.verify?.command ?? null, expect: it.iq.verify?.expect ?? null, manual: Boolean(it.iq.verify?.manual) },
+      check: it.check ?? null,
+    }]));
 
   return `<!doctype html>
 <html lang="en">
@@ -383,16 +475,20 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
 
   <nav class="rail" aria-label="Your queue">
     ${total === 0 ? '<p class="q-empty">Nothing is waiting on you.</p>' : ''}
-    ${group('Release candidates', queue.rcs.items, queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.')}
-    ${group('Decisions', queue.decisions.items, 'All answered.')}
-    ${group('Config', queue.config.items, 'Nothing needs your keyboard.')}
+    ${critical.length ? group('Critical', critical, '') : ''}
+    ${queue.overBudget ? `<p class="overbudget">${queue.overBudget} more item${queue.overBudget === 1 ? '' : 's'} claim${queue.overBudget === 1 ? 's' : ''} critical. The tag is capped at ${CRITICAL_BUDGET} so it keeps meaning something — the rest are at the top of their own sections.</p>` : ''}
+    ${group('Release candidates', queue.rcs.items, queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.', queue.rcs.moved)}
+    ${group('Decisions', queue.decisions.items, 'All answered.', queue.decisions.moved)}
+    ${group('Config', queue.config.items, 'Nothing needs your keyboard.', queue.config.moved)}
     ${queue.decisions.error ? `<p class="q-empty">Decisions unavailable: ${esc(queue.decisions.error)}</p>` : ''}
+    ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
+    ${collapsed('Cleared', cleared, (it) => (it.triage?.action === 'done' ? 'marked done' : 'dismissed'))}
   </nav>
 
   <main class="main" id="main">
     <div class="placeholder" id="placeholder">
       <h2>Your todo list, and where you answer it.</h2>
-      <p>Pick anything on the left: a <strong>decision</strong> opens here and you answer it in the sidebar, a <strong>release candidate</strong> opens on GitHub, a <strong>config</strong> item is a line only your keyboard can type — local, never published.</p>
+      <p>Pick anything on the left: a <strong>decision</strong> opens here and you answer it in the sidebar, a <strong>release candidate</strong> opens on GitHub, a <strong>config</strong> item opens as an installation qualification — the exact step, what you should see, and a check that proves it. Local, never published.</p>
     </div>
   </main>
 
@@ -413,19 +509,120 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
       <p class="note">Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.</p>
       <p class="ok" id="ok" hidden></p>
     </div>
+    <div class="triage" id="triage" hidden>
+      <div class="row">
+        <button id="tri-done" hidden>Done</button>
+        <button id="tri-snooze">Snooze</button>
+        <button id="tri-dismiss">Dismiss</button>
+      </div>
+      <div class="snooze-menu" id="snooze-menu" hidden>
+        <button data-snooze="1d">a day</button>
+        <button data-snooze="1w">a week</button>
+        <button data-snooze="change">until it changes</button>
+      </div>
+      <p class="means" id="tri-means"></p>
+    </div>
     ${answersPanel(answers, deliverer, generated)}
   </aside>
 
 </div>
 
 <script id="questions-data" type="application/json">${
-  JSON.stringify(Object.fromEntries(queue.decisions.items.map((d) => [d.artifact, d.questions ?? []])))
+  JSON.stringify(Object.fromEntries([...critical, ...queue.decisions.items]
+    .filter((d) => d.kind === 'decision').map((d) => [d.artifact, d.questions ?? []])))
     .replace(/</g, '\\u003c')
+}</script>
+<script id="iq-data" type="application/json">${
+  JSON.stringify(iqs).replace(/</g, '\\u003c')
+}</script>
+<script id="dismiss-data" type="application/json">${
+  JSON.stringify(DISMISS_MEANS).replace(/</g, '\\u003c')
 }</script>
 <script>
   const QUESTIONS = JSON.parse(document.getElementById('questions-data').textContent);
+  const IQ = JSON.parse(document.getElementById('iq-data').textContent);
+  const DISMISS = JSON.parse(document.getElementById('dismiss-data').textContent);
   const state = { item: null, verdict: null, perQuestion: {} };
   const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+
+  const LABEL = { do: 'Do', expect: 'Expect', verify: 'Verify', unblocks: 'Unblocks', blocks: 'Blocks', source: 'Source', why: 'Why' };
+
+  // The installation qualification, rendered where he can act on it: the exact
+  // step, what he should see, and a check that leaves a real pass/fail behind.
+  // Text and code are kept apart on purpose — the code is what he pastes, and a
+  // copy button beats selecting wrapped text on a phone.
+  function renderIQ(key) {
+    const iq = IQ[key];
+    $('placeholder').hidden = true;
+    document.querySelectorAll('#main iframe, #main .iq').forEach((n) => n.remove());
+    if (!iq) return;
+    const box = el('div', 'iq');
+    const h = el('h2', null, iq.title);
+    box.appendChild(h);
+    const meta = el('p', 'iq-meta', [iq.id, iq.filed ? 'filed ' + iq.filed : null, iq.verified ? 'verified ' + iq.verified : null].filter(Boolean).join(' · '));
+    box.appendChild(meta);
+    if (iq.claim) { const c = el('p', 'iq-res fail', 'critical · ' + iq.claim); box.appendChild(c); }
+
+    for (const f of iq.fields) {
+      const wrap = el('div', 'iq-f');
+      wrap.appendChild(el('span', 'lab', LABEL[f.name] || f.name));
+      if (f.text) wrap.appendChild(el('p', null, f.text));
+      if (f.code && f.code.length) {
+        const pre = el('pre', null, f.code.join('\n'));
+        wrap.appendChild(pre);
+        wrap.appendChild(copyBtn(f.code.join('\n')));
+      }
+      if (f.name === 'verify') wrap.appendChild(checkRow(key, iq));
+      box.appendChild(wrap);
+    }
+    if (iq.complete && iq.complete.ok === false) {
+      box.appendChild(el('p', 'iq-warn', 'This entry is missing ' + iq.complete.missing.join(' and ') + ' — it was filed before the list became an installation qualification.'));
+    }
+    $('main').appendChild(box);
+  }
+
+  function copyBtn(text) {
+    const b = el('button', 'copy', 'copy');
+    b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(text); b.textContent = 'copied'; }
+      catch { b.textContent = 'select it'; }
+      setTimeout(() => { b.textContent = 'copy'; }, 1500);
+    });
+    return b;
+  }
+
+  // Running the proof. A read-only command runs here on a click and the result
+  // is recorded; anything else is his to run, and says so rather than pretending
+  // the button is broken.
+  function checkRow(key, iq) {
+    const row = el('div', 'iq-check');
+    if (iq.verify.command) row.appendChild(copyBtn(iq.verify.command));
+    const btn = el('button', null, 'Check');
+    const out = el('span', 'iq-res');
+    if (iq.check) { out.textContent = iq.check.result + ' · ' + (iq.check.at || '').slice(11, 16); out.classList.add(iq.check.result); }
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; out.className = 'iq-res'; out.textContent = 'running…';
+      const r = await fetch('/check', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: key, id: iq.id, command: iq.verify.command, expect: iq.verify.expect }) });
+      const j = await r.json().catch(() => ({}));
+      btn.disabled = false;
+      out.classList.add(j.result || 'refused');
+      out.textContent = j.result === 'pass' ? 'PASS — ' + (j.stdout || 'exit 0')
+        : j.result === 'fail' ? 'FAIL — exit ' + j.exitCode + (j.stdout ? ' · ' + j.stdout : '')
+        : (j.why || 'could not run');
+      if (j.result === 'pass') $('tri-done').hidden = false;
+    });
+    if (iq.verify.manual || !iq.verify.command) {
+      btn.disabled = true;
+      row.appendChild(btn);
+      row.appendChild(el('span', 'iq-res refused', 'manual — nothing here can be scripted'));
+    } else {
+      row.appendChild(btn);
+      row.appendChild(out);
+    }
+    return row;
+  }
 
   function select(li) {
     document.querySelectorAll('.q').forEach((n) => n.setAttribute('aria-current', String(n === li)));
@@ -438,21 +635,66 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
     $('ok').hidden = true;
     $('side-title').textContent = li.querySelector('.q-title').textContent;
 
+    // Triage is available on every kind, because he asked to be able to clear
+    // or defer anything in the list — not only the config half of it.
+    state.item.fingerprint = li.dataset.fp || null;
+    $('triage').hidden = false;
+    $('snooze-menu').hidden = true;
+    $('tri-done').hidden = kind !== 'config';
+    $('tri-means').textContent = DISMISS[kind] || '';
+
     if (kind === 'decision') {
       $('placeholder').hidden = true;
+      document.querySelectorAll('#main .iq').forEach((n) => n.remove());
       let f = document.querySelector('#main iframe');
       if (!f) { f = document.createElement('iframe'); f.title = 'Decision artifact'; $('main').appendChild(f); }
       f.src = '/artifact/' + encodeURIComponent(li.dataset.artifact) + '/';
       $('answer').hidden = false;
       $('side-hint').textContent = 'Adopt all is one click. Otherwise pick a verdict and say why.';
+    } else if (kind === 'config') {
+      $('answer').hidden = true;
+      renderIQ(li.dataset.key);
+      $('side-hint').textContent = 'Only your keyboard can apply this one. Run the check when you have.';
     } else {
       $('answer').hidden = true;
-      if (kind === 'rc' && li.dataset.url) window.open(li.dataset.url, '_blank', 'noopener');
-      $('side-hint').textContent = kind === 'rc'
-        ? 'Opened on GitHub — release candidates are reviewed there.'
-        : 'Only your keyboard can apply this one. It is not published anywhere.';
+      document.querySelectorAll('#main .iq').forEach((n) => n.remove());
+      if (li.dataset.url) window.open(li.dataset.url, '_blank', 'noopener');
+      $('side-hint').textContent = 'Opened on GitHub — release candidates are reviewed there.';
     }
   }
+
+  // ---- triage -------------------------------------------------------------
+  // Every action posts to the local server and the row leaves the list. Nothing
+  // is deleted anywhere: the server appends to a ledger, and the row reappears
+  // under Snoozed or Cleared with a way back.
+  async function postTriage(body) {
+    const r = await fetch('/triage', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.ok) location.reload();
+    else { const j = await r.json().catch(() => ({})); $('tri-means').textContent = 'Could not record: ' + (j.error || r.status); }
+  }
+
+  $('tri-dismiss').addEventListener('click', () => {
+    if (state.item) postTriage({ ...state.item, action: 'dismiss' });
+  });
+  $('tri-done').addEventListener('click', () => {
+    if (state.item) postTriage({ ...state.item, action: 'done' });
+  });
+  $('tri-snooze').addEventListener('click', () => { $('snooze-menu').hidden = !$('snooze-menu').hidden; });
+  document.querySelectorAll('#snooze-menu button').forEach((b) => b.addEventListener('click', () => {
+    if (!state.item) return;
+    const pick = b.dataset.snooze;
+    const day = 86400000;
+    // Every snooze carries a change-watch as well as its date, so an item that
+    // moves under the snooze comes back on its own.
+    postTriage({
+      ...state.item, action: 'snooze', wakeOnChange: true,
+      until: pick === 'change' ? null : new Date(Date.now() + (pick === '1d' ? day : 7 * day)).toISOString(),
+    });
+  }));
+  document.querySelectorAll('.q-restore').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    postTriage({ key: b.dataset.key, kind: b.dataset.kind, action: 'restore' });
+  }));
 
   // The question text is the explanation; the id is only a handle. A row that
   // reads as a bare code has failed, so the sentence comes first and the code is

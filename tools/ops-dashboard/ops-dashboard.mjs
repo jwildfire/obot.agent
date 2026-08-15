@@ -44,6 +44,8 @@ import { render, sessionShell, navigatorShell, NOT_LISTENING } from './lib/rende
 import { parseNavigatorState } from './lib/navigator.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { ensureStore } from './lib/store.mjs';
+import { runVerify, readChecks } from './lib/iq.mjs';
+import { triage } from './lib/triage.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 7326;
@@ -145,8 +147,16 @@ async function page(args) {
   const queue = await collectQueue(args.workspace, args.hub, {
     agent: path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue'),
   });
+  // The last recorded pass/fail per item, so an installation qualification opens
+  // showing whether it has ever been proved rather than starting blank.
+  const checks = readChecks(args.workspace);
+  const withChecks = (g) => ({ ...g, items: (g.items ?? []).map((i) => (checks[i.id] ? { ...i, check: checks[i.id] } : i)) });
   return render({
-    queue,
+    queue: {
+      ...queue,
+      config: withChecks(queue.config),
+      critical: (queue.critical ?? []).map((i) => (checks[i.id] ? { ...i, check: checks[i.id] } : i)),
+    },
     answers: currentAnswers(args.workspace, { hub: args.hub }),
     deliverer: delivererState(args.workspace),
     workspace: args.workspace,
@@ -200,6 +210,33 @@ export function serve(args) {
           next: 'Recorded on this machine. The Navigator picks it up within five minutes, then an agent updates the artifact — nothing else for you to do.',
           warning: listening ? null : NOT_LISTENING,
         }));
+      }
+
+      // Delete and snooze, for anything in the list. The store is a ledger and
+      // this route only appends to it — no source file is ever edited from a
+      // click, so a dismissal stays recoverable and the config list keeps its
+      // own retire-with-strikethrough convention.
+      if (req.method === 'POST' && req.url.split('?')[0] === '/triage') {
+        const body = JSON.parse(await readBody(req));
+        try {
+          const rec = triage(args.workspace, body);
+          return send(200, 'application/json', JSON.stringify({ ok: true, at: rec.at }));
+        } catch (e) {
+          return send(400, 'application/json', JSON.stringify({ error: e.message }));
+        }
+      }
+
+      // Run one installation qualification's proof and record the result. The
+      // command is taken from the request, so it is re-checked against the
+      // read-only allowlist here rather than trusted because the page sent it —
+      // the page is the least trustworthy thing in this process.
+      if (req.method === 'POST' && req.url.split('?')[0] === '/check') {
+        const body = JSON.parse(await readBody(req));
+        if (!body.command) return send(400, 'application/json', JSON.stringify({ error: 'no command' }));
+        const rec = await runVerify(args.workspace, {
+          id: body.id ?? body.key, command: body.command, expect: body.expect ?? null,
+        });
+        return send(200, 'application/json', JSON.stringify(rec));
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, 'text/plain', 'method not allowed');
 
