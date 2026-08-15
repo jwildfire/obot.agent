@@ -175,3 +175,17 @@ test('renderState: no reading at all renders nothing rather than a false all-cle
   const md = renderState({ snapshot: {}, events: [], meta })
   assert.doesNotMatch(md, /config ledger/)
 })
+
+test('renderState: a note is kept under a clean verdict, not dropped', () => {
+  const md = renderState({
+    snapshot: {}, events: [], meta,
+    ledger: {
+      ok: true,
+      summary: 'ledger clean - 11 id(s) allocated, 11 present',
+      detail: ['note - blockers.md changed outside this tool since 01:17.'],
+    },
+  })
+  // The verdict is the headline; the note is what dates a gap if one turns up later.
+  assert.match(md, /config ledger: ledger clean - 11 id\(s\) allocated, 11 present/)
+  assert.match(md, /note - blockers\.md changed outside this tool/)
+})

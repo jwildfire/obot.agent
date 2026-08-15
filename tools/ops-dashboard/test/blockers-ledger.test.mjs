@@ -182,3 +182,26 @@ test('adoption records the holes the sequence already had, without calling them 
   assert.equal(run(ws, ['--audit']).status, 0);
   assert.doesNotMatch(run(ws, ['--audit']).stdout, /GAP/);
 });
+
+test('the verdict is the first line, even when there is a note to make', () => {
+  const ws = tmp();
+  file(ws, 'first item');
+  // Hand-editing the list is normal — he ticks things off — so this is the common
+  // case, not the exception. Callers summarise by first line; if the note led, the
+  // verdict would be displaced on almost every reading.
+  fs.appendFileSync(mdFile(ws), '\na line typed by hand\n');
+  const out = run(ws, ['--audit']).stdout.trim().split('\n');
+  assert.match(out[0], /ledger clean/);
+  assert.match(out.slice(1).join('\n'), /changed outside/);
+});
+
+test('a gap still leads, because it outranks any note', () => {
+  const ws = tmp();
+  file(ws, 'first item');
+  file(ws, 'second item');
+  const kept = read(mdFile(ws)).split('\n').filter((l) => !/^-\s+\[ \]\s*c0002\b/.test(l));
+  fs.writeFileSync(mdFile(ws), kept.join('\n') + '\na line typed by hand\n');
+  const r = run(ws, ['--audit']);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout.trim().split('\n')[0], /LEDGER GAP/);
+});

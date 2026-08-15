@@ -178,9 +178,10 @@ function auditLedger() {
   if (r.error || r.status === null) return null
   const out = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter(Boolean)
   const ok = r.status === 0
-  // Clean runs stay to one line; a gap brings its explanation with it, because the
-  // person reading this file will not go looking for the rest.
-  return { ok, summary: (out[0] || 'no reading').replace(/^blocker-log: /, ''), detail: ok ? [] : out.slice(1) }
+  // The tool prints its verdict first and its notes after, so the first line is the
+  // headline either way and everything below it is context worth keeping — a note
+  // that the file was edited outside the tool is what dates a gap when one appears.
+  return { ok, summary: (out[0] || 'no reading').replace(/^blocker-log: /, ''), detail: out.slice(1).map(l => l.replace(/^blocker-log: /, '')) }
 }
 
 function fetchRC(repo, pr) {

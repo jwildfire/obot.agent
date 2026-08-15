@@ -113,11 +113,15 @@ if not records:
           "  against. The next capture adopts the list and starts one." % p)
     sys.exit(0)
 a = audit(text, records)
-for line in report(a, p):
-    print(line)
+# The verdict LEADS, notes follow. Callers summarise by first line - the Navigator
+# puts it straight into navigator-state.md - and hand-editing this list is normal
+# (he ticks items off), so a note printed first would displace the verdict on
+# almost every sweep. A status line that stops showing status is not a status line.
 if not a["missing"]:
     print("blocker-log: ledger clean - %d id(s) allocated, %d present in %s"
           % (a["allocated"], a["present"], p))
+for line in report(a, p):
+    print(line)
 sys.exit(1 if a["missing"] else 0)
 PY
   exit $?
