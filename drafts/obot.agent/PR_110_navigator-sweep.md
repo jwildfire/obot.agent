@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-15 10:55 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/110 on 2026-08-15 10:58 EDT -->
 <!-- GITHUB_PROPERTIES: Labels: enhancement, Assignee: obotclaw[bot], Milestone: none-fits (v0.5.0 milestone not present in obot.agent; NEWS.md v0.5.0 (Upcoming) section carries the release grouping) -->
 
 ## Summary
