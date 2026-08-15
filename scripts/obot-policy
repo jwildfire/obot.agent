@@ -19,6 +19,13 @@ Subcommands
   matrix
       One row per repo × declared branch: profile, role, lane, autonomy.
 
+  carve-out <owner/repo> [--path P ...] [--stdin] [--json]
+      The guardrail files for a repo. With no paths, lists them. With paths
+      (flags, or one per line on stdin), prints the ones that are guarded —
+      empty output means nothing matched. Always exits 0 unless the arguments
+      are unusable, so a caller can test the output rather than the status.
+      This is what obot-merge asks before it decides a lane.
+
   validate
       Structural + policy consistency checks. Exit 1 on any error.
 
@@ -111,7 +118,10 @@ def resolve(policy, repo, base):
                 f"(declared: {', '.join(declared) or 'none'})",
                 {"profile": pname})
     lane = prof["merge"].get(role, "refused")
-    detail = {"profile": pname, "role": role}
+    # The class travels with the verdict because obot-merge needs it: a recorded
+    # decision can stand in for in-session approval on an operational repo's
+    # integration branch, and nowhere else.
+    detail = {"profile": pname, "role": role, "class": entry.get("class", "")}
     if lane == "refused":
         return ("refused",
                 f"role '{role}' is not a merge target under profile '{pname}' for {repo}",
@@ -124,6 +134,34 @@ def resolve(policy, repo, base):
     return ("standard",
             f"'{base}' is the {role} branch of {repo} under profile '{pname}'",
             detail)
+
+
+def carve_out_rules(policy, repo):
+    """The guardrail paths declared for a repo — empty list when it has none."""
+    repos = (policy.get("carveOut") or {}).get("repos") or {}
+    return list(repos.get(repo) or [])
+
+
+def carve_out_matches(policy, repo, changed_paths):
+    """Which of a PR's changed paths are guardrail files, in the order given.
+
+    A rule ending in '/' matches by prefix; anything else matches exactly. No
+    globs: a guardrail is the wrong place for a pattern dialect whose edge cases
+    have to be remembered under pressure. Comparison is case-sensitive, as git
+    is, and paths are repo-root-relative as GitHub returns them.
+    """
+    rules = carve_out_rules(policy, repo)
+    hits = []
+    for path in changed_paths:
+        path = path.strip()
+        if not path:
+            continue
+        for rule in rules:
+            if path.startswith(rule) if rule.endswith("/") else path == rule:
+                if path not in hits:
+                    hits.append(path)
+                break
+    return hits
 
 
 def declared_branches(entry):
@@ -195,6 +233,15 @@ def cmd_explain(args):
         else:
             print(f"  --auto: branch={a.get('branch')}  draftPR={a.get('draftPR')}  "
                   f"mergeStandard={a.get('mergeStandard')}  issues={a.get('issues')}")
+        # The guardrail list belongs in the answer. Before 2026-08-15 `explain`
+        # never mentioned it, so a session consulting the designated authority
+        # about obot.agent was told "standard lane" and nothing else — and could
+        # violate the carve-out in good faith. It has happened twice.
+        rules = carve_out_rules(policy, repo)
+        if rules:
+            print(f"  carve-out: {', '.join(rules)}")
+            print("  carve-out: a PR touching any of those merges ONLY with "
+                  "--jeremy-approved '<where/when>' — every lane, attended or not")
         for key, spec in (entry.get("custom") or {}).items():
             ca = spec.get("approved", {})
             print(f"  custom.{key} = {spec.get('value')!r}  "
@@ -217,11 +264,33 @@ def cmd_matrix(args):
             print(f"{repo:<28} {pname:<10} {cls:<12} {base:<18} {role:<12} {lane:<10} {unattended}")
 
 
+def cmd_carve_out(args):
+    policy = load()
+    rules = carve_out_rules(policy, args.repo)
+    paths = list(args.path or [])
+    if args.stdin:
+        paths += [line for line in sys.stdin.read().splitlines()]
+    if not paths:
+        if args.json:
+            print(json.dumps({"repo": args.repo, "rules": rules}))
+        else:
+            for rule in rules:
+                print(rule)
+        return
+    matched = carve_out_matches(policy, args.repo, paths)
+    if args.json:
+        print(json.dumps({"repo": args.repo, "rules": rules,
+                          "checked": len(paths), "matched": matched}))
+    else:
+        for path in matched:
+            print(path)
+
+
 def cmd_validate(args):
     policy = load()
     errors, warnings = [], []
 
-    for key in ("profiles", "repos", "defaultProfile", "roles", "invariants", "carveOut"):
+    for key in ("profiles", "repos", "defaultProfile", "roles", "invariants", "carveOut", "authority"):
         if key not in policy:
             errors.append(f"missing top-level key: {key}")
     if policy.get("defaultProfile") not in policy.get("profiles", {}):
@@ -279,8 +348,50 @@ def cmd_validate(args):
 
     if policy.get("autonomy", {}).get("releases", {}).get("publish"):
         errors.append("autonomy.releases.publish must stay false — publishing is always human-triggered")
-    if "scripts/policy.json" not in policy.get("carveOut", {}).get("paths", []):
-        errors.append("carveOut.paths must include scripts/policy.json — the guardrail must guard itself")
+
+    # ---- the carve-out, v3 -------------------------------------------------
+    # v2 kept a flat list whose governed repo was implied by a prose comment, so
+    # no tool could check it. v3 keys the list by repo, which is what makes the
+    # gate in obot-merge possible at all — so the shape is validated, not assumed.
+    carve = policy.get("carveOut") or {}
+    if "paths" in carve:
+        errors.append("carveOut.paths is the v2 shape — v3 keys the list by repo under "
+                      "carveOut.repos, so the governed repo is data rather than a comment")
+    crepos = carve.get("repos")
+    if not isinstance(crepos, dict) or not crepos:
+        errors.append("carveOut.repos must be a non-empty map of owner/repo -> [paths]")
+    else:
+        if "scripts/policy.json" not in (crepos.get("jwildfire/obot.agent") or []):
+            errors.append("carveOut.repos['jwildfire/obot.agent'] must include scripts/policy.json "
+                          "— the guardrail must guard itself")
+        for crepo, paths in crepos.items():
+            if crepo not in policy.get("repos", {}):
+                errors.append(f"carveOut.repos['{crepo}'] governs a repo that is not declared in 'repos'")
+            if not isinstance(paths, list) or not paths:
+                errors.append(f"carveOut.repos['{crepo}'] must be a non-empty list of paths")
+                continue
+            for path in paths:
+                if not isinstance(path, str) or not path:
+                    errors.append(f"carveOut.repos['{crepo}'] contains a non-string path")
+                elif path.startswith("/") or ".." in path.split("/"):
+                    errors.append(f"carveOut.repos['{crepo}'] path '{path}' must be repo-relative, "
+                                  f"with no leading '/' and no '..'")
+                elif "*" in path or "?" in path:
+                    errors.append(f"carveOut.repos['{crepo}'] path '{path}' looks like a glob — "
+                                  f"matching is prefix (trailing '/') or exact, nothing else")
+
+    # ---- the authority ref (Gate B) ----------------------------------------
+    auth = policy.get("authority") or {}
+    for key in ("repo", "ref", "path"):
+        if not auth.get(key):
+            errors.append(f"authority.{key} is required — without it obot-merge cannot tell whether "
+                          f"the policy file it just read is the one in force")
+    if auth.get("repo") and auth["repo"] not in policy.get("repos", {}):
+        errors.append(f"authority.repo '{auth['repo']}' is not a declared repo")
+    if auth.get("repo") and auth.get("path") and \
+            auth["path"] not in ((carve.get("repos") or {}).get(auth["repo"]) or []):
+        errors.append("the authority file must itself be a carve-out path — otherwise the copy "
+                      "the tool trusts can be rewritten on the standard lane")
 
     for w in warnings:
         print(f"WARN  {w}")
@@ -437,6 +548,14 @@ def main():
 
     m = sub.add_parser("matrix", help="one row per repo x branch")
     m.set_defaults(func=cmd_matrix)
+
+    c = sub.add_parser("carve-out", help="the guardrail paths for a repo, and which of a PR's touch them")
+    c.add_argument("repo")
+    c.add_argument("--path", action="append", metavar="PATH",
+                   help="a changed path to test against the list; repeatable")
+    c.add_argument("--stdin", action="store_true", help="read changed paths from stdin, one per line")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(func=cmd_carve_out)
 
     v = sub.add_parser("validate", help="structural + policy consistency checks")
     v.set_defaults(func=cmd_validate)

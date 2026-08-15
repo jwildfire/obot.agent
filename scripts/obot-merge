@@ -21,6 +21,42 @@
 #              as an audit comment on the PR before merging.
 #   refused  - any branch with no declared role, and any repo not in the file
 #
+# The carve-out gate (added 2026-08-15) can only make that stricter. A PR whose
+# changed files touch one of the repo's guardrail paths - the policy file, this
+# script, the resolver, the goal registry, the hooks - is forced onto the
+# attested lane whatever its profile says, so it merges only with Jeremy's
+# sign-off, attended or not. @jwildfire decided this on 2026-08-15 (decision
+# D0005.1/W1, "always require the flag"): the prose rule had existed since July
+# and was violated twice in sixteen days, both times in good faith, because
+# nothing mechanical ever read a PR's file list. A repo's class (operational or
+# clinical) does not enter into it - obot.agent is operational and self-merges
+# everything else on the standard lane; these particular files still stop.
+#
+# Gate B, same decision: obot-merge reads the policy file sitting next to
+# itself, so a session invoking it from a worktree whose branch edits that file
+# would resolve the lane from the rules it is proposing to change. The file
+# declares an 'authority' ref; the local copy's blob sha is compared against it
+# and any difference - or any failure to check - forces attested too.
+#
+# What "his sign-off" means depends on the repo, and that is his correction of
+# 2026-08-15, the same day: "oa#113 needs your sign-off line. this isnt an RC or
+# an artifact". He reviews exactly two things - release candidates and decision
+# artifacts - and a convention change in an operational repo is neither. So a
+# carve-out merge has two admissible forms of approval:
+#
+#   --jeremy-approved '<where/when he approved THIS merge>'
+#       Always valid. The only form accepted on a release-role branch, or in a
+#       repo classed 'clinical'.
+#   --decision '<the decision he already recorded, and what it decided>'
+#       Valid only for a carve-out merge into the INTEGRATION branch of an
+#       'operational' repo: work he has already ruled on, which he has said must
+#       not come back to him. The audit comment says so in those words, so the
+#       trail never claims he approved a merge he never saw.
+#
+# Neither is available to an unattended session. The gate's real target was
+# always the unattended run and the un-recorded change; it was never a request
+# for a second opinion on work he had already signed off.
+#
 # The milestone gate (added 2026-08-14) is a second, independent refusal: every
 # issue a PR closes must carry a milestone, and a release-role merge must name
 # the issues it ships. It is the mechanical backstop for @jwildfire's rule that
@@ -32,9 +68,13 @@
 # Usage:
 #   obot-merge <pr-number> -R <owner>/<repo> [--merge|--squash|--rebase]
 #              [--delete-branch] [--check] [--jeremy-approved '<note>']
-#              [--no-milestone '<reason>'] [--no-issues '<reason>']
+#              [--decision '<note>'] [--no-milestone '<reason>']
+#              [--no-issues '<reason>']
 #
-#   --check          dry run: evaluate policy and the milestone gate, merge nothing
+#   --check          dry run: evaluate policy and the milestone gate, and report
+#                    separately whether GitHub will actually merge it. Merges
+#                    nothing. Exit 0 whenever policy permits, even when GitHub
+#                    does not - the two verdicts are printed, never conflated.
 #   --no-milestone   override the milestone gate for this merge, with a reason
 #   --no-issues      release merge that legitimately closes no issue, with a reason
 #
@@ -49,12 +89,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POLICY_FILE="$SCRIPT_DIR/policy.json"
 RESOLVER="$SCRIPT_DIR/obot-policy"
 
-usage() { sed -n 's/^# \{0,1\}//p' "${BASH_SOURCE[0]}" | sed -n '3,41p' >&2; }
+# The header block above IS the usage text, so it cannot drift from the flags.
+usage() { sed -n '3,/^[^#]/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; }
 fail()  { printf 'obot-merge: %s\n' "$1" >&2; exit 1; }
 refuse(){ printf 'obot-merge: REFUSED - %s\n' "$1" >&2; exit 2; }
 
 PR="" REPO="" STRATEGY="--merge" DELETE_BRANCH="" CHECK="" APPROVAL_NOTE=""
-MILESTONE_OVERRIDE="" NO_ISSUES_NOTE=""
+MILESTONE_OVERRIDE="" NO_ISSUES_NOTE="" DECISION_NOTE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -R) REPO="${2:?-R needs owner/repo}"; shift 2 ;;
@@ -62,6 +103,7 @@ while [ $# -gt 0 ]; do
     --delete-branch) DELETE_BRANCH="--delete-branch"; shift ;;
     --check) CHECK=1; shift ;;
     --jeremy-approved) APPROVAL_NOTE="${2:?--jeremy-approved needs a note describing where/when Jeremy approved}"; shift 2 ;;
+    --decision) DECISION_NOTE="${2:?--decision needs the decision he already recorded and what it decided}"; shift 2 ;;
     --no-milestone) MILESTONE_OVERRIDE="${2:?--no-milestone needs a reason}"; shift 2 ;;
     --no-issues) NO_ISSUES_NOTE="${2:?--no-issues needs a reason}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -75,7 +117,7 @@ done
 [ -f "$POLICY_FILE" ] || fail "policy file missing: $POLICY_FILE"
 [ -x "$RESOLVER" ]    || fail "policy resolver missing or not executable: $RESOLVER"
 
-PR_JSON="$(gh pr view "$PR" -R "$REPO" --json baseRefName,isDraft,state,mergeable,headRefOid,url,title,body,milestone)" \
+PR_JSON="$(gh pr view "$PR" -R "$REPO" --json baseRefName,isDraft,state,mergeable,mergeStateStatus,changedFiles,headRefOid,url,title,body,milestone)" \
   || fail "could not resolve PR #$PR in $REPO"
 
 BASE="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["baseRefName"])')"
@@ -94,7 +136,7 @@ num, base = os.environ['OBOT_PR'], pr['baseRefName']
 
 print(f\"PR #{num} {pr['url']}\")
 print(f\"  title: {pr['title']}\")
-print(f\"  base:  {base}   state: {pr['state']}   draft: {pr['isDraft']}   mergeable: {pr['mergeable']}\")
+print(f\"  base:  {base}   state: {pr['state']}   draft: {pr['isDraft']}   files: {pr.get('changedFiles', '?')}\")
 print(f\"  head:  {pr['headRefOid']}\")
 if resolved.get('profile'):
     role = f\", role {resolved['role']}\" if resolved.get('role') else ''
@@ -125,6 +167,82 @@ fi
 
 LANE="$(printf '%s' "$VERDICT" | sed -n 's/^ALLOW://p' | head -1)"
 ROLE="$(printf '%s' "$RESOLVED" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("role",""))')"
+CLASS="$(printf '%s' "$RESOLVED" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("class",""))')"
+
+# ---- Gate B: is this the policy file that is actually in force? ------------
+# The tool reads the policy sitting next to itself. In a workspace whose
+# convention is one linked worktree per branch, a session working on a policy
+# change resolves the lane from the branch under review - so Gate A below could
+# be deleted by the very PR it exists to stop. The file names its own authority;
+# the local copy's blob sha is compared against it. Any difference, or any
+# failure to find out, forces the attested lane. Not a refusal: holding a
+# modified copy while working on a policy PR is legitimate, and the right place
+# for that PR to stop is @jwildfire's sign-off, which is what attested means.
+AUTHORITY_NOTE=""
+FORCE_ATTESTED=""
+
+AUTHORITY="$(POLICY_FILE="$POLICY_FILE" python3 -c '
+import hashlib, json, os, sys
+
+path = os.environ["POLICY_FILE"]
+policy = json.load(open(path))
+auth = policy.get("authority") or {}
+if not (auth.get("repo") and auth.get("ref") and auth.get("path")):
+    print("SKIP\tno authority declared")
+    sys.exit(0)
+data = open(path, "rb").read()
+local = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+print("\t".join(["CHECK", auth["repo"], auth["ref"], auth["path"], local]))
+')" || fail "could not read the authority block from $POLICY_FILE"
+
+case "$AUTHORITY" in CHECK*)
+  IFS=$'\t' read -r _ A_REPO A_REF A_PATH A_LOCAL <<<"$AUTHORITY"
+  A_REMOTE="$(gh api "repos/$A_REPO/contents/$A_PATH?ref=$A_REF" --jq '.sha' 2>/dev/null)" || A_REMOTE=""
+  if [ -z "$A_REMOTE" ]; then
+    FORCE_ATTESTED=1
+    AUTHORITY_NOTE="  policy: could not read the authority copy ($A_REPO@$A_REF:$A_PATH) - attested lane forced"
+  elif [ "$A_REMOTE" != "$A_LOCAL" ]; then
+    FORCE_ATTESTED=1
+    AUTHORITY_NOTE="  policy: local $A_PATH differs from $A_REPO@$A_REF - the guardrail under this tool's feet is not the one in force, attested lane forced"
+  fi
+;; esac
+
+# ---- Gate A: does this PR touch a guardrail file? -------------------------
+# The whole point of the carve-out, made mechanical. Skipped entirely for repos
+# with no guardrail list, which is six of the seven - the cost lands only where
+# the guardrail lives.
+CARVE_MATCHED=""
+CARVE_RULES="$("$RESOLVER" carve-out "$REPO" 2>/dev/null || true)"
+if [ -n "$CARVE_RULES" ]; then
+  # `gh pr view --json files` truncates at 100 entries with no error and no
+  # flag (measured 2026-08-01: safety.viz#114, 318 changed files, 100 returned).
+  # A guardrail path at position 101 would pass unseen, so the fetch is the
+  # paginated REST endpoint plus a completeness assertion, and any failure is an
+  # operational error - never a pass.
+  CHANGED="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[] | .filename, .previous_filename' 2>/dev/null | grep -v '^null$' || true)"
+  [ -n "$CHANGED" ] || fail "could not read the changed files for PR #$PR in $REPO - $REPO has guardrail paths, and an unreadable file list is not a pass"
+  DECLARED="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("changedFiles") or 0)')"
+  SEEN="$(printf '%s\n' "$CHANGED" | sort -u | wc -l | tr -d ' ')"
+  # Renames report two paths for one file, so the fetch can legitimately exceed
+  # the count; falling short is the truncation signature.
+  if [ "$SEEN" -lt "$DECLARED" ]; then
+    fail "file list for PR #$PR looks truncated ($SEEN of $DECLARED changed files) - refusing to judge a guardrail against a partial list"
+  fi
+  CARVE_MATCHED="$(printf '%s\n' "$CHANGED" | "$RESOLVER" carve-out "$REPO" --stdin || true)"
+  if [ -n "$CARVE_MATCHED" ]; then
+    FORCE_ATTESTED=1
+  fi
+fi
+
+CARVE_LIST="$(printf '%s' "$CARVE_MATCHED" | tr '\n' ' ' | sed 's/ *$//;s/ /, /g')"
+if [ -n "$CARVE_MATCHED" ]; then
+  printf '  policy: carve-out path touched, attested lane forced (%s)\n' "$CARVE_LIST"
+fi
+if [ -n "$AUTHORITY_NOTE" ]; then printf '%s\n' "$AUTHORITY_NOTE"; fi
+
+if [ -n "$FORCE_ATTESTED" ] && [ "$LANE" = "standard" ]; then
+  LANE="approval"
+fi
 
 # ---- milestone gate -------------------------------------------------------
 # @jwildfire, 2026-08-14, after safety.viz v1.6.0 shipped grouping nothing:
@@ -264,25 +382,121 @@ if [ "$ROLE" = "release" ]; then
   fi
 fi
 
-if [ -n "$CHECK" ]; then
-  if [ "$LANE" = "approval" ]; then
-    printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s on the approval tier (explicit Jeremy approval + --jeremy-approved required)\n' "$PR" "$REPO"
+# A recorded decision stands in for in-session approval on exactly one square:
+# a guardrail merge into the integration branch of an operational repo. That is
+# the square @jwildfire ruled is the agents' to land - "this isnt an RC or an
+# artifact" - and nowhere else. A release-role branch or a clinical repo is his
+# in-session call whatever has been decided before.
+DECISION_OK=""
+if [ -n "$DECISION_NOTE" ]; then
+  if [ "$LANE" != "approval" ]; then
+    fail "--decision substitutes for an attestation, and this merge needs none: PR #$PR touches no guardrail path and its base is on the standard lane. Drop the flag."
+  elif [ "$ROLE" = "release" ]; then
+    refuse "--decision cannot carry a release-role merge into '$BASE'. Publishing to a release branch is @jwildfire's call for this merge, whatever was decided before - re-run with --jeremy-approved '<where/when he approved this release>'."
+  elif [ "$CLASS" != "operational" ]; then
+    refuse "--decision applies only to repos classed 'operational'; $REPO is '${CLASS:-unset}', where @jwildfire reviews before anything reaches the released surface. Re-run with --jeremy-approved '<where/when he approved this merge>'."
+  elif [ -z "$CARVE_MATCHED" ] && [ -z "$FORCE_ATTESTED" ]; then
+    refuse "--decision carries a guardrail merge, not a 'protected'-profile one: $REPO's '$BASE' needs @jwildfire's approval for every merge, not only for guardrail changes. Re-run with --jeremy-approved '<where/when he approved this merge>'."
   else
-    printf 'obot-merge: CHECK PASSED - policy and the milestone gate permit merging PR #%s in %s\n' "$PR" "$REPO"
+    DECISION_OK=1
+    printf '  approval: recorded decision - %s\n' "$DECISION_NOTE"
+  fi
+fi
+
+# ---- mergeability: what GitHub will actually do ---------------------------
+# A policy pass is not a promise that the merge will succeed, but read out at
+# the moment Jeremy says "merge it", "CHECK PASSED" is heard as one. It answered
+# exactly that for a CONFLICTING PR (obot.agent#52, 2026-07-29). GitHub computes
+# mergeability lazily, so the first query is the one most likely to say UNKNOWN
+# and the single value the header used to print was usually meaningless - a
+# bounded poll is what makes the field usable at all.
+POLL_DELAY="${OBOT_MERGE_POLL_SECONDS:-2}"
+MERGE_STATE=""
+read_merge_state() {
+  local i state
+  for i in 1 2 3; do
+    state="$(gh pr view "$PR" -R "$REPO" --json mergeable,mergeStateStatus \
+      --jq '"\(.mergeable // "UNKNOWN") \(.mergeStateStatus // "UNKNOWN")"' 2>/dev/null)" || state=""
+    case "$state" in
+      ""|UNKNOWN*|*UNKNOWN) : ;;
+      *) printf '%s' "$state"; return 0 ;;
+    esac
+    [ "$i" = 3 ] || sleep "$POLL_DELAY"
+  done
+  printf '%s' "${state:-UNKNOWN UNKNOWN}"
+}
+MERGE_STATE="$(read_merge_state)"
+MERGE_STATUS="${MERGE_STATE##* }"
+
+# GitHub's vocabulary, in a sentence, using the same buckets scripts/reviews-queue
+# reads - so the reviews walkthrough and the merge lane describe a PR the same way.
+case "$MERGE_STATUS" in
+  CLEAN)     MERGE_VERDICT="READY - GitHub will merge this now" ;;
+  HAS_HOOKS) MERGE_VERDICT="READY - mergeable; server-side hooks will run" ;;
+  UNSTABLE)  MERGE_VERDICT="MERGEABLE, CHECKS UNHAPPY - required checks are failing or still running" ;;
+  BEHIND)    MERGE_VERDICT="BLOCKED - the base branch moved ahead; update the branch first" ;;
+  DIRTY)     MERGE_VERDICT="BLOCKED - conflicts with the base branch; rebase or resolve, then re-check" ;;
+  BLOCKED)   MERGE_VERDICT="BLOCKED - branch protection: a required review or check is missing" ;;
+  DRAFT)     MERGE_VERDICT="BLOCKED - draft; 'gh pr ready' first" ;;
+  UNKNOWN)   MERGE_VERDICT="UNKNOWN - GitHub has not computed mergeability yet; re-check in a moment" ;;
+  *)         MERGE_VERDICT="$MERGE_STATUS - unrecognised state, reported as GitHub gave it" ;;
+esac
+case "$MERGE_VERDICT" in BLOCKED*) MERGE_BLOCKED=1 ;; *) MERGE_BLOCKED="" ;; esac
+
+if [ -n "$CHECK" ]; then
+  if [ "$LANE" = "approval" ] && [ -n "$DECISION_OK" ]; then
+    printf '  policy:       PASS - carve-out merge carried by a recorded decision on an operational integration branch\n'
+  elif [ "$LANE" = "approval" ]; then
+    printf '  policy:       PASS - merging is permitted on the approval tier (explicit Jeremy approval + --jeremy-approved required)\n'
+  else
+    printf '  policy:       PASS - policy and the milestone gate permit merging\n'
+  fi
+  printf '  mergeability: %s\n' "$MERGE_VERDICT"
+  if [ -n "$MERGE_BLOCKED" ]; then
+    printf 'obot-merge: CHECK - policy permits merging PR #%s in %s; GitHub does not. Nothing was merged.\n' "$PR" "$REPO"
+  else
+    printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s\n' "$PR" "$REPO"
   fi
   exit 0
 fi
 
-if [ "$LANE" = "approval" ] && [ -z "$APPROVAL_NOTE" ]; then
+if [ "$LANE" = "approval" ] && [ -z "$APPROVAL_NOTE" ] && [ -z "$DECISION_OK" ]; then
+  if [ -n "$CARVE_MATCHED" ]; then
+    refuse "PR #$PR touches a carve-out path in $REPO ($CARVE_LIST) - these are guardrail files, and they never merge on nobody's authority. Two ways forward: --jeremy-approved '<where/when he approved this merge>' if he approved it in session, or --decision '<the decision he already recorded>' when this repo is operational, the base is its integration branch, and the change is work he has already ruled on. Never pass either flag without the approval it names."
+  fi
   refuse "base branch is approval-tier for $REPO: merge only with Jeremy's explicit in-session approval, then re-run with --jeremy-approved '<where/when he approved>'. Do not pass the flag without that approval."
 fi
 
+# Ordering matters here, and used not to. The audit comment used to post before
+# the merge was attempted, so a PR that then failed to merge kept a permanent
+# "explicitly approved by @jwildfire" record for a merge that never happened -
+# on the one lane whose entire purpose is the audit trail.
+if [ -n "$MERGE_BLOCKED" ]; then
+  printf '  mergeability: %s\n' "$MERGE_VERDICT"
+  fail "GitHub will not merge PR #$PR in $REPO as it stands. Nothing was merged, no token was minted, and no audit comment was posted."
+fi
+
 printf 'obot-merge: policy OK (%s lane) - merging PR #%s in %s as obotclaw[bot] (%s)\n' "$LANE" "$PR" "$REPO" "$STRATEGY"
-TOKEN="$("$SCRIPT_DIR/obot-app-token")" || fail "token mint failed"
+# The mint is the first irreversible step; the seam exists so the test suite can
+# exercise the merge path without one.
+TOKEN="$("${OBOT_APP_TOKEN_CMD:-$SCRIPT_DIR/obot-app-token}")" || fail "token mint failed"
 
 if [ "$LANE" = "approval" ]; then
   BASE_BRANCH="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["baseRefName"])')"
-  AUDIT="🔒 Protected-branch merge into \`$BASE_BRANCH\`: explicitly approved by @jwildfire — ${APPROVAL_NOTE}. Executed via obot-merge as obotclaw[bot] on $(date '+%Y-%m-%d %H:%M %Z')."
+  # The trail must never say he approved a merge he never saw. A merge carried by
+  # a recorded decision says exactly that, and names the decision.
+  if [ -n "$DECISION_OK" ] && [ -z "$APPROVAL_NOTE" ]; then
+    AUDIT="🔒 Guardrail merge into \`$BASE_BRANCH\`, carried by a decision @jwildfire already recorded — ${DECISION_NOTE}. He did not review this merge: this repo is operational and \`$BASE_BRANCH\` is its integration branch, where he has ruled that work he has already decided is the agents' to land. Executed via obot-merge as obotclaw[bot] on $(date '+%Y-%m-%d %H:%M %Z')."
+  else
+    AUDIT="🔒 Protected-branch merge into \`$BASE_BRANCH\`: explicitly approved by @jwildfire — ${APPROVAL_NOTE}. Executed via obot-merge as obotclaw[bot] on $(date '+%Y-%m-%d %H:%M %Z')."
+  fi
+  # Which guardrail was changed, under whose approval, on the PR itself — today
+  # that is reconstructable only by reading the diff.
+  if [ -n "$CARVE_MATCHED" ]; then
+    AUDIT="$AUDIT
+
+Carve-out paths touched: \`$(printf '%s' "$CARVE_LIST" | sed 's/, /`, `/g')\`."
+  fi
   GH_TOKEN="$TOKEN" gh pr comment "$PR" -R "$REPO" --body "$AUDIT" >/dev/null \
     || fail "could not post the approval audit comment - not merging without the audit trail"
   printf 'obot-merge: audit comment posted on PR #%s\n' "$PR"

@@ -21,3 +21,10 @@ jobs:
         run: node --test tools/session-hub/test/*.test.mjs tools/ops-dashboard/test/*.test.mjs tools/statusline/test/*.test.mjs tools/navigator/test/*.test.mjs scripts/test/*.test.mjs
       - name: Policy file validation
         run: python3 scripts/obot-policy validate
+
+      # Every merge verdict the policy file can produce, against a recorded
+      # baseline. A diff here is a policy change: intended ones are re-recorded
+      # with --update and reviewed in the PR, and nothing else can change them
+      # unnoticed (@jwildfire, 2026-08-15, decision D0005.2).
+      - name: Policy verdict sweep
+        run: python3 scripts/test/policy-sweep
