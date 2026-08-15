@@ -97,6 +97,14 @@ test('spawnArgs pins background, auto permission mode and the sibling identity',
   assert.ok(args.includes('-n'));
 });
 
+test('spawnArgs opts the sibling out of Remote Control (@jwildfire 2026-08-15)', () => {
+  const args = spawnArgs({ name: '👯🤖 2026-07-27 audit-apply', prompt: 'do the thing' });
+  assert.ok(!args.includes('--remote-control'));
+  const i = args.indexOf('--settings');
+  assert.ok(i !== -1, 'the --settings opt-out is required: dropping the flag alone still bridges');
+  assert.equal(JSON.parse(args[i + 1]).remoteControlAtStartup, false);
+});
+
 // ------------------------------------------------------------- job state
 test('jobState reads state.json and reports terminal from firstTerminalAt', () => {
   const dir = tmp();

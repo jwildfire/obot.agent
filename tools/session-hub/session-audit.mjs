@@ -148,7 +148,16 @@ export function agentPrompt({ entries, hub, runToken, label }) {
 }
 
 export function spawnArgs({ name, prompt, model }) {
-  const args = ['--bg', '--permission-mode', 'auto', '-n', name];
+  // Background siblings spawn unbridged (@jwildfire 2026-08-15 — obot.agent
+  // docs/remote-control.md). Dropping --remote-control would not be enough:
+  // the global remoteControlAtStartup setting bridges a flagless spawn too, so
+  // the opt-out has to force the key off for this process.
+  const args = [
+    '--bg',
+    '--permission-mode', 'auto',
+    '--settings', JSON.stringify({ remoteControlAtStartup: false }),
+    '-n', name,
+  ];
   if (model) args.push('--model', model);
   args.push(prompt);
   return args;

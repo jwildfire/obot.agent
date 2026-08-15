@@ -80,8 +80,12 @@ immediately and mention the checkbox lane as an alternative.
 ### 3. Spawn the reviewer
 
 Follow the [`session-spawn`](../session-spawn/SKILL.md) contract in full — auto
-permission mode, `--remote-control`, `👯🤖 {date} {slug}` naming, green colour,
-the scratchpad heartbeat. The reviewer inherits
+permission mode, `👯🤖 {date} {slug}` naming, green colour, the scratchpad
+heartbeat — with one deliberate deviation: **the reviewer is the named opt-in to
+Remote Control.** Background siblings spawn unbridged since 2026-08-15, but this one
+is a session @jwildfire converses with, so it keeps `--remote-control` (in place of
+the `--settings` opt-out) and `session-spawn` step 6's bridge check applies to it.
+The reviewer inherits
 [`templates/sibling-briefing.md`](../../templates/sibling-briefing.md), so the
 briefing here carries only the walkthrough-specific text. This one is
 judgment-heavy and conversational, so give it a strong model.
@@ -90,6 +94,9 @@ judgment-heavy and conversational, so give it a strong model.
 claude --bg --permission-mode auto --remote-control --model opus \
   -n "👯🤖 $(date +%F) pr-review" "<briefing>"
 ```
+
+(no `--settings '{"remoteControlAtStartup": false}'` here — that is the background-sibling
+default this lane deliberately opts out of)
 
 The briefing carries: the `reviews-queue --json` output, the walkthrough contract
 (step 4), the decision lane (step 5), and this instruction —
