@@ -40,9 +40,10 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { collectQueue, refreshRCs } from './lib/collect.mjs';
-import { render, sessionShell, navigatorShell } from './lib/render.mjs';
+import { render, sessionShell, navigatorShell, NOT_LISTENING } from './lib/render.mjs';
 import { parseNavigatorState } from './lib/navigator.mjs';
-import { ensureStore, readAnswers, writeAnswer } from './lib/store.mjs';
+import { currentAnswers, recordAnswer } from './lib/answers.mjs';
+import { ensureStore } from './lib/store.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 7326;
@@ -119,11 +120,38 @@ export function writeServeMarker(workspace, { port, url }) {
   return marker;
 }
 
+/**
+ * Is anything listening for the answers he records?
+ *
+ * The deliverer is the 🧭🤖 Navigator sweep (launchd, every five minutes). Its
+ * state file is the heartbeat, and the file's own rule — a `swept:` stamp older
+ * than three cadences means the observer is dead — is the one this reuses. An
+ * absent file is the same answer as a dead one: nothing is listening.
+ *
+ * This exists so the page can *say* that. An answer sitting in a queue nobody
+ * reads must never look like an answer that landed.
+ */
+export function delivererState(workspace) {
+  const file = path.join(workspace, ...SESSION_DIR, 'navigator-state.md');
+  try {
+    const s = parseNavigatorState(fs.readFileSync(file, 'utf8'));
+    return { alive: !s.stale, sweptAt: s.sweptAt, ageMin: s.ageMin };
+  } catch {
+    return { alive: false, missing: true, sweptAt: null, ageMin: null };
+  }
+}
+
 async function page(args) {
   const queue = await collectQueue(args.workspace, args.hub, {
     agent: path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue'),
   });
-  return render({ queue, staged: readAnswers(args.workspace), workspace: args.workspace, hub: args.hub });
+  return render({
+    queue,
+    answers: currentAnswers(args.workspace, { hub: args.hub }),
+    deliverer: delivererState(args.workspace),
+    workspace: args.workspace,
+    hub: args.hub,
+  });
 }
 
 function readBody(req, limit = 64 * 1024) {
@@ -148,9 +176,30 @@ export function serve(args) {
     try {
       if (req.method === 'POST' && req.url.split('?')[0] === '/answer') {
         const answer = JSON.parse(await readBody(req));
-        if (!answer.verdict) return send(400, 'application/json', JSON.stringify({ error: 'no verdict' }));
-        const rec = writeAnswer(args.workspace, answer);
-        return send(200, 'application/json', JSON.stringify({ ok: true, id: rec.id }));
+        let result;
+        try {
+          result = recordAnswer(args.workspace, answer, { hub: args.hub });
+        } catch (e) {
+          // A refusal he can act on. The old handler took anything with a verdict
+          // string, which is how a "per-question" answer holding no questions
+          // reached disk on 2026-08-15.
+          return send(400, 'application/json', JSON.stringify({ error: e.message }));
+        }
+        const { record, duplicate } = result;
+        const listening = delivererState(args.workspace).alive;
+        return send(200, 'application/json', JSON.stringify({
+          ok: true,
+          id: record.id,
+          decisionId: record.decisionId,
+          decisionIdError: record.decisionIdError,
+          status: record.status,
+          duplicate,
+          supersedes: record.supersedes,
+          // What happens next, in one sentence, because the page's job is to
+          // answer "what did clicking that do?" before he has to ask.
+          next: 'Recorded on this machine. The Navigator picks it up within five minutes, then an agent updates the artifact — nothing else for you to do.',
+          warning: listening ? null : NOT_LISTENING,
+        }));
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, 'text/plain', 'method not allowed');
 
