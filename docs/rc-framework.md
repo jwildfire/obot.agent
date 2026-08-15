@@ -31,11 +31,16 @@ The governing principle behind what reaches his queue (@jwildfire, 2026-08-15,
 - **User-facing clinical repos**: he reviews **everything** before it reaches
   prod, and releases are formally documented as soon as they go live.
 
-Which repo is which is a decision he makes, never an agent: the clear cases and
-the ambiguous ones are laid out in the
-[repo-classification decision artifact](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-operational-clinical-classification/),
-and the classification is recorded per repo in
-[`scripts/policy.json`](../scripts/policy.json) once he decides. The weekly
+Which repo is which is a decision he makes, never an agent. **Decided 2026-08-15**
+([artifact](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-operational-clinical-classification/),
+answer in [Q&A #160](https://github.com/jwildfire/obot.roadmap/discussions/160)) and
+recorded as a `class` field per repo in [`scripts/policy.json`](../scripts/policy.json):
+obot.agent and obot.roadmap **operational**; safety.viz, gsm.safety, open.csr,
+open.gismo and demo-301 **clinical**. demo-301 is his override of the recommendation,
+with a recorded reclassification condition: it is where he reviews app functionality
+today, and converts to operational if it becomes a simple template with no
+user-facing changes. The safety-histogram fork was retired the same day (functionality
+lives on as safety.viz's histogram module). The weekly
 release trigger is reconciled with the session-model design in
 [Q&A #158](https://github.com/jwildfire/obot.roadmap/discussions/158), not here.
 **Precondition**: automatic merge-to-prod on an operational repo requires that

@@ -182,7 +182,7 @@ def cmd_explain(args):
         entry = policy["repos"][repo]
         pname, _ = profile_of(policy, entry)
         appr = entry.get("approved", {})
-        print(f"\n{repo}   profile: {pname}")
+        print(f"\n{repo}   profile: {pname}   class: {entry.get('class', '(unset)')}")
         print(f"  approved: {appr.get('by','?')} on {appr.get('date','?')} — {appr.get('where','(no record)')}")
         for label in declared_branches(entry):
             base = label.split(" ")[0]
@@ -203,17 +203,18 @@ def cmd_explain(args):
 
 def cmd_matrix(args):
     policy = load()
-    print(f"{'repo':<28} {'profile':<10} {'branch':<18} {'role':<12} {'lane':<10} unattended-merge")
-    print("-" * 96)
+    print(f"{'repo':<28} {'profile':<10} {'class':<12} {'branch':<18} {'role':<12} {'lane':<10} unattended-merge")
+    print("-" * 110)
     for repo in sorted(policy.get("repos", {})):
         entry = policy["repos"][repo]
         pname, _ = profile_of(policy, entry)
+        cls = entry.get("class", "(unset)")
         a = autonomy_of(policy, repo)
         for label in declared_branches(entry):
             base, role = label.split(" ")[0], label.split("(")[1].rstrip(")")
             lane, _, _ = resolve(policy, repo, base)
             unattended = "yes" if base in (a.get("mergeStandard") or []) else "no"
-            print(f"{repo:<28} {pname:<10} {base:<18} {role:<12} {lane:<10} {unattended}")
+            print(f"{repo:<28} {pname:<10} {cls:<12} {base:<18} {role:<12} {lane:<10} {unattended}")
 
 
 def cmd_validate(args):
@@ -264,6 +265,11 @@ def cmd_validate(args):
         appr = entry.get("approved") or {}
         if pname == "auto" and not (appr.get("by") and appr.get("date") and appr.get("where")):
             errors.append(f"{repo}: profile 'auto' needs a complete approved block (by/date/where)")
+        cls = entry.get("class")
+        if cls is None:
+            warnings.append(f"{repo}: no 'class' (operational | clinical) — the control split is unrecorded for this repo")
+        elif cls not in ("operational", "clinical"):
+            errors.append(f"{repo}: unknown class '{cls}' — must be 'operational' or 'clinical'")
         for key, spec in (entry.get("custom") or {}).items():
             ca = spec.get("approved") or {}
             if not (ca.get("by") and ca.get("date") and ca.get("where")):

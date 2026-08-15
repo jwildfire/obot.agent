@@ -103,6 +103,7 @@
   "repos": {
     "jwildfire/safety.viz": {
       "profile": "auto",
+      "class": "clinical",
       "branches": {
         "integration": "dev",
         "release": [
@@ -117,6 +118,7 @@
     },
     "jwildfire/open.gismo": {
       "profile": "auto",
+      "class": "clinical",
       "branches": {
         "integration": "dev",
         "release": [
@@ -130,23 +132,9 @@
       },
       "_note": "The old grants matrix carried 'obotclaw App install pending - until installed, no pushes/merges'. Cleared 2026-07-29: the App install was verified present (installation/repositories) and @jwildfire approved dropping the blocker, restoring this repo's full 'auto' grants."
     },
-    "jwildfire/safety-histogram": {
-      "profile": "auto",
-      "branches": {
-        "integration": "dev",
-        "release": [
-          "master"
-        ]
-      },
-      "approved": {
-        "by": "@jwildfire",
-        "date": "2026-07-22",
-        "where": "obot.roadmap#18 design review"
-      },
-      "_note": "The repo's DEFAULT branch is 'master', which is the release role here - integration is 'dev'. Roles are declared, never inferred from the default branch, precisely because of cases like this."
-    },
     "jwildfire/gsm.safety": {
       "profile": "auto",
+      "class": "clinical",
       "branches": {
         "integration": "dev",
         "release": [
@@ -161,6 +149,7 @@
     },
     "jwildfire/open.csr": {
       "profile": "auto",
+      "class": "clinical",
       "branches": {
         "integration": "dev",
         "release": [
@@ -176,6 +165,7 @@
     },
     "jwildfire/demo-301": {
       "profile": "auto",
+      "class": "clinical",
       "branches": {
         "integration": "main",
         "release": [
@@ -187,10 +177,11 @@
         "date": "2026-07-29",
         "where": "AskUserQuestion decision prompt, 2026-07-29 session \u2014 'Both auto' selected for the two drift repos on PR #61; deliberate widening, unattended merges into main now permitted"
       },
-      "_note": "No dev branch: 'main' is the integration lane (every PR's target) and 'site' is the live GitHub Pages source, which takes the release role. This is the case the role model exists for - no branch-name special-casing. Same drift as open.csr (merge lane, no autonomy entry); resolved 2026-07-29 by promoting to 'auto', a deliberate widening @jwildfire approved."
+      "_note": "No dev branch: 'main' is the integration lane (every PR's target) and 'site' is the live GitHub Pages source, which takes the release role. This is the case the role model exists for - no branch-name special-casing. Same drift as open.csr (merge lane, no autonomy entry); resolved 2026-07-29 by promoting to 'auto', a deliberate widening @jwildfire approved. CLASS OVERRIDE (@jwildfire, 2026-08-15, Q&A #160): clinical, not the recommended operational - this is where he reviews app functionality, so content is reviewed thoroughly before updates. RECLASSIFICATION CONDITION, his words: if it ends up being a simple template where no user-facing changes are being made, it converts to operational - that switch is a recorded decision away, not a rediscovery."
     },
     "jwildfire/obot.roadmap": {
       "profile": "auto",
+      "class": "operational",
       "branches": {
         "integration": "main",
         "release": []
@@ -214,6 +205,7 @@
     },
     "jwildfire/obot.agent": {
       "profile": "auto",
+      "class": "operational",
       "branches": {
         "integration": "main",
         "release": [
@@ -226,6 +218,14 @@
         "where": "obot.roadmap#18 design review"
       },
       "_note": "The carveOut paths live in this repo, so many of its PRs need approval regardless of profile. 'stable' is the R2 lagging release branch (@jwildfire approved R2 on 2026-08-15, recorded in obot.roadmap discussion #155): cut at the v0.3.0 commit, work keeps landing on 'main', each release is a main -> stable PR on the attested lane, and the tag lands on 'stable'."
+    }
+  },
+  "classes": {
+    "_note": "The operational-vs-clinical control split (@jwildfire, 2026-08-15, decided in obot.roadmap discussion #160 over the artifact at reports/decisions/2026-08-15-operational-clinical-classification/). 'operational' = agents self-improve with automatic merges to production plus periodic releases to a lagging release branch; 'clinical' = @jwildfire reviews everything before it reaches the released surface, and releases are formally documented as soon as they go live. Every repo entry carries a 'class'; obot-policy validate warns on a repo without one. The class records intent - the merge lanes still come from the profile.",
+    "approved": {
+      "by": "@jwildfire",
+      "date": "2026-08-15",
+      "where": "Q&A #160 answer: open.csr and open.gismo clinical, demo-301 clinical (his override of the operational recommendation), the rest as recommended, class field in policy.json approved"
     }
   }
 }
