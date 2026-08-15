@@ -1,6 +1,6 @@
 ---
 name: session-update
-description: "Add an item to the running session todo list. Use mid-session when @jwildfire says 'session update: …', 'add that to the session todo', or work surfaces a task to pick up later — the item lands in the session scratchpad that session-wrapup sweeps and session-init re-reads. Do NOT use for already-scoped roadmap work (file/edit the issue directly) or for prose observations (that is session-note)."
+description: "Add an item to the running session todo list. Use mid-session when @jwildfire says 'session update: …', 'add that to the session todo', or work surfaces a task to pick up later — the item lands in the session scratchpad that session-wrapup sweeps and session-init re-reads. One-shot capture: a single idempotent write, echoing back only the line written. Do NOT use for already-scoped roadmap work (file/edit the issue directly), for prose observations (that is session-note), or for an idea aimed at the roadmap rather than this session (that is session-idea)."
 argument-hint: "The todo item to add"
 ---
 
@@ -63,12 +63,19 @@ mechanisms keep it current (the lean-bookends design, 2026-07-14):
   channels.
 
 **Multi-writer rules:** log under `## Session log` as tagged one-liners —
-`- HH:MM {tag} — {event}` with the session's tag (`😺🤖 lead`, `👯🤖 {slug}`,
-`⚡️🤖 {description}`) and links inline. **Append-only via shell `>>`** — never
-rewrite the file with the Write tool from a sibling; concurrent sessions share
-it. The lead may edit other sections (check-offs, Overview refresh) after
-re-reading the file. If the file is missing, create it via `>>` with the
-skeleton above.
+`- $(date +%H:%M) {tag} — {event}` with the session's tag (`😺🤖 lead`,
+`👯🤖 {slug}`, `⚡️🤖 {description}`) and links inline; the timestamp is
+**shelled, never modeled**. The append is **heading-anchored**: insert the line
+under `## Session log`, never blind-appended to end-of-file with `>>` — on any
+scratchpad whose sections have drifted, a bare `>>` lands the line under
+`## Scaffold` and corrupts the wrapup's inventory (obot.agent#57). The exact
+command (skeleton-on-missing, insert-under-heading) is in
+[`templates/sibling-briefing.md`](../../templates/sibling-briefing.md); use it
+rather than improvising. Never rewrite the file with the Write tool from a
+sibling; concurrent sessions share it. The lead may edit other sections
+(check-offs, Overview refresh) after re-reading the file — **section-replacing
+writes are a known lost-write hazard under concurrency (hub#147), so only the
+lead does them**.
 
 ## When to Use
 
@@ -79,24 +86,51 @@ skeleton above.
 
 **Do not use** for work that already has (or clearly deserves) an issue — file or
 edit the issue directly instead; the scratchpad is for items too small or too raw
-to scope yet. For non-task observations, use `session-note`.
+to scope yet. For non-task observations, use `session-note`; for something nobody
+is committing to do this session, use [`session-idea`](../session-idea/SKILL.md) —
+the test is whether it belongs to this session or to the roadmap.
 
 ## Procedure
 
-1. **Resolve today's scratchpad** — `.claude/session-notes/YYYY-MM-DD.md` under
-   the workspace root; create it (and the directory) with the skeleton above if
-   missing.
-2. **Append the item** under `## Todo`:
+Capture is a **sub-10-second operation** — one tool call, one sentence back (see
+[`docs/session-framework.md`](../../docs/session-framework.md)). Do not resolve,
+then read, then append: that is three round trips for a one-line write.
 
-   ```markdown
-   - [ ] {item} *(added HH:MM)*
+1. **Write the item in one idempotent shell call** — it creates the scratchpad
+   with the skeleton if missing and inserts the line under `## Todo` in the same
+   call. The timestamp is **shelled, never modeled**:
+
+   ```bash
+   WS=~/Documents/obot2
+   LOG="$WS/.claude/session-notes/$(date +%F).md"
+   LINE="- [ ] {item} $(date '+*(added %H:%M)*')"
+   python3 - "$LOG" "$LINE" <<'PY'
+   import sys, pathlib
+   p, line = pathlib.Path(sys.argv[1]), sys.argv[2]
+   if not p.exists():
+       p.parent.mkdir(parents=True, exist_ok=True)
+       p.write_text(f"# Session scratchpad — {p.stem}\n\n## Overview\n\n## Todo\n\n## Notes\n\n## Scaffold\n\n## Session log\n")
+   lines = p.read_text().splitlines()
+   if "## Todo" not in lines:
+       lines += ["", "## Todo"]
+   i = lines.index("## Todo") + 1
+   j = i
+   while j < len(lines) and not lines[j].startswith("## "):
+       j += 1
+   while j > i and not lines[j-1].strip():
+       j -= 1
+   lines.insert(j, line)
+   p.write_text("\n".join(lines) + "\n")
+   PY
    ```
 
    Keep the item one line and self-contained — it will be read cold at wrapup or
    next kickoff; include links/issue numbers if they exist.
-3. **Confirm** by echoing the current Todo list back, so @jwildfire sees the
-   running state. Then return to the interrupted work — adding the item is not a
-   license to start it.
+2. **Confirm in one sentence** by echoing back **only the line just written**.
+   Do not re-read the file and do not re-render the list: re-rendering the whole
+   list is [`session-todo`](../session-todo/SKILL.md)'s job and costs a round trip
+   the capture does not need. Then return to the interrupted work — adding the
+   item is not a license to start it.
 
 ## Lifecycle
 

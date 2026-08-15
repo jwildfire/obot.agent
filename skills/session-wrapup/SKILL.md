@@ -1,7 +1,7 @@
 ---
 name: session-wrapup
-description: "Wrap up a working session by folding the session scratchpad — the as-you-go record kept by session-update, session-note, and the sibling heartbeat — verified by one GitHub delta agent; then discuss findings via the three-question checkpoint and apply the agreed changes: issue updates, stage moves, scaffold/memory updates, and the diary entry. Use at the end of any substantive session — 'wrap up', 'session wrapup', 'close out the session'. With --auto, skip the review checkpoint and post the wrapup directly under standing grants (@jwildfire, 2026-07-24). Do NOT use mid-session or for empty sessions."
-argument-hint: "Optional: session focus or extra context to fold into the summary"
+description: "Wrap up a working session by folding the session scratchpad — the as-you-go record kept by session-update, session-note, and the sibling heartbeat — into a checkpoint draft put in front of @jwildfire in under a minute, while one background sibling verifies that record against GitHub during his review; corrections fold in before anything is applied, then the agreed changes land: issue updates, stage moves, scaffold/memory updates, and the diary entry. Every output leads with the same two headlines — release candidates needing review, then decisions needed. Use at the end of any substantive session — 'wrap up', 'session wrapup', 'close out the session'. With --auto, skip the review checkpoint and post the wrapup directly under standing grants (@jwildfire, 2026-07-24). Do NOT use mid-session or for empty sessions."
+argument-hint: "Optional: session focus or extra context — carried in the verifier's briefing, not investigated inline"
 ---
 
 # Session Wrapup
@@ -16,7 +16,9 @@ done when five things are true:
 3. **Scaffold reviewed** — friction and repetition from the session are turned into
    applied or proposed scaffold updates (skills, AGENTS.md, memory, config).
 4. **Summary posted** — the day's diary entry is committed, the site deploy is
-   green, and the deployed URL is shared for review.
+   green, and the deployed URL is shared for review. The entry **leads with the
+   two headlines** — release candidates needing review, then decisions needed —
+   so what @jwildfire has to act on sits above everything else.
 5. **Next session prepped** — every agreed next-session priority links a hub
    requirement; any priority without one has its **Business Requirement +
    Overview** drafted and filed before the session ends.
@@ -29,20 +31,118 @@ design): **the scratchpad is the inventory.** During the session,
 lines and a close-out entry; a workspace Stop hook nudges any session that goes
 quiet — see `session-update`)
 keep `.claude/session-notes/{YYYY-MM-DD}.md` current. The wrapup **folds that
-record and verifies it** with one GitHub delta agent — it does not re-derive the
+record and verifies it** with one background sibling — it does not re-derive the
 day from transcript-mining subagents and per-repo sweeps. A thin scratchpad is a
 during-session note-taking failure to fix (tighten the heartbeat, log as you
-go), not a reason for a heavier wrapup. Target: a typical wrapup in **~10
-minutes with a single delta agent**.
+go), not a reason for a heavier wrapup.
 
-The routine is **interactive** (@jwildfire's call, 2026-07-09): first **collect**
-the picture read-only, then **discuss** — present findings and ask clarifying
-questions — and only after the discussion **apply** changes. Standing grants cover
+**Two clocks** (hub #148 D1) — they are measured separately and neither is allowed
+to hide behind the other:
+
+- **Time-to-first-visible-output: under 1 minute.** The checkpoint draft is in
+  front of @jwildfire inside the bar, produced from the scratchpad alone. This is
+  the binding SLA; verification runs beside it, not before it.
+- **Time-to-fully-closed: an honest, separate budget**, bounded by the deploy
+  floor — the hub-site deploy-to-green median is **157s over 12 runs**, so a fully
+  closed wrapup can never beat that, and pretending otherwise just moves the wait
+  somewhere invisible. Report both numbers, not a blended one.
+
+The starting point being fixed is measured, not felt: the **2026-07-30 `--auto`
+wrapup took ~28 minutes**. This bookend runs under the responsiveness contract in
+[`docs/session-framework.md`](../../docs/session-framework.md).
+
+The routine is **interactive** (@jwildfire's call, 2026-07-09): draft and present
+first, discuss, and only after the discussion apply changes. Standing grants cover
 the mechanics of the apply phase; they do not skip the discussion.
 
 This codifies diary design decision D2 (per-session cadence — see
 [`diary/README.md`](../../../obot.roadmap/diary/README.md)) and extends it from "write the entry"
 to the full closing routine.
+
+## The two headlines
+
+Every wrapup output — the checkpoint page, the diary entry, the `--auto` morning
+digest, and the closing chat response — **opens with the same two sections, in
+this order**:
+
+1. **🚦 Release candidates needing review**
+2. **🧭 Decisions needed**
+
+Everything else — work completed, PRs touched, blockers, loose ends — follows
+them. This is [`docs/rc-framework.md`](../../docs/rc-framework.md) applied to the
+session bookend: @jwildfire reviews exactly two kinds of thing, RCs carrying
+demos and decision artifacts carrying options, so the wrapup puts exactly those
+two at the top and leaves the rest as record. A session whose result is buried
+under a work log is a session he has to read before he can act.
+
+**Both headings are always present**, even when empty (`_None this session._`) —
+a missing heading is indistinguishable from a dropped one, and this is the part
+he scans first.
+
+### 🚦 Release candidates needing review
+
+One bullet per RC awaiting his decision — **this session's and every earlier one
+still open**. The list is a standing queue, not a session delta.
+
+- **Shape:** `- **{repo} {version}** — {one line: what a person can now do that
+  they could not before}. [RC PR #{n}]({pr url}) · [demo]({hub demo url}) ·
+  ask: {publish and tag | merge and hold}`, plus `*(carried from MM-DD)*` when
+  the item is not new this session.
+- **Draft-release RCs** — obot.agent, obot.roadmap and demo-301, the repos where
+  `main` *is* the integration branch — link the draft GitHub release in place of
+  the PR (rc-framework, *Repos where integration is the release branch*).
+- **Every bullet links a demo page on the hub.** A PR with no working deployed
+  demo link is not an RC and must not be put in front of him: list it under
+  `## Work completed` with the demo named as owed. The demo link is the bullet's
+  reason to exist — he decides from it without reading code.
+- **No RC from an active goal is itself news.** When a goal in
+  [`goals/registry.json`](../../goals/registry.json) advanced but produced no RC,
+  add one line saying why — a decision blocked it, the increment was too small to
+  release, the demo is still owed. Silence reads as "nothing happened", and the
+  2026-08-14 app-goal session (deliberately no RC) is exactly the case that needs
+  the sentence.
+
+### 🧭 Decisions needed
+
+One bullet per call the session could not make — cumulative in the same way,
+including open calls carried from earlier sessions.
+
+- **Shape:** `- **{the question in a few words}** — {the call in one line};
+  recommendation: {the option to take}. [decision artifact]({hub url}) ·
+  [answer in Q&A]({discussion url}) · blocks: [{goal or issue}]({url})`, plus
+  `*(carried from MM-DD)*` when the item is not new.
+- **Every decision has a hub Q&A thread** (@jwildfire, 2026-08-14): post a brief
+  executive summary — question, options in a line each, recommendation — to the
+  hub's [Q&A category](https://github.com/jwildfire/obot.roadmap/discussions/categories/q-a),
+  linking the artifact for the full argument (never restate it in markdown).
+  The thread is where he documents the decision; record it in the
+  decisions-index Discussion column so the roadmap Todo section links it.
+- **Every bullet names a recommendation.** Surfacing a decision without one hands
+  him the work of inventing the options — the same failure the blockers step
+  already rules out with `## Proposed mitigation`.
+- **The default home is a decision artifact** under
+  `obot.roadmap/reports/decisions/{YYYY-MM-DD}-{slug}/`, per the rc-framework
+  contract. A call too small for its own page may link the hub issue or comment
+  where its options are written down instead — but it must link *something*. A
+  decision that exists only as a diary sentence is one he cannot come back to.
+- A blocker with **no artifact and no issue** is a gap to name in the entry, not
+  a bullet to quietly drop.
+
+### Where everything else goes
+
+The headlines change what the later sections hold, so nothing appears twice:
+
+| Item | Home |
+|---|---|
+| A release proposed for publication | `## 🚦 Release candidates needing review` |
+| A call only @jwildfire can make | `## 🧭 Decisions needed` |
+| A risk being tracked, with an issue filed | `## Blockers / risks` |
+| A mechanical ask — a click, a permission, a sign-off, a stage call | `## 🙋 ToDo` |
+| Everything that landed on its own | `## Work completed` |
+
+The test is what he has to *do*: approve a release → headline 1; **choose**
+between options → headline 2; act on something small with no judgement in it →
+`🙋 ToDo`; nothing, it is already tracked → blockers or the work log.
 
 ## When to Use
 
@@ -55,51 +155,179 @@ filler diary entries).
 
 ## Procedure
 
-Three phases: **collect** (steps 1–4 — read-only: no issue edits, stage moves,
-posts, or memory writes yet), **discuss** (step 5), **apply** (steps 6–8).
+The shape is **ack + delegate** (step 0) → **draft and show** (steps 1–3, inside
+the under-a-minute bar; the checkpoint *is* the discussion) → **fold corrections**
+(step 4) → **collect and apply** (steps 5–8) → **post** (step 9) → **exit**
+(step 10). Nothing before the checkpoint edits issues, moves stages, posts, or
+writes memory.
 
-### 1. Fold the scratchpad, verify with one delta agent
+### 0. Ack and spawn the verifier — in one message
 
-**The scratchpad first.** Read today's
-`.claude/session-notes/{YYYY-MM-DD}.md` in full: the `## Overview` check-state
-(what the kickoff list says got done), unchecked `## Todo` items, `## Notes`,
-and the `## Session log` — including every sibling (`👯🤖`) and ultracode
-(`⚡️🤖`) line the heartbeat collected. This record, plus the current
-conversation, is the inventory. Group it the way diary entries report it:
-merged / opened / closed / advanced, each with links.
+The **first output of the wrapup**, before any reading beyond today's scratchpad:
+one line confirming the wrapup started, naming the sibling
+`👯🤖 {date} wrapup-verify` and what it is checking, and saying the draft is next.
+Then spawn it and move straight on to step 1 — never wait on it.
 
-**Then verify, don't trust.** Launch a single read-only subagent to check the
-record against reality — batched calls, not per-repo loops:
+Brief the sibling from
+[`templates/delta-sweep-briefing.md`](../../templates/delta-sweep-briefing.md),
+which layers on
+[`templates/sibling-briefing.md`](../../templates/sibling-briefing.md) and is the
+single home for the `gh` traps — the silent 100-result cap on `gh search` is
+exactly the error class this sibling exists to catch, so it must run with the
+traps in hand. In the wrapup-verify variant its corrections land in
+`{workspace}/.claude/session-notes/{YYYY-MM-DD}-wrapup-verify.md`, its heartbeat
+lines are inserted under the scratchpad's `## Session log` heading with a shelled
+`$(date +%H:%M)`, and it ends with a terminal `result:` line. Any free-text
+argument to `/session-wrapup` is carried in the briefing as recon — it is never
+investigated inline.
 
-- `gh search issues` / `gh search prs` across `--owner jwildfire`, filtered to
-  activity since the session started (`--json` fields plus `updatedAt`; parse
-  with `python3`, `jq` is not installed), plus
-  `gh project item-list 1 --owner jwildfire` for board stages.
-- Its two jobs: **verify scratchpad claims** (a "PR posted" line must
-  correspond to a real PR; a "merged" claim to a merged PR) and **catch
-  strays** — GitHub activity in the session window with no scratchpad line.
+Fan its work into **three independent jobs** (hub #148 D3), all in the sibling,
+none in the lead:
 
-**Local git, scoped.** Check `git status` / unpushed commits only in the repos
-and worktrees the scratchpad or delta digest name as touched this session —
-unpushed work is a loose end, not a completion. Do not sweep every clone.
+- **(a) Delta verify** — every scratchpad claim corresponds to real GitHub state
+  (a "PR posted" line to a real PR, a "merged" claim to a merged PR), plus
+  **strays**: GitHub activity in the session window with no scratchpad line.
+  **The headline bullets are checked hardest**: every RC's PR or draft release is
+  still open, every demo URL and decision-artifact URL returns 200, and every
+  carried item is still unresolved. A dead demo link turns an RC bullet into
+  noise — catch it before he clicks it, not after.
+- **(b) Local git, scoped** — `git status` and unpushed commits in **only** the
+  repos and worktrees the scratchpad names as touched; unpushed work is a loose
+  end, not a completion. Never a sweep of every clone.
+- **(c) Roadmap hygiene recon** — the step 5 checklist run read-only, returning a
+  **proposed fix list** the lead applies, plus the still-open Ideas listing.
 
-**Transcripts are the exception, not the default.** Mine a session transcript
-(`~/.claude/projects/…/{sessionId}.jsonl`, via one scoped subagent) only when
-the fold surfaces a **known gap** — e.g. a sibling job ran but left no
-scratchpad lines, or the delta caught activity nothing accounts for. Name the
-gap in the wrapup summary either way.
+**Transcripts stay the exception.** Mine a session transcript
+(`~/.claude/projects/…/{sessionId}.jsonl`) only when the fold surfaces a **known
+gap** — a sibling job that ran but left no scratchpad lines, activity nothing
+accounts for. When justified, it is a **fourth job for the same sibling**, never a
+second blocking subagent in the lead. Name the gap in the wrapup summary either
+way.
 
-### 2. Roadmap hygiene sweep — build the fix list
+### 1. Draft from the scratchpad alone
 
-For **each issue or PR the inventory says was touched** (not the whole tracker),
-check — and record mismatches as **proposed fixes**, don't edit anything yet:
+The scratchpad **is** the as-you-go record; the draft does not wait on
+verification. Read today's `.claude/session-notes/{YYYY-MM-DD}.md` in full — the
+`## Overview` check-state (what the kickoff list says got done), unchecked
+`## Todo` items, `## Notes`, `## Scaffold`, and the `## Session log` including
+every sibling (`👯🤖`) and ultracode (`⚡️🤖`) line — in **one batched read**
+together with the previous diary entry for format reference. One tool block, not
+sequential reads.
+
+**Pre-compose deterministically** (hub #148 D4) so the model edits prose rather
+than deriving structure:
+
+- The **two headline lists come first, and come mechanically**: RC bullets from
+  the scratchpad lines naming an RC PR or draft release plus its demo URL,
+  decision bullets from the lines naming a decision artifact — **unioned with the
+  still-open items in the previous entry's two headline sections**, which carry
+  forward until he closes them. Carrying an item he has since resolved is the
+  cheap error (step 4's verifier strikes it); dropping one he has not is the
+  expensive one.
+- The **merged / opened / closed / advanced** grouping, with links, comes
+  mechanically from the scratchpad plus the warm sweep cache.
+- The **session-report line** and the scratchpad **check-offs** are likewise
+  mechanical.
+- The **scaffold changes** are the scratchpad's `## Scaffold` section carried
+  verbatim — [`session-scaffold`](../session-scaffold/SKILL.md) already built that
+  list as the friction happened, so nothing is re-derived here.
+- The **next-session priorities** are drafted here from the same scratchpad alone:
+  unchecked `## Todo` items and uncompleted `## Overview` lines, carried items
+  marked as carried.
+- The model writes only the **lead paragraph and the section prose**.
+
+The scaffold and next-session sections are **required to be in the checkpoint draft**
+(step 3 shows the entry in publish form), so they are composed here, from the
+scratchpad, and only *extended* after the checkpoint — the session sweep for what
+the scaffold list missed is step 6, and the traceability pass that links a hub
+requirement to every priority is step 7. Nothing in this step reads GitHub or
+files anything.
+
+Output is bulleted lists, not prose paragraphs, everywhere but the lead.
+
+### 2. Persist the draft to disk — before rendering
+
+Write the composed entry to
+`{workspace}/.claude/session-notes/{YYYY-MM-DD}-diary-draft.md` (suffix `-2`,
+`-3`, … for later sessions the same day, mirroring the diary file convention),
+then **render the review page from that file** (hub #148 comment). A session that
+dies after the checkpoint loses nothing. This is the same path the `--auto`
+failure lane already writes to, so the two agree by construction.
+
+### 3. Checkpoint — the draft post, reviewed in Chrome
+
+The checkpoint is **a draft of the wrapup post presented for review**
+(@jwildfire's format, 2026-07-14, superseding the three-question
+AskUserQuestion checkpoint — "the formatting on the Q&A is hard to follow"):
+
+1. **The full diary entry draft** (step 9 format) — the two headline sections
+   first, then accomplishments, scaffold changes, and next-session priorities,
+   all visible in the form they will actually publish. Add a short aside listing
+   what posts alongside the entry (changelog entry, session report) and what was
+   already applied under standing grants before the draft.
+2. **Render it as a local HTML review page and open it in Chrome** —
+   @jwildfire reviews in Chrome, not the CLI. The page shows the entry styled
+   as it will publish — the two headline sections at the top, carrying the page's
+   visual weight, the work log below them — with a comment box and two buttons —
+   `✅ Approve & post` / `✏️ Request changes` — wired to a one-shot localhost
+   listener so the click (with comments) reaches the session directly; a chat
+   reply works as a fallback. Nothing posts until the decision arrives.
+3. **Verification banner** — the page carries a load-bearing line reading
+   `👯🤖 wrapup-verify still running` or `👯🤖 wrapup-verify landed at HH:MM`
+   (shelled — `$(date +%H:%M)`, never modeled). A
+   provisional draft must say it is provisional; the banner is never dropped for
+   tidiness.
+4. **Comments are the discussion**: fold them in — including any new work they
+   direct, which then belongs in the entry — re-render, and re-present until
+   approved. An approval is the go-ahead for the apply phase (Approval
+   Convention satisfied); the diary entry is then posted under the
+   standard-update grant.
+
+**The under-a-minute clock stops here** — at first paint of this page, not at the
+last revision.
+
+**Timing ledger** — at first paint here, and again at step 9, append one JSON line
+per step to `.claude/session-hub/cache/init-timings.jsonl` with `"bookend":"wrapup"`,
+per the schema in the [responsiveness
+contract](../../docs/session-framework.md#the-timing-ledger). Shell the timestamps.
+The ledger is local telemetry — **never commit it**.
+
+Anything beyond standing grants that the sweep surfaced (deletions, closing
+unverified work, upstream PRs) still needs its own explicit ask — raise it in
+the review aside or separately, never bury it in the draft.
+
+If @jwildfire is unavailable (unattended background run, no decision), stop
+here and surface `needs input:` with the full draft — never post the diary or
+edit issues without the review. This rule is for the *default* interactive
+wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
+(see the [Unattended variant](#unattended---auto-variant)).
+
+### 4. Fold the verifier's corrections in — before APPLY
+
+Read `{workspace}/.claude/session-notes/{YYYY-MM-DD}-wrapup-verify.md` and state
+the deltas in chat as a short bulleted revision — `Since the draft: …` — then
+re-render the review page if the entry text changed.
+
+- **Nothing is applied before the corrections land**, or before the sibling is
+  explicitly declared timed out.
+- If it **is** declared timed out, say so in the closing response *and* in the
+  entry — an unverified wrapup is allowed, an unverified wrapup that reads as
+  verified is not.
+- A `no changes` line from the verifier is a **valid landing and must be stated**,
+  never silently assumed — a silently-skipped verification must be detectable.
+
+### 5. Roadmap hygiene — apply the fix list
+
+The checklist below is **run as recon by the verifier sibling** (step 0 job c) and
+arrives as a proposed-fix list; the lead applies it rather than re-deriving it.
+For **each issue or PR the inventory says was touched** (not the whole tracker):
 
 - **Body accurate?** Re-read the live body (`gh issue view` — Draft Sync
   Convention); flag it if the session changed scope, design, or status.
   Requirement issues must carry the five template sections (see
   [Creating Requirement issues](../../../obot.roadmap/AGENTS.md)).
 - **Stage correct?** Flag touched items whose board stage no longer matches
-  reality (stages come free with the step 1 delta digest). Respect done-gates
+  reality (stages come free with the delta digest). Respect done-gates
   (e.g. a renderer requirement is not Released until its site entry deploys).
 - **Links intact?** PRs carry `Closes #X` lines and Development-sidebar links;
   sub-issues are attached to their parent (`sub-issue-linking` skill).
@@ -108,9 +336,9 @@ check — and record mismatches as **proposed fixes**, don't edit anything yet:
   requirement(s) in the release notes — a `Requirements delivered:` line placed
   before the closing attribution rule. Retro-add via the releases API
   (`gh api -X PATCH repos/{owner}/{repo}/releases/{id}`) when missing.
-- **Ideas promoted?** List still-open Ideas discussions
+- **Ideas promoted?** The sibling lists still-open Ideas discussions
   (`gh api graphql` on the hub's Ideas category, states `OPEN`, excluding the
-  pinned explainer #47) and note each as "captured, not yet promoted" — these
+  pinned explainer #47) and each is noted as "captured, not yet promoted" — these
   are ideas the `ideas-triage` Action and `session-inbox` haven't landed on the
   roadmap yet (@jwildfire, 2026-07-24). Surface the list; don't force-promote.
 
@@ -118,17 +346,60 @@ Then sweep the scratchpad and conversation for **uncaptured todos**: promises
 made, "we should…" moments, blockers hit, review requests, deferred decisions.
 Propose a durable home for each — a Requirement (`requirement-drafting`), a
 sub-issue (`requirement-tasks`), an edit/comment on an existing issue, or the
-diary's "Next session" / "🙋 ToDo" sections (step 7). Standing grants make the
-fixes mechanically no-approval-needed, but they are applied in step 6 — after
+diary's "Next session" / "🙋 ToDo" sections (step 9). Standing grants make the
+fixes mechanically no-approval-needed, but they are applied in step 8 — after
 the checkpoint. Anything involving deleting or closing what isn't verifiably
 done needs explicit approval: raise it at the checkpoint, never assume it.
 
-### 3. Scaffold review — collect candidates
+**Blockers and risks get issues, not just prose** (@jwildfire, 2026-07-29). A risk
+named only in a diary entry is a risk nobody is tracking — the entry scrolls off
+the news page and the concern goes with it. So for every item heading into the
+entry's `## Blockers / risks` section, decide: is it **actionable** — is there
+something a future session or @jwildfire could actually do about it? If yes, it
+gets a tracking issue. Purely descriptive context (a constraint that simply *is*,
+with no action available) stays prose.
 
-Start from the scratchpad's `## Scaffold` section — the list
-[`session-scaffold`](../session-scaffold/SKILL.md) built as friction happened;
-those entries are the primary candidates. Then review the session for anything
-the list missed:
+**A risk that needs *his* call is also a headline.** File the issue as below
+*and* carry the item as a `🧭 Decisions needed` bullet with its artifact link:
+the issue is where it is tracked, the headline is how it reaches him this
+session. A blocker that only ever appears under `## Blockers / risks` has been
+recorded, not raised.
+
+File them **as obotclaw**, in the repo that owns the fix (the hub for
+product/roadmap concerns, `obot.agent` for harness and scaffold ones), and open
+each body with a provenance line naming where it came from — so the issue carries
+its own history:
+
+> Filed from the **blockers and risks** identified in session 😺🤖 {date} (job
+> {id}) — the wrapup files actionable risks rather than leaving them in a diary
+> entry. Session record: [diary {date}]({deployed diary URL}).
+
+Write the body as the risk, not the anecdote. **Every documented risk carries a
+nested `## Proposed mitigation` section** (@jwildfire, 2026-07-29) — a risk
+without one is a complaint, and it puts the burden of inventing the fix on
+whoever picks the issue up cold. So each body is two halves:
+
+- **`## Risk`** — what happened, and why it matters. Concrete: the mechanism, not
+  the vibe.
+- **`## Proposed mitigation`** — two to four numbered candidate fixes, each a real
+  option someone could choose, ending with a one-line **recommendation** naming
+  which to take and why. Where a fix is cheap and a structural change is not, say
+  which is which; where the honest answer is "accept it and revisit at X", that is
+  a legitimate option to list.
+
+Board each new hub issue (normally `Backlog`) and give it a milestone. Then **link
+the issue from the entry's blocker bullet**, so the diary points at the tracker
+rather than replacing it. **Composing the full Risk + Proposed mitigation bodies
+happens after the checkpoint**, in the apply phase (step 8): the checkpoint draft
+shows the blocker bullets with an `issue to file` marker rather than waiting on
+composed bodies.
+
+### 6. Scaffold review — extend the drafted list
+
+The candidate list is already in the checkpoint draft, carried verbatim from the
+scratchpad's `## Scaffold` section in step 1 — the list
+[`session-scaffold`](../session-scaffold/SKILL.md) built as friction happened. Add
+the sibling's review to it, then check the session for anything both missed:
 
 - **Repeatable pattern** executed by hand two or more times, or an existing skill
   that gave stale/wrong guidance → a new skill or a skill update. Hub-process
@@ -143,70 +414,64 @@ the list missed:
   merged worktrees, heartbeat nudges that misfired → note what a fix would be;
   nothing destructive without approval.
 
-### 4. Draft next-session tasks
+### 7. Next-session tasks — make them traceable, queue the filings
 
-Draft a prioritized, concrete list of what the next session should pick up:
-every item traceable (link the issue/PR it advances; propose an issue if
-substantial work has none), carried items marked as carried so nothing silently
-drops. The agreed list lands in the diary's **"Next session: loose ends"**
+Step 1 drafted this list from the scratchpad and the checkpoint showed it; here it
+is made traceable against the verified record — link the issue/PR each item
+advances, propose an issue where substantial work has none, and fold in anything
+the checkpoint discussion added. The agreed list lands in the diary's
+**"Next session: loose ends"**
 section, the scratchpad `## Overview` check-state, and the `next-session-todo`
-memory (step 6) — the hand-off [`session-init`](../session-init/SKILL.md) reads
+memory (step 8) — the hand-off [`session-init`](../session-init/SKILL.md) reads
 back.
 
+**The hand-off must be self-contained (2026-08-04):** the `## Overview` this
+wrapup leaves behind carries the complete ranked list — full one-line items
+with links, groups, and check-state — in the **current day's** scratchpad,
+never a pointer to an earlier day's file ("see YYYY-MM-DD.md"). A session that
+spans days copies the list forward into today's file as part of step 8. Init
+reads ONE file; the 2026-08-04 init paid a round trip chasing a two-file
+pointer chain.
+
+**Open headline items carry into the hand-off too.** Every RC still awaiting
+review and every decision still open goes into the `## Overview`'s *Waiting on
+@jwildfire* group with its links — not as the next session's work to do, but as
+the work it must not duplicate and the queue it should ask about first.
+[`session-init`](../session-init/SKILL.md) paints that group verbatim, so an
+unreviewed RC stays visible every morning until he closes it.
+
 **Roadmap prep — obot.agent orchestration job (1), roadmap-standards enforcement:**
-every priority on the drafted list must link a hub requirement. For any priority
-without one, draft the requirement's **Business Requirement + Overview** sections
-(via `requirement-drafting`; scope questions to @jwildfire are welcome —
-AskUserQuestion) and **file it before the checkpoint**, so the draft post's
-next-session list presents each priority *with* its requirement link. Board-add every new
-requirement with a Status (normally `Requirement Gathering`) and link existing
-implementation issues as sub-issues at filing time (`sub-issue-linking`; note the
-one-parent-per-issue constraint). Later lifecycle sections (Data Requirement,
-Design, Tasks) stay stubbed for their own stages.
+every priority on the drafted list must link a hub requirement. **The obligation is
+unchanged; only its position relative to the checkpoint moves** (hub #148 D6). A
+priority without a requirement **no longer blocks the checkpoint**:
 
-### 5. Checkpoint — the draft post, reviewed in Chrome
+- Draft the requirement's **Business Requirement + Overview** sections (via
+  `requirement-drafting`; scope questions to @jwildfire are welcome —
+  AskUserQuestion).
+- Mark the item `requirement to file` in the checkpoint draft.
+- **File it in the apply phase (step 8)** — or hand it to the next session's queue
+  — rather than before the checkpoint.
+- **Record the queued filing in the entry** so nothing drops.
 
-The checkpoint is **a draft of the wrapup post presented for review**
-(@jwildfire's format, 2026-07-14, superseding the three-question
-AskUserQuestion checkpoint — "the formatting on the Q&A is hard to follow"):
+Board-add every new requirement with a Status (normally `Requirement Gathering`)
+and link existing implementation issues as sub-issues at filing time
+(`sub-issue-linking`; note the one-parent-per-issue constraint). Later lifecycle
+sections (Data Requirement, Design, Tasks) stay stubbed for their own stages.
 
-1. **Compose the full diary entry draft** (step 7 format) from the fold —
-   accomplishments, scaffold changes, and next-session priorities all visible
-   in the form they will actually publish. Add a short aside listing what posts
-   alongside the entry (changelog entry, session report) and what was already
-   applied under standing grants before the draft.
-2. **Render it as a local HTML review page and open it in Chrome** —
-   @jwildfire reviews in Chrome, not the CLI. The page shows the entry styled
-   as it will publish, with a comment box and two buttons —
-   `✅ Approve & post` / `✏️ Request changes` — wired to a one-shot localhost
-   listener so the click (with comments) reaches the session directly; a chat
-   reply works as a fallback. Nothing posts until the decision arrives.
-3. **Comments are the discussion**: fold them in — including any new work they
-   direct, which then belongs in the entry — re-render, and re-present until
-   approved. An approval is the go-ahead for the apply phase (Approval
-   Convention satisfied); the diary entry is then posted under the
-   standard-update grant.
+### 8. Apply the agreed changes
 
-Anything beyond standing grants that the sweep surfaced (deletions, closing
-unverified work, upstream PRs) still needs its own explicit ask — raise it in
-the review aside or separately, never bury it in the draft.
-
-If @jwildfire is unavailable (unattended background run, no decision), stop
-here and surface `needs input:` with the full draft — never post the diary or
-edit issues without the review. This rule is for the *default* interactive
-wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
-(see the [Unattended variant](#unattended---auto-variant)).
-
-### 6. Apply the agreed changes
-
-- Issue-body edits, stage moves, link and metadata fixes from step 2, as agreed.
-- New issues/sub-issues and issue comments that got homes in the discussion.
-- Scaffold updates from step 3 that were approved or fall under standing grants;
+- Issue-body edits, stage moves, link and metadata fixes from step 5, as agreed.
+- New issues/sub-issues and issue comments that got homes in the discussion,
+  including the **composed Risk + Proposed mitigation bodies** deferred from
+  step 5.
+- The **queued requirement filings** from step 7 (or their explicit hand-off to
+  the next session's queue).
+- Scaffold updates from step 6 that were approved or fall under standing grants;
   memory writes, including updating the `next-session-todo` memory to the agreed
-  step-4 list.
+  step-7 list.
 - Check captured scratchpad items off (`- [x]`) — never delete them or the file.
 
-### 7. Draft and post the session summary
+### 9. Draft and post the session summary
 
 - **File**: one post per session (@jwildfire, 2026-07-09). The day's first
   session is `diary/YYYY-MM-DD.md`; each later session gets its **own file**
@@ -215,12 +480,17 @@ wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
   existing entry — `render_diary.mjs` gives every session file its own page and
   news-index line.
 - **Format** (match recent entries; the diary README and the latest few entries
-  are the exemplars): lead `<span class="meta">…</span>` story paragraph, then
+  are the exemplars): lead `<span class="meta">…</span>` story paragraph and the
+  session-report line, then **the two headlines** —
+  `## 🚦 Release candidates needing review` and `## 🧭 Decisions needed`, composed
+  to the rules [above](#the-two-headlines) — and only then the record:
   `## Work completed` (from the step 1 inventory, grouped by lane),
   `## PRs / issues touched` (merged / opened / closed / advanced, with links),
-  `## Blockers / risks`, `## Next session: loose ends` (from step 4, as agreed),
-  `## 🙋 ToDo` (items needing @jwildfire). The scratchpad `## Notes` lines are
-  raw material for the entry, not verbatim copy.
+  `## Blockers / risks` (each actionable item linking the issue filed for it in
+  step 8), `## Scaffold changes` (step 6), `## Next session: loose ends` (from
+  step 7, as agreed), `## 🙋 ToDo` (the mechanical remainder only — see the
+  routing table). The scratchpad `## Notes` lines are raw material for the entry,
+  not verbatim copy.
 - **Changelog**: if the session changed what `roadmap.html` shows (stage moves,
   new requirements), append a `site/roadmap-changelog.json` entry with the
   semver bump rules in `AGENTS.md`.
@@ -234,8 +504,23 @@ wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
   Output lands at `obot.roadmap/reports/sessions/{slug}.html` (slug mirrors the
   diary file). Add one line to the entry directly under the `<span class="meta">`
   paragraph: `📊 [Session report](../reports/sessions/{slug}.html)`. The report
-  commits together with the diary entry. Render it **after** the scratchpad
-  check-states from step 6 are final — the report freezes them.
+  commits together with the diary entry. **The render runs after the checkpoint**
+  — it freezes the step-8 check-states anyway, so it has no business on the
+  pre-checkpoint path (hub #148 D6). The analytics/status refresh and the
+  open-Ideas listing move off that path with it.
+- **Refresh analytics usage data**: regenerate the Cost data behind
+  [the Analytics page](https://jwildfire.github.io/obot.roadmap/analytics/index.html) —
+
+  ```bash
+  python3 obot.roadmap/scripts/build_usage_data.py   # writes site/usage/usage.json
+  ```
+
+  The source is this machine's local transcripts, so the site deploy **cannot**
+  rebuild this data itself — it re-renders whatever `usage.json` was last
+  committed, and the wrapup is the heartbeat that keeps it current
+  (@jwildfire, 2026-07-29). Commit the refreshed file together with the diary
+  entry (standard-update grant). Like the report render, this is a
+  post-checkpoint step (hub #148 D6).
 - **Post**: commit directly to `main` and push (standard-update grant). The site
   deploy triggers on `diary/**` pushes.
 - **Refresh package status**: that same deploy re-renders
@@ -246,27 +531,50 @@ wrapup; a wrapup invoked with `--auto` posts without the checkpoint instead
   ```bash
   gh workflow run deploy-site.yml -R jwildfire/obot.roadmap
   ```
-- **Verify the deploy**: `gh run list -R jwildfire/obot.roadmap --workflow=deploy-site.yml --limit 1`
-  and watch it to a green conclusion — a posted-but-undeployed entry is not posted.
-  The dashboard steps are `continue-on-error`, so also check that the run did not
-  fall back to the "temporarily unavailable" placeholder.
+- **Verify the deploy — asynchronously; it does not block the lead** (hub #148
+  D5). Push, share the deployed URL, and verify off the critical path: start
+  `gh run list -R jwildfire/obot.roadmap --workflow=deploy-site.yml --limit 1` plus
+  its watch **in the background**, or hand the watch to the verify sibling. The
+  failure lane must be **durable**: on a red run — or one that fell back to the
+  "temporarily unavailable" placeholder, since the dashboard steps are
+  `continue-on-error` — append a `## Deploy failure` line to the scratchpad naming
+  the run URL and end the session with `needs input:`. **A posted-but-undeployed
+  entry is not posted** — that rule is unchanged; it is now a condition confirmed
+  before close-out rather than a blocking watch loop.
 - **Share the deployed URL** (https://jwildfire.github.io/obot.roadmap/ diary page)
   — @jwildfire reviews in Chrome on the deployed site, not from a local file.
+- **Append the closing timing-ledger line** for this bookend (schema and path in
+  step 3), so the wrapup SLA stays a checkable fact rather than a vibe.
 
-### 8. Exit checklist
+### 10. Exit checklist
+
+**The closing chat response leads with the two headlines as well** — the same RC
+and decision bullets, one line each with their links, before anything about how
+the session went. He should be able to act from the chat message without opening
+the entry; the checklist below goes underneath them, not above.
 
 Confirm, and state in the closing response:
 
+- [ ] Both headlines present in every output (checkpoint page, entry, closing
+      response) — each bullet one line, each RC linking a live demo, each
+      decision naming its recommendation and linking its artifact; `_None_` where
+      empty, with the no-RC-from-an-active-goal line where that applies.
+- [ ] Headline items reconciled — carried items still open, resolved ones
+      dropped, nothing duplicated between the headlines and `## 🙋 ToDo`.
 - [ ] Scratchpad folded — every line verified, captured, and checked off; gaps
       (missing sibling logs, stray GitHub activity) named.
-- [ ] Checkpoint held — changes applied only after the step 5 discussion.
+- [ ] Checkpoint draft persisted to disk before rendering.
+- [ ] Checkpoint held — changes applied only after the step 3 discussion.
+- [ ] Verifier corrections folded in before apply (or timeout stated).
 - [ ] Board stages match reality for every touched issue; bodies synced.
 - [ ] No todo exists only in conversation — each has an issue, diary line, or
       memory entry.
 - [ ] Scaffold updates applied or proposed; memory current.
 - [ ] Session report rendered and linked from the diary entry.
-- [ ] Next-session list recorded (diary + scratchpad + memory).
+- [ ] Next-session list recorded (diary + scratchpad + memory); queued
+      requirement filings named.
 - [ ] Diary entry deployed (workflow green) and the deployed URL shared.
+- [ ] Timing ledger line appended for this bookend.
 
 ## Unattended (`--auto`) variant
 
@@ -276,35 +584,53 @@ draft-only variant from the hub #18 design). It is the standard close for
 autonomous sessions (`obot-auto`,
 [hub #18](https://github.com/jwildfire/obot.roadmap/issues/18)) and for any
 wrapup he invokes with `--auto`; a bare `/session-wrapup` stays interactive —
-the step 5 checkpoint remains the default contract.
+the step 3 checkpoint remains the default contract.
 
-- **Steps 1–4 run unchanged** (fold, verify with the delta agent, hygiene
-  sweep, next-session draft).
-- **Step 5 is skipped**: no review page, no approval wait. Compose the final
-  entry directly in step 7 format, and open it with an unreviewed marker
+- **Steps 0–2 run unchanged** (ack + spawn the verifier, draft from the
+  scratchpad, persist the draft to disk), as do **steps 5–7** (hygiene fix list,
+  scaffold review, next-session draft).
+- **Step 3 is skipped**: no review page, no approval wait. Compose the final
+  entry directly in step 9 format, and open it with an unreviewed marker
   directly under the session-report line:
   `*Posted unattended (--auto); not yet reviewed by @jwildfire.*` — the diary
   publishes to a public site, so the flag keeps the record honest. He reviews
   after the fact; fold any corrections in by direct commit (standard-update
   grant) and drop the marker when he signs off.
-- **Step 6 applies standing-grant changes only** (board stages, issue-body
+- **Step 4 becomes a blocking wait — the asymmetric rule.** An `--auto` wrapup
+  **waits for the verify sibling before posting**, because there is no human to
+  catch a correction afterwards. The wait is a **declared exemption**: log it as a
+  scratchpad heartbeat line under `## Session log` when the wait starts and when
+  it ends, and state it in the digest.
+- **Step 8 applies standing-grant changes only** (board stages, issue-body
   fixes and comments, scratchpad check-offs, memory updates — including
   `next-session-todo`). The grant boundary does not move with `--auto`:
   merges, deletions, closes beyond the wired grants, releases, and upstream
-  posts still land as `## 🙋 ToDo` asks in the entry, never auto-applied.
-- **Step 7 runs in full**: post the entry plus changelog line and session
-  report under the standard-update grant, verify the deploy to green, and
-  carry the deployed URL into the close-out. If the push or deploy fails,
-  downgrade gracefully: save the entry as
-  `{workspace}/.claude/session-notes/{YYYY-MM-DD}-diary-draft.md` and end with
-  `needs input:` naming the failure — a posted-but-undeployed entry is not
-  posted.
+  posts still land as asks in the entry, never auto-applied — **routed by the
+  headline table**: a release proposed for publication is an RC bullet, a call he
+  has to make is a decision bullet, and only the mechanical remainder is
+  `## 🙋 ToDo`.
+- **Step 9 runs in full**: post the entry plus changelog line and session
+  report under the standard-update grant, and carry the deployed URL into the
+  close-out. Deploy verification stays **asynchronous and non-blocking here too** —
+  `--auto` is not one of the declared exemptions in the [responsiveness
+  contract](../../docs/session-framework.md#exemptions--announce-them), so it uses
+  the same durable `## Deploy failure` lane step 9 defines rather than a blocking
+  watch loop. If the push or deploy fails,
+  downgrade gracefully: the entry is already saved at
+  `{workspace}/.claude/session-notes/{YYYY-MM-DD}-diary-draft.md` (step 2 wrote
+  it) — end with `needs input:` naming the failure — a posted-but-undeployed
+  entry is not posted.
 - **Still write the morning digest** into the scratchpad as a
-  `## Morning digest` section (ultracode-runbook format: what shipped with
-  links and CI state, token/cost note per the allocation grant, anything
-  skipped or failed with why, and a numbered morning-actions queue) — it stays
-  the fastest skim even with the diary live.
-- **Step 8 adapts one box**: "Checkpoint held" becomes "Unreviewed marker
-  present in the posted entry".
+  `## Morning digest` section — **the two headlines first** (RCs with their demo
+  links, then decisions with their artifact links and recommendations), then the
+  ultracode-runbook body: what shipped with links and CI state, token/cost note
+  per the allocation grant, anything skipped or failed with why, and a numbered
+  morning-actions queue whose first entries are the headline items. It stays the
+  fastest skim even with the diary live, and it opens on the same two questions
+  the entry does.
+- **Step 10 adapts one box**: "Checkpoint held" becomes "Unreviewed marker
+  present in the posted entry". The two headline boxes do not adapt — an
+  unattended wrapup is precisely the one he reads cold, so the headlines are the
+  whole interface.
 - **End the session** with `result:` and the deployed diary URL; `needs
   input:` is reserved for the failure path above.

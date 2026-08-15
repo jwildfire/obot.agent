@@ -41,16 +41,64 @@ For current status — which renderers are live, what's in review, what's next �
 - `AGENTS.md` — the overlay: program rules layered on gsm.agent conventions.
 - `agent.md` — short entrypoint: which skill to reach for.
 - `docs/` — framework docs (test framework, GxP framework, interview framework,
-  terminology, gsm.viz reference). The harvested requirement matrices moved to
+  terminology, [`session-framework`](docs/session-framework.md) — the responsiveness contract the session commands
+  answer to — gsm.viz reference). The harvested requirement matrices moved to
   safety.viz (`requirements/`) in obot.roadmap#64; `docs/requirements/` keeps the
   harvest-phase review record and a pointer.
 - `skills/` — the agent skills; grouped index in [`agent.md`](agent.md).
+- `commands/` — the short `/s-*` aliases for the session-command family (`/s-init`
+  is `/session-init`); generated and installed by
+  [`scripts/session-aliases`](scripts/session-aliases). Note the workspace copies at
+  `~/Documents/obot2/.claude/commands/*.md` are **installed copies, not symlinks** —
+  editing the files here does not update the live workspace commands until
+  `scripts/session-aliases` is re-run. Skills under `.claude/skills/` *are* symlinks and
+  go live immediately.
 - `templates/` — starter templates (requirements matrix, interview log/question,
-  test-driver prompt).
+  test-driver prompt) plus the sibling briefing and the delta-sweep briefing — the
+  fill-in briefings `session-spawn` and the bookends use.
 - `interviews/` — P004 interview records (historical; kept verbatim).
 - `scripts/` — `obot-app-token` (mints obotclaw[bot] installation tokens), `obot-merge`
-  (the policy-gated merge lane), the idea-queue intake pair (`reminders-to-ideas`,
-  `ideas-sweep`), and the wiki requirements-harvest helper.
+  (the policy-gated merge lane), `obot-auto` (launches an unattended `--auto` session),
+  `obot-prime` (launches the standing 🎩🤖 Q&A concierge session —
+  [`skills/session-prime`](skills/session-prime/SKILL.md)),
+  `policy.json` + `obot-policy` (see below), the idea-queue intake trio
+  (`reminders-to-ideas`, `ideas-file`, `ideas-sweep`), `reviews-queue` (the classified
+  PR queue behind `session-reviews`), `session-aliases` (generates and installs the
+  `/s-*` aliases), and the wiki requirements-harvest helper.
+- `tools/` — the session [`session-hub`](tools/session-hub/README.md) (live dashboard +
+  wrapup report) and [`statusline`](tools/statusline/README.md) (the status line every
+  agent runs, with its clickable hub link). Each ships an installer where the harness
+  needs a copy outside the repo.
+
+## Write policy: one decision per repo
+
+[`scripts/policy.json`](scripts/policy.json) is the guardrail for every agent write in
+the workspace — what merges where, and what an unattended session may do. A repo gets
+**one** decision, its **profile**:
+
+| | `protected` (the default) | `auto` (@jwildfire promotes a repo to it) |
+|---|---|---|
+| **integration** branch | merge needs `--jeremy-approved` attestation | merges on the standard lane |
+| **release** branch(es) | attestation | attestation |
+| any other branch | refused | refused |
+| unattended `--auto` session | no writes at all | branch, draft PR, merge integration, manage issues |
+
+Branches are declared by **role**, not name, so a repo whose branches aren't called
+`dev`/`main` needs no special case — `demo-301` maps `main`→integration and its live
+Pages branch `site`→release. A repo **absent from the file is refused entirely**; adding
+one lands it at `protected`. Anything beyond a profile goes in that repo's `custom`
+block and carries its own recorded approval.
+
+```bash
+scripts/obot-policy explain jwildfire/safety.viz   # effective permissions, with the approval record
+scripts/obot-policy matrix                         # every repo x branch
+scripts/obot-policy validate                       # structural + policy consistency (obot-auto gates on this)
+scripts/obot-policy add jwildfire/new-repo         # scaffold at 'protected'
+```
+
+`policy.json` sits inside its own carve-out: PRs touching it never merge unattended, and
+never merge at all without @jwildfire's sign-off. It replaced the `merge-policy.json` +
+`autonomy-grants.json` pair, which had to be edited separately per repo and had drifted.
 
 ## Agent identity
 
@@ -66,12 +114,14 @@ How raw ideas become roadmap items without a persistent Claude session
 full design on the
 [roadmap site](https://jwildfire.github.io/obot.roadmap/requirements/design/48_design.html)):
 
-- **Capture (zero tokens).** Two lanes into the hub's
+- **Capture (zero tokens).** Three lanes into the hub's
   [Ideas discussions](https://github.com/jwildfire/obot.roadmap/discussions/categories/ideas):
-  a new discussion straight from GitHub mobile/web, or *"Hey Siri, add … to my obot
+  a new discussion straight from GitHub mobile/web; *"Hey Siri, add … to my obot
   list"* — [`scripts/reminders-to-ideas`](scripts/reminders-to-ideas) files pending
-  Reminders as discussions posted by obotclaw[bot] (no LLM; items prefixed `private:`
-  stay in a local file, never posted).
+  Reminders as discussions posted by obotclaw[bot] (no LLM); or, from inside a
+  session, [`session-idea`](skills/session-idea/SKILL.md) →
+  [`scripts/ideas-file`](scripts/ideas-file). All three post the same shape, and all
+  three honour the `private:` prefix that keeps an item in a local file, never posted.
 - **Triage (continuous + backstop).** The hub's
   [`ideas-triage` Action](https://github.com/jwildfire/obot.roadmap/blob/main/.github/workflows/ideas-triage.yml)
   responds to each new post within minutes — confident ideas become issues and the

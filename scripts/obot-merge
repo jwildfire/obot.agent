@@ -2,26 +2,41 @@
 # obot-merge — policy-gated PR merge, executed as obotclaw[bot].
 #
 # The single mechanical merge lane for agent sessions in the obot workspace.
-# Checks the PR's base branch against scripts/merge-policy.json, refuses drafts
-# and anything outside the policy, mints a fresh obotclaw[bot] installation
-# token (obot-app-token, same directory), merges, and verifies the result.
+# Checks the PR's base branch against scripts/policy.json (via obot-policy,
+# same directory), refuses drafts and anything outside the policy, mints a
+# fresh obotclaw[bot] installation token (obot-app-token), merges, and
+# verifies the result.
 #
 # The operating contract is unchanged: Jeremy's explicit approval is required
 # BEFORE invoking this for a real merge. This tool removes the mechanical
 # permission block once that approval exists - it is not the approval.
 #
-# Policy tiers (merge-policy.json):
-#   allowed          - integration lanes; contract-gated approval, no attestation
-#   approvalRequired - protected/release branches; merge ONLY with Jeremy's
-#                      explicit in-session approval, attested via
-#                      --jeremy-approved '<where/when he approved>'. The note is
-#                      posted as an audit comment on the PR before merging.
+# Merge lanes (resolved by `obot-policy resolve <repo> <base>` from the repo's
+# profile plus the role its base branch plays):
+#   standard - integration branch of an 'auto' repo; contract-gated approval,
+#              no attestation
+#   attested - release branches, and every branch of a 'protected' repo; merge
+#              ONLY with Jeremy's explicit in-session approval, passed as
+#              --jeremy-approved '<where/when he approved>'. The note is posted
+#              as an audit comment on the PR before merging.
+#   refused  - any branch with no declared role, and any repo not in the file
+#
+# The milestone gate (added 2026-08-14) is a second, independent refusal: every
+# issue a PR closes must carry a milestone, and a release-role merge must name
+# the issues it ships. It is the mechanical backstop for @jwildfire's rule that
+# no work starts on an issue until a milestone is assigned - see AGENTS.md,
+# "Milestone before work". It refuses only on positive evidence; a lookup it
+# cannot complete warns and proceeds, because a GitHub hiccup must not block a
+# merge on a metadata question.
 #
 # Usage:
 #   obot-merge <pr-number> -R <owner>/<repo> [--merge|--squash|--rebase]
 #              [--delete-branch] [--check] [--jeremy-approved '<note>']
+#              [--no-milestone '<reason>'] [--no-issues '<reason>']
 #
-#   --check   dry run: evaluate policy and print the verdict, merge nothing
+#   --check          dry run: evaluate policy and the milestone gate, merge nothing
+#   --no-milestone   override the milestone gate for this merge, with a reason
+#   --no-issues      release merge that legitimately closes no issue, with a reason
 #
 # Exit codes: 0 merged (or --check passed), 1 operational error, 2 policy refusal.
 #
@@ -31,13 +46,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-POLICY_FILE="$SCRIPT_DIR/merge-policy.json"
+POLICY_FILE="$SCRIPT_DIR/policy.json"
+RESOLVER="$SCRIPT_DIR/obot-policy"
 
-usage() { sed -n 's/^# \{0,1\}//p' "${BASH_SOURCE[0]}" | sed -n '3,27p' >&2; }
+usage() { sed -n 's/^# \{0,1\}//p' "${BASH_SOURCE[0]}" | sed -n '3,41p' >&2; }
 fail()  { printf 'obot-merge: %s\n' "$1" >&2; exit 1; }
 refuse(){ printf 'obot-merge: REFUSED - %s\n' "$1" >&2; exit 2; }
 
 PR="" REPO="" STRATEGY="--merge" DELETE_BRANCH="" CHECK="" APPROVAL_NOTE=""
+MILESTONE_OVERRIDE="" NO_ISSUES_NOTE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -R) REPO="${2:?-R needs owner/repo}"; shift 2 ;;
@@ -45,48 +62,60 @@ while [ $# -gt 0 ]; do
     --delete-branch) DELETE_BRANCH="--delete-branch"; shift ;;
     --check) CHECK=1; shift ;;
     --jeremy-approved) APPROVAL_NOTE="${2:?--jeremy-approved needs a note describing where/when Jeremy approved}"; shift 2 ;;
+    --no-milestone) MILESTONE_OVERRIDE="${2:?--no-milestone needs a reason}"; shift 2 ;;
+    --no-issues) NO_ISSUES_NOTE="${2:?--no-issues needs a reason}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) fail "unknown flag: $1" ;;
     *) PR="$1"; shift ;;
   esac
 done
 [ -n "$PR" ] && [ -n "$REPO" ] || { usage; fail "PR number and -R owner/repo are required"; }
+# Fail closed: no policy file, no resolver, no merge. There is deliberately no
+# fallback to a permissive path when the guardrail is unreadable.
 [ -f "$POLICY_FILE" ] || fail "policy file missing: $POLICY_FILE"
+[ -x "$RESOLVER" ]    || fail "policy resolver missing or not executable: $RESOLVER"
 
-PR_JSON="$(gh pr view "$PR" -R "$REPO" --json baseRefName,isDraft,state,mergeable,headRefOid,url,title)" \
+PR_JSON="$(gh pr view "$PR" -R "$REPO" --json baseRefName,isDraft,state,mergeable,headRefOid,url,title,body,milestone)" \
   || fail "could not resolve PR #$PR in $REPO"
 
-VERDICT="$(printf '%s' "$PR_JSON" | python3 -c "
-import json, sys
+BASE="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["baseRefName"])')"
+
+# Policy verdict comes from the shared resolver so obot-merge and the --auto
+# session can never disagree about what a repo permits.
+RESOLVED="$("$RESOLVER" resolve "$REPO" "$BASE" --json)" || true
+[ -n "$RESOLVED" ] || fail "policy resolver produced no verdict for $REPO $BASE"
+
+VERDICT="$(printf '%s' "$PR_JSON" | OBOT_RESOLVED="$RESOLVED" OBOT_PR="$PR" python3 -c "
+import json, os, sys
 
 pr = json.load(sys.stdin)
-policy = json.load(open('$POLICY_FILE'))
-repo, base = '$REPO', pr['baseRefName']
-entry = policy.get(repo)
-if isinstance(entry, list):  # legacy shape: plain list = allowed lanes
-    entry = {'allowed': entry}
+resolved = json.loads(os.environ['OBOT_RESOLVED'])
+num, base = os.environ['OBOT_PR'], pr['baseRefName']
 
-print(f\"PR #$PR {pr['url']}\")
+print(f\"PR #{num} {pr['url']}\")
 print(f\"  title: {pr['title']}\")
 print(f\"  base:  {base}   state: {pr['state']}   draft: {pr['isDraft']}   mergeable: {pr['mergeable']}\")
 print(f\"  head:  {pr['headRefOid']}\")
+if resolved.get('profile'):
+    role = f\", role {resolved['role']}\" if resolved.get('role') else ''
+    print(f\"  policy: profile {resolved['profile']}{role}\")
 
-if entry is None:
-    print(f'REFUSE:{repo} is not in merge-policy.json - merges in this repo are Jeremy-manual')
+# Refusal precedence is unchanged from the merge-policy.json era: a repo that
+# is not in the policy at all outranks the PR's own state, then draft, then
+# state, then the branch lane. 'profile' is absent exactly when the repo is
+# unknown to the policy.
+if 'profile' not in resolved:
+    print('REFUSE:' + resolved['reason'])
+elif pr['isDraft']:
+    print('REFUSE:PR is a draft - mark it ready for review first')
+elif pr['state'] != 'OPEN':
+    print(f\"REFUSE:PR state is {pr['state']}, not OPEN\")
+elif resolved['lane'] == 'standard':
+    print('ALLOW:standard')
+elif resolved['lane'] == 'attested':
+    print('ALLOW:approval')
 else:
-    allowed = entry.get('allowed', [])
-    approval = entry.get('approvalRequired', [])
-    if pr['isDraft']:
-        print('REFUSE:PR is a draft - mark it ready for review first')
-    elif pr['state'] != 'OPEN':
-        print(f\"REFUSE:PR state is {pr['state']}, not OPEN\")
-    elif base in allowed:
-        print('ALLOW:standard')
-    elif base in approval:
-        print('ALLOW:approval')
-    else:
-        lanes = ', '.join(allowed + [b + ' (approval-tier)' for b in approval])
-        print(f\"REFUSE:base branch '{base}' is not an allowed merge target for {repo} (lanes: {lanes})\")
+    print('REFUSE:' + resolved['reason'])
 ")"
 
 printf '%s\n' "$VERDICT" | grep -v '^REFUSE:\|^ALLOW:'
@@ -95,12 +124,122 @@ if printf '%s' "$VERDICT" | grep -q '^REFUSE:'; then
 fi
 
 LANE="$(printf '%s' "$VERDICT" | sed -n 's/^ALLOW://p' | head -1)"
+ROLE="$(printf '%s' "$RESOLVED" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("role",""))')"
+
+# ---- milestone gate -------------------------------------------------------
+# @jwildfire, 2026-08-14, after safety.viz v1.6.0 shipped grouping nothing:
+# "there should be a rule that no work is done on an issue until a milestone is
+# assigned." The rule is enforced earliest at work selection (session-init);
+# this is the mechanical backstop at the one chokepoint every merge passes.
+#
+# Two refusals, deliberately narrow:
+#   1. any issue this PR closes, in this repo, that carries no milestone
+#   2. a release-role merge whose body names no issue at all
+# Everything else - a stale milestone, a cross-repo reference, an unreadable
+# issue - is reported and waved through. The gate refuses on positive evidence
+# only: it must never turn a GitHub outage into a merge outage. Note the
+# stale-milestone blind spot is real - it is what let sv#46/#48/#54 ship in
+# v1.6.0 still carrying v1.2.0 - and is covered by the release-notes step, not
+# here.
+
+MILESTONE_REPORT=""
+REFS="$(printf '%s' "$PR_JSON" | python3 -c '
+import json, re, sys
+
+body = json.load(sys.stdin).get("body") or ""
+# Fenced code and quoted lines are illustration, not a claim on an issue.
+body = re.sub(r"```.*?```", "", body, flags=re.S)
+body = "\n".join(l for l in body.splitlines() if not l.lstrip().startswith(">"))
+
+KEYWORD = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
+cur = sys.argv[1] if len(sys.argv) > 1 else ""
+same, cross = [], []
+for m in re.finditer(
+    KEYWORD + r"\s*:?\s+\[?"
+    r"(?:https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)"
+    r"|([\w.-]+/[\w.-]+)#(\d+)"
+    r"|#(\d+))",
+    body, re.I):
+    if m.group(5):
+        same.append(m.group(5))
+        continue
+    repo, num = (m.group(1) or m.group(3)), (m.group(2) or m.group(4))
+    # A fully-qualified reference back to this same repo is a same-repo close.
+    if cur and repo.lower() == cur.lower():
+        same.append(num)
+    else:
+        cross.append("%s#%s" % (repo, num))
+
+def uniq(xs):
+    out = []
+    for x in xs:
+        if x not in out:
+            out.append(x)
+    return out
+
+print("SAME:" + " ".join(uniq(same)))
+print("CROSS:" + " ".join(uniq(cross)))
+' "$REPO" 2>/dev/null)" || REFS=""
+
+if [ -z "$REFS" ]; then
+  MILESTONE_REPORT="  milestone gate: SKIPPED - could not read the PR body; merging without the check"
+else
+  CLOSING_SAME="$(printf '%s' "$REFS" | sed -n 's/^SAME://p')"
+  CLOSING_CROSS="$(printf '%s' "$REFS" | sed -n 's/^CROSS://p')"
+
+  # Cross-repo references never auto-close on GitHub and may live in a repo this
+  # token cannot read, so they are recorded and not enforced.
+  MISSING=""
+  UNREADABLE=""
+  for N in $CLOSING_SAME; do
+    if MS="$(gh issue view "$N" -R "$REPO" --json milestone --jq '.milestone.title // "NONE"' 2>/dev/null)"; then
+      if [ "$MS" = "NONE" ]; then MISSING="$MISSING #$N"; fi
+    else
+      UNREADABLE="$UNREADABLE #$N"
+    fi
+  done
+
+  PR_MILESTONE="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; m=json.load(sys.stdin).get("milestone"); print(m["title"] if m else "")' 2>/dev/null || true)"
+
+  CLOSES_LIST="(none)"
+  if [ -n "$CLOSING_SAME" ]; then
+    CLOSES_LIST="$(for N in $CLOSING_SAME; do printf '#%s ' "$N"; done)"
+  fi
+  MILESTONE_REPORT="  closes: $CLOSES_LIST"
+  if [ -n "$CLOSING_CROSS" ]; then
+    MILESTONE_REPORT="$MILESTONE_REPORT  cross-repo (not enforced): $CLOSING_CROSS"
+  fi
+  if [ -n "$PR_MILESTONE" ]; then
+    MILESTONE_REPORT="$MILESTONE_REPORT
+  PR milestone: $PR_MILESTONE"
+  fi
+  if [ -n "$UNREADABLE" ]; then
+    MILESTONE_REPORT="$MILESTONE_REPORT
+  milestone gate: could not read$UNREADABLE - not enforced on those"
+  fi
+
+  if [ -z "$CLOSING_SAME$CLOSING_CROSS" ] && [ "$ROLE" = "release" ] && [ -z "$NO_ISSUES_NOTE" ]; then
+    refuse "release merge into '$BASE' names no issue: an RC body must carry a 'Closes #N' line for every issue it ships, so the release groups its work instead of shipping anonymously (safety.viz v1.6.0, 2026-08-14). Add the lines, or re-run with --no-issues '<why this release closes nothing>'."
+  fi
+  if [ -n "$MISSING" ] && [ -z "$MILESTONE_OVERRIDE" ]; then
+    refuse "no milestone on$MISSING in $REPO. No work is done on an issue until a milestone is assigned (@jwildfire, 2026-08-14) - assign one with 'gh issue edit <n> -R $REPO --milestone <title>', creating the milestone first if the release has none. Override with --no-milestone '<reason>' only when the issue genuinely belongs to no release."
+  fi
+  if [ -n "$MILESTONE_OVERRIDE" ] && [ -n "$MISSING" ]; then
+    MILESTONE_REPORT="$MILESTONE_REPORT
+  milestone gate: OVERRIDDEN for$MISSING - $MILESTONE_OVERRIDE"
+  fi
+  if [ -n "$NO_ISSUES_NOTE" ] && [ -z "$CLOSING_SAME$CLOSING_CROSS" ]; then
+    MILESTONE_REPORT="$MILESTONE_REPORT
+  milestone gate: no-issues release accepted - $NO_ISSUES_NOTE"
+  fi
+fi
+if [ -n "$MILESTONE_REPORT" ]; then printf '%s\n' "$MILESTONE_REPORT"; fi
 
 if [ -n "$CHECK" ]; then
   if [ "$LANE" = "approval" ]; then
     printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s on the approval tier (explicit Jeremy approval + --jeremy-approved required)\n' "$PR" "$REPO"
   else
-    printf 'obot-merge: CHECK PASSED - policy permits merging PR #%s in %s\n' "$PR" "$REPO"
+    printf 'obot-merge: CHECK PASSED - policy and the milestone gate permit merging PR #%s in %s\n' "$PR" "$REPO"
   fi
   exit 0
 fi
