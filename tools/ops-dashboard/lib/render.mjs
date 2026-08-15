@@ -178,6 +178,7 @@ const DASHBOARD_CSS = `
   .q-fold { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.4rem; }
   .q-fold summary { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase;
                     color:var(--faint); cursor:pointer; }
+  .q-off { cursor:default; }
   .q-off .q-title { color:var(--muted); }
   .q-restore { font-size:0.66rem; padding:0 0.25rem; border:1px solid var(--line); border-radius:5px;
                background:var(--paper); color:var(--accent); cursor:pointer; font-family:var(--mono); }
@@ -728,7 +729,7 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
     })));
   }
 
-  document.querySelectorAll('.q').forEach((li) => li.addEventListener('click', () => select(li)));
+  document.querySelectorAll('.q:not(.q-off)').forEach((li) => li.addEventListener('click', () => select(li)));
 
   document.querySelectorAll('.verdicts button').forEach((b) => b.addEventListener('click', () => {
     state.verdict = b.dataset.v;

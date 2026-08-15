@@ -150,12 +150,13 @@ async function page(args) {
   // The last recorded pass/fail per item, so an installation qualification opens
   // showing whether it has ever been proved rather than starting blank.
   const checks = readChecks(args.workspace);
-  const withChecks = (g) => ({ ...g, items: (g.items ?? []).map((i) => (checks[i.id] ? { ...i, check: checks[i.id] } : i)) });
+  const check = (i) => checks[i.id ?? i.key];
+  const withChecks = (g) => ({ ...g, items: (g.items ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)) });
   return render({
     queue: {
       ...queue,
       config: withChecks(queue.config),
-      critical: (queue.critical ?? []).map((i) => (checks[i.id] ? { ...i, check: checks[i.id] } : i)),
+      critical: (queue.critical ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)),
     },
     answers: currentAnswers(args.workspace, { hub: args.hub }),
     deliverer: delivererState(args.workspace),

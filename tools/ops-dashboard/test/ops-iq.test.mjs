@@ -462,3 +462,11 @@ test('retiring an entry moves it out of Open with its id and body intact', () =>
   assert.deepEqual(collectConfig(ws).items.map((i) => i.id), ['c0001', 'c0003', 'c0004']);
   assert.ok(captureFails(ws, ['--retire', 'c0002', '--reason', 'again']), 'a retired id is not open twice');
 });
+
+test('a snoozed row is not selectable — it has no detail to open', () => {
+  const html = render({
+    queue: { ...ranked(), items: [], snoozed: [{ kind: 'config', key: 'c0009', title: 'later', triage: { action: 'snooze', until: '2026-08-23T00:00:00.000Z' } }] },
+  });
+  assert.ok(html.includes('q-off'), 'a folded row is marked as inert');
+  assert.ok(html.includes(".q:not(.q-off)"), 'and the click handler skips it, rather than opening an empty panel');
+});
