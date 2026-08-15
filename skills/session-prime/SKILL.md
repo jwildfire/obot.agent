@@ -52,14 +52,75 @@ exemptions** — prime has no bookends, so none of the declared exemptions can f
   ~2 quick bounded reads — one named file, one `gh` call. The test: **if you cannot
   name the exact file or single command that answers it, it is research — delegate
   it.**
-- **Ack + spawn in the same message, then return.** One line naming what was
-  delegated and to which lane/slug, the spawn itself, and — when the question
-  allows — a provisional partial answer marked as such. Never end a turn blocked on
-  a delegate.
+- **Ack + spawn in the same message, then return** — and in that order: the ack
+  text is the message's *first* content block, the spawn its first tool call
+  ([Reply first](#reply-first--the-turn-ordering-hard-lines) below is the
+  enforcement). One line naming what was delegated and to which lane/slug, and —
+  when the question allows — a provisional partial answer marked as such. Never
+  end a turn blocked on a delegate.
 - **Relay at the next turn boundary.** A background subagent's report arrives as a
   task notification — relay it immediately in one short message, lists not prose,
   leading `Since you asked: …`. Sibling results relay as pointers to the artifacts
   they left.
+
+## Reply first — the turn-ordering hard lines
+
+The [framework rule](../../docs/session-framework.md#reply-first--turn-ordering)
+made prime-grade. Case study
+([obot.agent#102](https://github.com/jwildfire/obot.agent/issues/102)): on
+2026-08-15 prime answered one question in **~31 minutes** — 19.5 of them thinking
+and writing a memory file before any text, then a ~2,500-word briefing, then a
+10-minute composition *after* the spawn returned. @jwildfire sent four messages
+into that silence. The delegation itself was correct; the ordering was the
+failure. These lines make the ordering mechanical:
+
+- **Every turn is one of two shapes — decide which in the first seconds:**
+  - **Shape A, inline answer** — allowed only when the exact file or single
+    command is nameable up front (the inline test). At most **2 tool calls**,
+    then the reply. Two because that is the contract's existing inline
+    allowance ("~2 quick bounded reads"): a turn reaching for a third call has
+    failed the inline test and is research.
+  - **Shape B, delegate** — the reply text comes **first**, before every tool
+    call: ack in one line, provisional partial if available. The first tool call
+    is the spawn. A Shape-A read that fails to produce the answer converts the
+    turn to Shape B on the spot — ack immediately; do not take another read.
+- **Hard cap: no turn emits more than 2 tool calls before its first text block.**
+  Not the spawn count, not the total — the count *before @jwildfire has seen
+  anything*.
+- **Blown-budget escape hatch**: on noticing mid-turn that nothing has been
+  emitted yet, say something *immediately* — a bare `Spawning now — back
+  shortly.` counts — then do the minimum to finish the turn.
+- **Bookkeeping is deferred, always.** Memory files, `prime-state.md` section
+  edits, scratchpad notes are valuable and never urgent: they go **after** the
+  reply text — same turn or next turn. "Durable record" does not compete with
+  "fast answer"; it *sequences behind it*. The write-with-reply rule below is
+  unchanged in substance and now explicit in order: the one stamped state line
+  rides the same message, after the text. Anything longer than a line — a memory
+  file with a why, a governance note — is composition, and composition is a
+  delegate's job or a post-ack step.
+- **Briefings: ack first, then compose — and point, don't restate.** Long
+  briefings stay; their quality is real and is not traded here. The fix is
+  order: once the ack text is out, the minutes spent generating the briefing as
+  the spawn argument run behind a visible reply instead of as dead air.
+  Additionally, anything already on disk — decision artifacts, `prime-state.md`,
+  Q&A threads, scratchpad — enters the briefing as a **path or URL the sibling
+  reads**, never a paraphrase; inline only what exists nowhere but this
+  conversation (@jwildfire's words this turn, decisions just made). That is
+  cheaper *and* better: paraphrase drifts, pointers don't. Rejected
+  alternatives, for the record: shorter briefings (quality lost, nothing gained
+  — post-ack composition is already invisible) and transcript-mining siblings
+  (prime's transcript is multi-topic noise; a pointered briefing is the better
+  source).
+- **The preparation trap** — "never absorb a deliverable" includes the
+  *preparation*. On 2026-08-15 prime delegated the artifact rewrite correctly
+  and still burned 31 minutes, because it absorbed the prep: the memory file,
+  the inline briefing, the post-spawn wrap-up. Preparation absorbed ahead of the
+  reply is the same contract breach as absorbing the deliverable — it just hides
+  better, because "the delegation happened."
+- **The self-check**, before any non-spawn tool call:
+  **"Has @jwildfire seen anything from me this turn?"**
+  If no, and this call is not the spawn, the turn is out of order — emit the
+  reply first.
 
 ## Never — the hard lines
 

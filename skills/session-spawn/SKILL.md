@@ -127,10 +127,14 @@ after it), with the lead's own tag and a shelled timestamp:
 [`templates/sibling-briefing.md`](../../templates/sibling-briefing.md), with
 `😺🤖 lead` as the tag).
 
-The **ack to @jwildfire goes in the same message as the spawn** — one line: what
-was delegated, to which slug, and how to reach it (`claude agents`, or
-claude.ai/code via Remote Control). Then return to whatever he asked, and relay
-the sibling's result at your next turn.
+The **ack to @jwildfire goes in the same message as the spawn, and the ack text
+is emitted *before* the spawn call** — reply-first ordering
+([session-framework](../../docs/session-framework.md#reply-first--turn-ordering)):
+a long briefing composed as the spawn argument runs behind an already-visible
+ack, but composed ahead of the ack it is dead air (the 2026-08-15 31-minute
+prime turn, obot.agent#102). One line: what was delegated, to which slug, and
+how to reach it (`claude agents`, or claude.ai/code via Remote Control). Then
+return to whatever he asked, and relay the sibling's result at your next turn.
 
 The wrapup then knows the sibling exists even if it never logs a line — that
 mismatch is exactly the "known gap" that justifies transcript mining in
