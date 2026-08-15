@@ -229,6 +229,77 @@ export function rcSub({ lead } = {}) {
   return `${(space > 40 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, '')}…`;
 }
 
+// Only our own Pages site is framed. github.com answers `x-frame-options: deny` on a
+// PR (verified 2026-08-15), so the PR itself can never be embedded; anything else
+// off-site is not ours to embed either. Everything unframeable is still a link.
+const PAGES_HOST = 'jwildfire.github.io';
+const isFrameable = (url) => {
+  try { return new URL(url).hostname === PAGES_HOST; } catch { return false; }
+};
+
+const MD_LINK_G = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+
+/**
+ * The RC body, parsed into the panel the dashboard renders in the middle column.
+ *
+ * @jwildfire asked (2026-08-15) for a release candidate to open *in* the dashboard
+ * rather than sending him to GitHub. A PR cannot be iframed — github.com sets
+ * `x-frame-options: deny` — and proxying his authenticated GitHub session to get around
+ * that would be a security hole, not a workaround. So the panel is built natively out of
+ * the body, which is possible only because the RC body contract gives every RC the same
+ * shape: one-sentence exec summary, a bulleted link list carrying the demo page and
+ * NEWS.md, then the requirements closed. The contract makes the panel renderable; the
+ * panel is why the contract is worth enforcing. (The demo page *is* framed — Pages sets
+ * no frame headers.)
+ *
+ * Everything is optional. RCs written before the contract still have to open, so each
+ * field degrades to null or an empty list rather than throwing.
+ */
+export function parseRCBody(body) {
+  const out = { summary: null, links: [], demo: null, news: null, requirements: [], ask: null, frameable: false };
+  const lines = String(body ?? '').split('\n');
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // `**See it move:**` and `**The ask:**` are their own thing wherever they appear.
+    // The contract puts them in the bullet list, but bodies written before it use bold
+    // paragraphs (open.gismo#10), and either way they are never the exec summary.
+    const seeItMove = /^[-*]?\s*\*\*See it move:?\*\*/i.test(line);
+    const ask = /^[-*]?\s*\*\*The ask:?\*\*\s*(.+)$/i.exec(line);
+    if (ask) { if (!out.ask) out.ask = plain(ask[1]); continue; }
+
+    const closes = /^[-*]\s*Closes\s+(#\d+)\s*[—–-]?\s*(.*)$/i.exec(line);
+    if (closes) {
+      out.requirements.push({ ref: closes[1], text: plain(closes[2]) });
+      continue;
+    }
+
+    // Links are collected from anywhere, so the panel can show what he actually linked.
+    // Demo and NEWS.md are identified by *target*, never by a passing mention: a bullet
+    // reading "publishes the release with the NEWS.md section via #8" links a PR, and
+    // matching on the words alone picks it up as the release notes.
+    const all = [...line.matchAll(MD_LINK_G)].map((m) => ({ label: plain(m[1]), url: m[2] }));
+    if (/^[-*]\s/.test(line) || seeItMove) out.links.push(...all);
+    for (const { label, url } of all) {
+      if (!out.news && /\/NEWS\.md(\?|#|$)/i.test(url)) out.news = url;
+      if (!out.demo && (seeItMove || /^demo$|demo page|annotated demo/i.test(label))) out.demo = url;
+    }
+    if (seeItMove) continue;
+
+    // The exec summary: the first line that is prose — not a heading, not a bullet, not
+    // the ⛔ banner, not the attribution footer.
+    if (!out.summary && !/^[#>|*-]/.test(line) && !/^This PR was drafted/.test(line)
+        && !line.startsWith('Closes #') && !line.startsWith('⛔')) {
+      out.summary = plain(line);
+    }
+  }
+
+  out.frameable = out.demo ? isFrameable(out.demo) : false;
+  return out;
+}
+
 /**
  * Release candidates, from the sweep `reviews-queue` already does.
  *
@@ -278,6 +349,11 @@ export function refreshRCs(workspace, script) {
           // second line without going back to the network.
           lead: pr.lead ?? null,
           sub: rcSub({ lead: pr.lead }),
+          // Parsed once here, not in the browser: the panel then renders from the
+          // cache, so it opens instantly and still opens with the network down.
+          rc: parseRCBody(pr.body),
+          checks: pr.checks ?? null,
+          size: pr.size ?? null,
           // `why` is the field reviews-queue emits; the old `reason` never existed, so
           // every row read "ready for your call" whatever the sweep actually said.
           detail: `${pr.repo} — ${pr.why ?? 'ready for your call'}`,

@@ -78,6 +78,34 @@ this package's version, otherwise from the `(Upcoming)` heading of the local clo
 `-RCn` already in the title is authoritative and never renumbered: the counter is a
 review-round fact this page cannot see.
 
+### The release-candidate panel
+
+Clicking a release candidate opens it **in the middle column** rather than bouncing to
+GitHub. @jwildfire asked for the PR itself in an iframe; that is impossible — github.com
+answers `x-frame-options: deny` on a PR (verified 2026-08-15), so it renders blank
+permanently, and proxying his authenticated GitHub session to defeat that would be a
+security hole rather than a workaround.
+
+The native panel is the better answer anyway: it opens instantly from the cache (so it
+works with the network down), it matches the dashboard instead of dropping a foreign page
+into the middle of it, and it follows his stated review order — *"skim the PR, read
+through the demo page and then read the release notes"* — without GitHub's chrome around
+it. Top to bottom: title with CI state and diff size, the one-sentence exec summary, the
+ask, the `NEWS.md` link, the requirements the release closes, and the **demo page running
+live in an iframe** (Pages sets no frame headers, so our own demo frames fine; a demo
+hosted anywhere else degrades to a link).
+
+This is only renderable because the [RC body contract](../../docs/rc-framework.md#what-an-rc-pr-must-carry)
+gives every RC body the same shape — the contract makes the panel possible, and the panel
+is why the contract is worth enforcing. Where a body predates the contract the panel says
+so in place of the missing part ("No NEWS.md link — the contract requires one"), which is
+a more useful nudge than a blank space.
+
+**Approving stays on GitHub, deliberately.** Reviewing here means writing there, and
+approving a release candidate is exactly the action that should stay a deliberate click:
+the RC gate is @jwildfire's, and a one-click approve inside a local tool erodes it. The
+panel ends with an *Open on GitHub to approve* link.
+
 **The second line.** Because the title no longer explains itself, an RC row carries a
 subtitle: the one-sentence executive summary the
 [RC body contract](../../docs/rc-framework.md#what-an-rc-pr-must-carry) puts first in every

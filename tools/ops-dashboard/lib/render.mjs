@@ -143,7 +143,28 @@ const DASHBOARD_CSS = `
   .rail { border-right:1px solid var(--line); }
   .side { border-left:1px solid var(--line); background:var(--card); }
   .main { overflow:hidden; display:flex; flex-direction:column; background:var(--card); }
-  .main iframe { flex:1; width:100%; border:0; min-height:70vh; }
+  .main > iframe { flex:1; width:100%; border:0; min-height:70vh; }
+
+  /* The release-candidate panel — his review order top to bottom: what it is, the ask,
+     the notes, what it closes, then the demo running live. */
+  .rc-panel { flex:1; overflow-y:auto; padding:1rem 1.1rem 1.4rem; }
+  .rc-head { display:flex; align-items:baseline; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.35rem; }
+  .rc-head h2 { font-size:1rem; margin:0; font-family:var(--mono); }
+  .rc-checks { font-size:0.68rem; padding:0.05rem 0.4rem; border-radius:99px;
+               background:var(--good-soft); color:var(--good); }
+  .rc-checks.failing { background:var(--accent-soft); color:var(--accent); }
+  .rc-checks.pending, .rc-checks.none { background:var(--warn-soft); color:var(--warn); }
+  .rc-size { font-size:0.68rem; color:var(--faint); font-family:var(--mono); }
+  .rc-summary { font-size:0.9rem; margin:0 0 0.5rem; max-width:64ch; }
+  .rc-ask { font-size:0.82rem; margin:0 0 0.5rem; padding:0.3rem 0.5rem;
+            background:var(--accent-soft); border-radius:5px; max-width:64ch; }
+  .rc-links { font-size:0.8rem; margin:0 0 0.9rem; }
+  .rc-panel h3 { font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em;
+                 color:var(--muted); margin:0.9rem 0 0.35rem; }
+  .rc-reqs { margin:0; padding-left:1.1rem; font-size:0.83rem; }
+  .rc-reqs li { margin-bottom:0.15rem; }
+  .rc-none { font-size:0.8rem; color:var(--muted); margin:0; }
+  .rc-demo { width:100%; height:60vh; border:1px solid var(--line); border-radius:6px; background:var(--paper); }
   .main .placeholder { padding:1.2rem 1.1rem; color:var(--muted); max-width:52ch; }
   .main .placeholder h2 { font-size:1rem; margin:0 0 0.4rem; color:var(--ink); }
   .main .placeholder p { margin:0 0 0.5rem; font-size:0.85rem; }
@@ -169,7 +190,7 @@ const DASHBOARD_CSS = `
   .q-title { font-size:0.82rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
              overflow:hidden; }
   /* An RC title carries no summary any more (@jwildfire, 2026-08-15), so the row runs to
-     a second line under it. `.q` is already a column and `.q-line` already carries
+     a second line under it. The .q row is already a column and .q-line already carries
      min-width:0, so this only has to be the line itself: one line, ellipsized, because
      he reads this list on a 390px phone. */
   .q-sub { font-size:0.72rem; color:var(--muted); line-height:1.25; min-width:0;
@@ -506,7 +527,7 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
   <main class="main" id="main">
     <div class="placeholder" id="placeholder">
       <h2>Your todo list, and where you answer it.</h2>
-      <p>Pick anything on the left: a <strong>decision</strong> opens here and you answer it in the sidebar, a <strong>release candidate</strong> opens on GitHub, a <strong>config</strong> item opens as an installation qualification — the exact step, what you should see, and a check that proves it. Local, never published.</p>
+      <p>Pick anything on the left: a <strong>decision</strong> opens here and you answer it in the sidebar, a <strong>release candidate</strong> opens here too — summary, release notes, what it closes, and its demo page running live, with approval still a deliberate click on GitHub — and a <strong>config</strong> item opens as an installation qualification: the exact step, what you should see, and a check that proves it. Local, never published.</p>
     </div>
   </main>
 
@@ -556,10 +577,17 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
 <script id="dismiss-data" type="application/json">${
   JSON.stringify(DISMISS_MEANS).replace(/</g, '\\u003c')
 }</script>
+<script id="rc-data" type="application/json">${
+  JSON.stringify(Object.fromEntries(queue.rcs.items.map((r) => [r.key, {
+    title: r.title, url: r.url, sub: r.sub ?? null, checks: r.checks ?? null,
+    size: r.size ?? null, repo: r.repo ?? null, ...(r.rc ?? {}),
+  }]))).replace(/</g, '\\u003c')
+}</script>
 <script>
   const QUESTIONS = JSON.parse(document.getElementById('questions-data').textContent);
   const IQ = JSON.parse(document.getElementById('iq-data').textContent);
   const DISMISS = JSON.parse(document.getElementById('dismiss-data').textContent);
+  const RCS = JSON.parse(document.getElementById('rc-data').textContent);
   const state = { item: null, verdict: null, perQuestion: {} };
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
@@ -668,22 +696,79 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
     if (kind === 'decision') {
       $('placeholder').hidden = true;
       document.querySelectorAll('#main .iq').forEach((n) => n.remove());
-      let f = document.querySelector('#main iframe');
+      // The RC panel owns an iframe of its own inside #main, so it goes before the
+      // artifact frame is looked up by selector.
+      const panel = $('rc-panel'); if (panel) panel.remove();
+      let f = document.querySelector('#main > iframe');
       if (!f) { f = document.createElement('iframe'); f.title = 'Decision artifact'; $('main').appendChild(f); }
       f.src = '/artifact/' + encodeURIComponent(li.dataset.artifact) + '/';
       $('answer').hidden = false;
       $('side-hint').textContent = 'Adopt all is one click. Otherwise pick a verdict and say why.';
+    } else if (kind === 'rc') {
+      $('answer').hidden = true;
+      document.querySelectorAll('#main .iq').forEach((n) => n.remove());
+      renderRC(li.dataset.key);
+      $('side-hint').textContent = 'Skim it here, then approve on GitHub — the RC gate stays a deliberate click.';
     } else if (kind === 'config') {
       $('answer').hidden = true;
+      const panel = $('rc-panel'); if (panel) panel.remove();
       renderIQ(li.dataset.key);
       $('side-hint').textContent = 'Only your keyboard can apply this one. Run the check when you have.';
     } else {
       $('answer').hidden = true;
       document.querySelectorAll('#main .iq').forEach((n) => n.remove());
-      if (li.dataset.url) window.open(li.dataset.url, '_blank', 'noopener');
-      $('side-hint').textContent = 'Opened on GitHub — release candidates are reviewed there.';
+      const panel = $('rc-panel'); if (panel) panel.remove();
+      $('side-hint').textContent = 'Nothing to show for this one.';
     }
   }
+
+  // The release-candidate panel. @jwildfire asked for the PR itself in an iframe;
+  // github.com answers x-frame-options: deny, so that renders blank permanently and
+  // no amount of trying changes it. This is the native version, and it is the better
+  // one: it opens instantly from the cache (so it works with the network down), it
+  // matches the dashboard instead of dropping a foreign page into the middle of it,
+  // and it shows his review order — skim the summary, read the demo, read the notes —
+  // without the GitHub chrome around it. The demo page *is* framed live: Pages sets no
+  // frame headers. Approving stays on GitHub, deliberately.
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function renderRC(key) {
+    const rc = RCS[key];
+    const main = $('main');
+    $('placeholder').hidden = true;
+    const old = main.querySelector(':scope > iframe'); if (old) old.remove();
+    let box = $('rc-panel');
+    if (!box) { box = document.createElement('div'); box.id = 'rc-panel'; box.className = 'rc-panel'; main.appendChild(box); }
+    if (!rc) { box.innerHTML = '<p class="rc-none">No detail cached for this one yet — open it on GitHub.</p>'; return; }
+
+    const checks = rc.checks
+      ? '<span class="rc-checks ' + esc(rc.checks.state) + '">' + ({
+          green: 'checks green', failing: rc.checks.failing + ' failing', pending: rc.checks.pending + ' running', none: 'no checks',
+        }[rc.checks.state] || 'checks') + '</span>'
+      : '';
+
+    const reqs = (rc.requirements || []).length
+      ? '<h3>Requirements this release closes</h3><ul class="rc-reqs">' + rc.requirements.map((r) =>
+          '<li><a href="' + esc(rcIssueUrl(rc.repo, r.ref)) + '" target="_blank" rel="noopener">' + esc(r.ref) + '</a> ' + esc(r.text) + '</li>').join('') + '</ul>'
+      : '<h3>Requirements this release closes</h3><p class="rc-none">None named in the body — the RC body contract wants a <code>Closes #N</code> line per issue shipped.</p>';
+
+    const demo = rc.demo && rc.frameable
+      ? '<h3>The demo</h3><iframe class="rc-demo" src="' + esc(rc.demo) + '" title="Release demo" loading="lazy"></iframe>'
+      : rc.demo
+        ? '<h3>The demo</h3><p class="rc-none"><a href="' + esc(rc.demo) + '" target="_blank" rel="noopener">Open the demo</a> — it is not on the Pages site, so it cannot be shown inline.</p>'
+        : '<h3>The demo</h3><p class="rc-none">No demo link in the body. A PR without a working demo is not an RC.</p>';
+
+    box.innerHTML =
+      '<div class="rc-head"><h2>' + esc(rc.title) + '</h2>' + checks +
+        (rc.size ? '<span class="rc-size">' + esc(rc.size) + '</span>' : '') + '</div>' +
+      (rc.sub || rc.summary ? '<p class="rc-summary">' + esc(rc.summary || rc.sub) + '</p>' : '') +
+      (rc.ask ? '<p class="rc-ask"><strong>The ask:</strong> ' + esc(rc.ask) + '</p>' : '') +
+      '<p class="rc-links">' + (rc.news ? '<a href="' + esc(rc.news) + '" target="_blank" rel="noopener">Release notes (NEWS.md)</a>' : '<span class="rc-none">No NEWS.md link — the contract requires one.</span>') +
+        ' · <a href="' + esc(rc.url) + '" target="_blank" rel="noopener">Open on GitHub to approve</a></p>' +
+      reqs + demo;
+  }
+
+  const rcIssueUrl = (repo, ref) => repo ? 'https://github.com/' + repo + '/issues/' + String(ref).replace('#', '') : '#';
 
   // ---- triage -------------------------------------------------------------
   // Every action posts to the local server and the row leaves the list. Nothing
