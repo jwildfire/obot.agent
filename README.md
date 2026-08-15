@@ -99,16 +99,32 @@ scripts/obot-policy add jwildfire/new-repo         # scaffold at 'protected'
 ```
 
 `policy.json` sits inside its own **carve-out**, and since 2026-08-15 that is mechanical
-rather than prose. The guardrail files — the policy file, `obot-merge`, `obot-policy`,
-`goals/`, `hooks/` — are listed per repo under `carveOut.repos`, and a PR touching any of
-them is forced onto the attested lane whatever its profile says: it merges **only** with
-`--jeremy-approved '<where/when he said so>'`, on every lane, attended or not
+rather than prose. The guardrail files — the policy file, `obot-merge`, `obot-policy`, the
+goal registry, `hooks/` — are listed per repo under `carveOut.repos`, and a PR touching any
+of them is forced onto the attested lane whatever its profile says: it never merges on
+nobody's authority
 ([his decision](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-14-hub140-one-question/),
-2026-08-15). A repo's class does not enter into it: obot.agent is operational and
-self-merges everything else on the standard lane; these files still stop. `obot-policy
-explain <repo>` prints the list, `obot-policy carve-out <repo> --path <p>` tests one path,
-and `scripts/test/policy-sweep` checks every verdict the file can produce against a
-recorded baseline (run in CI).
+2026-08-15). Two things can carry it, and the tool tells them apart:
+
+| | `--jeremy-approved '<where/when>'` | `--decision '<what he already decided>'` |
+|---|---|---|
+| Means | he approved **this merge**, in session | he already ruled on **this work**, and the agent is landing it |
+| Where it is valid | everywhere | only a guardrail merge into the **integration** branch of an **operational** repo |
+| Release branch | yes | refused |
+| Clinical repo | yes | refused |
+| Unattended session | never | never |
+
+The second exists because of his correction the same day — *"this isnt an RC or an
+artifact"*. He reviews release candidates and decision artifacts; a convention change in an
+operational repo is neither, and routing one to him contradicts the rule that only release
+candidates reach his queue. The audit comment says which form carried the merge, so the
+trail never claims he approved something he never saw. The list is the **permission
+surface** only: documentation that happens to live beside it is ordinary work, which is why
+the goal registry is listed by file rather than by its directory.
+
+`obot-policy explain <repo>` prints the list, `obot-policy carve-out <repo> --path <p>`
+tests one path, and `scripts/test/policy-sweep` checks every verdict the file can produce
+against a recorded baseline (run in CI).
 
 Two things follow from the same decision. The tool checks that the policy file it just
 read matches the `authority` ref declared inside it — otherwise a session working in a

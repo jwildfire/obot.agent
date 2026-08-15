@@ -399,10 +399,11 @@ roadmap signal — and end.
   there is no in-session approval to attest — which means a `protected`-profile
   repo is entirely off-limits to an unattended session (no branch, no draft PR,
   no merge, issues read-only). PRs touching the carve-out (`scripts/policy.json`,
-  `scripts/obot-merge`, `scripts/obot-policy`, `goals/`, `hooks/`) are refused
-  by `obot-merge` itself since 2026-08-15 — it reads the PR's changed files and
-  forces the attested lane, which an unattended session can never satisfy. Do
-  not work around it: park the increment and write a decision artifact.
+  `scripts/obot-merge`, `scripts/obot-policy`, `goals/registry.json`, `hooks/`)
+  are refused by `obot-merge` itself since 2026-08-15 — it reads the PR's changed
+  files and forces the attested lane, which an unattended session can never
+  satisfy, with or without a decision to cite. Do not work around it: park the
+  increment and write a decision artifact.
   `scripts/obot-policy explain <owner/repo>` is the authority on what a repo
   permits; cite it verbatim when refusing.
 - **Goal issues are read-only for autonomous sessions**: never edit a goal

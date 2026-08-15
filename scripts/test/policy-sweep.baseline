@@ -29,6 +29,6 @@ carve-out jwildfire/obot.agent   scripts/merge-policy.json        scripts/merge-
 carve-out jwildfire/obot.agent   scripts/autonomy-grants.json     scripts/autonomy-grants.json -> GUARDED; scripts/autonomy-grants.json.bak -> open
 carve-out jwildfire/obot.agent   scripts/obot-merge               scripts/obot-merge -> GUARDED; scripts/obot-merge.bak -> open
 carve-out jwildfire/obot.agent   scripts/obot-policy              scripts/obot-policy -> GUARDED; scripts/obot-policy.bak -> open
-carve-out jwildfire/obot.agent   goals/                           goals/deep/file.txt -> GUARDED; goals-elsewhere/file.txt -> open
+carve-out jwildfire/obot.agent   goals/registry.json              goals/registry.json -> GUARDED; goals/registry.json.bak -> open
 carve-out jwildfire/obot.agent   hooks/                           hooks/deep/file.txt -> GUARDED; hooks-elsewhere/file.txt -> open
 carve-out jwildfire/not-a-real-repo (no list)                        scripts/policy.json -> open

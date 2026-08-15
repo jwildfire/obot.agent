@@ -61,10 +61,19 @@ Increment PRs are working paper. Keep them small, land them, move on. **Open
 them non-draft** — `obot-merge` refuses drafts, and a draft on GitHub means
 "unfinished", which an increment is not — and keep him out of the queue the way
 that actually works: never assign him, never request his review, never ping. If
-an increment cannot merge — it touches a guardrail path in
-[`scripts/policy.json`](../scripts/policy.json)'s carve-out, or its repo is
-`protected` — it is a *blocker*, and blockers go to a decision artifact (below),
-not to his review queue.
+an increment cannot merge because its repo is `protected`, it is a *blocker*,
+and blockers go to a decision artifact (below), not to his review queue.
+
+An increment that touches a **guardrail path** in
+[`scripts/policy.json`](../scripts/policy.json)'s carve-out is a narrower case,
+and it is not automatically a blocker. In an operational repo, on the
+integration branch, if the change implements something he has already decided,
+it merges with `obot-merge … --decision '<the decision, and what it decided>'`
+— the audit comment records that he did not review the merge and names what he
+did decide. If there is no such decision, that is what a decision artifact is
+for. What never happens is the increment appearing in his review queue: he
+reviews release candidates and decision artifacts, and nothing else
+(@jwildfire, 2026-08-15: *"this isnt an RC or an artifact"*).
 
 ## What an RC PR must carry
 

@@ -118,7 +118,10 @@ def resolve(policy, repo, base):
                 f"(declared: {', '.join(declared) or 'none'})",
                 {"profile": pname})
     lane = prof["merge"].get(role, "refused")
-    detail = {"profile": pname, "role": role}
+    # The class travels with the verdict because obot-merge needs it: a recorded
+    # decision can stand in for in-session approval on an operational repo's
+    # integration branch, and nowhere else.
+    detail = {"profile": pname, "role": role, "class": entry.get("class", "")}
     if lane == "refused":
         return ("refused",
                 f"role '{role}' is not a merge target under profile '{pname}' for {repo}",

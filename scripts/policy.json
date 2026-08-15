@@ -49,7 +49,7 @@
   "lanes": {
     "_note": "What the three merge outcomes mean to obot-merge.",
     "standard": "Mergeable via obot-merge with no extra flag. Contract-gated: @jwildfire approved the work; the tool removes the mechanical block, it is not the approval.",
-    "attested": "Mergeable ONLY with --jeremy-approved '<where/when he approved>'. The note is posted on the PR as an audit comment before the merge. Never available to an unattended session - there is no in-session approval to attest.",
+    "attested": "Mergeable ONLY with a recorded approval, posted on the PR as an audit comment before the merge. --jeremy-approved '<where/when he approved>' is his approval of this merge and is always valid. --decision '<what he already decided>' is valid only for a carve-out merge into the integration branch of an 'operational' repo - never for a release-role branch, never for a 'clinical' repo. Never available to an unattended session: there is no in-session approval to attest, and a recorded decision is not a licence to act unattended.",
     "refused": "Not a merge target. obot-merge exits 2."
   },
   "invariants": {
@@ -90,7 +90,7 @@
     "outsideOrg": "read-only, no exceptions - drafts handed to @jwildfire"
   },
   "carveOut": {
-    "_note": "The guardrail files. A PR touching any of these merges ONLY with @jwildfire's explicit sign-off, passed as --jeremy-approved '<where/when he said so>' - on every lane, in every profile, in every class, whether or not he is present (@jwildfire, 2026-08-15, D0005.1/W1: 'always require the flag'). Keys are repos; a path ending in '/' matches by prefix, anything else matches exactly; no globs, case-sensitive, repo-root-relative, and a rename counts as a touch on both its old and new path. obot-merge forces the attested lane when a PR's changed files intersect its repo's list, and names the matched paths in the refusal and in the audit comment.",
+    "_note": "The guardrail files. A PR touching any of these is forced onto the attested lane whatever the repo's profile says, and merges only with a recorded approval from @jwildfire (@jwildfire, 2026-08-15, D0005.1/W1: 'always require the flag'). Two forms count, and the tool tells them apart: --jeremy-approved '<where/when he said so>' is his approval of THIS merge, and is the only form accepted on a release-role branch or in a 'clinical' repo; --decision '<artifact/issue + what it decided>' cites a decision he already recorded, and is accepted only on the integration branch of an 'operational' repo - the case where he has ruled that routine work is the agents' to land and must not come back to him (his correction, 2026-08-15: 'this isnt an RC or an artifact'). Neither form is available to an unattended session. Keys are repos; a path ending in '/' matches by prefix, anything else matches exactly; no globs, case-sensitive, repo-root-relative, and a rename counts as a touch on both its old and new path. The list is the permission surface only - documentation that happens to live beside it is ordinary work (which is why the goal registry is listed by file rather than by its directory).",
     "repos": {
       "jwildfire/obot.agent": [
         "scripts/policy.json",
@@ -98,7 +98,7 @@
         "scripts/autonomy-grants.json",
         "scripts/obot-merge",
         "scripts/obot-policy",
-        "goals/",
+        "goals/registry.json",
         "hooks/"
       ]
     },
