@@ -84,6 +84,82 @@ quoting them ("c0007 is done") and the record has to stay unambiguous. Same rule
 hub's decision ids (`scripts/lib/decision-ids.mjs`), deliberately: two schemes that
 behave differently would be worse than either.
 
+### Config items are installation qualifications
+
+@jwildfire, 2026-08-15: *"the config items are pretty useless. They need to actually tell
+me what i need to do in exact detail. they need to be an installation qualification."*
+
+His term, and precise — an IQ is a protocol with exact steps, the result expected of each,
+and a recorded pass/fail. The old items were not thin (most already carried a paste-ready
+command); three other things were wrong, largest first:
+
+1. **The page threw the fix away.** `collectConfig` read the headline and set `detail: ''`
+   on purpose, and a config row was not clickable. The entries were better than the surface
+   rendering them.
+2. **No expected result, no verification.** Success and silent failure looked identical.
+3. **No pass/fail record.** Checking the box was self-attestation.
+
+So an entry now carries `Do` / `Expect` / `Verify` / `Unblocks` / `Source`, plus optional
+`Blocks` and `Why` (last — an item that opens with the mechanism was written agent-to-agent).
+The first three are **required and enforced at capture** by [`tools/blocker-log`](../blocker-log),
+not patched up here: a tool that accepts a free-text one-liner gets fed free-text one-liners
+forever. Clicking a config row opens the whole thing in the main area with copy buttons.
+
+**The verify contract: the command must exit 0 exactly when the item is done.** `Check` runs
+it and appends a real result to `.claude/ops/checks.jsonl`. Only single, read-only commands
+run unattended (`lib/iq.mjs`, `AUTO_VERIFY_HEADS`) — a write dressed as a read (`gh api -X
+DELETE`), anything that can chain or redirect, and anything that could run arbitrary code
+degrade to copy-and-run with the reason on the button. That is not a limitation to apologise
+for: several of these steps are web-UI-only or device-side and *cannot* be scripted, and the
+page has to say so rather than pretend. Say `→ prints 2` or `→ not <string>` when the exit
+code alone is not the whole question; a stated output outranks the exit code, because
+`grep -c x file` prints `0` and exits 1 when "none" is the right answer.
+
+### Delete and snooze, on anything in the list
+
+@jwildfire, 2026-08-15: *"i also want to just be able to delete/snooze anything in the list."*
+Anything — release candidates and decisions too, not only config items (`lib/triage.mjs`).
+
+- **A snooze must have a wake.** One with no way back is a silent delete wearing a friendlier
+  word, so a snooze with neither a date nor a change-watch is refused by the module *and* the
+  route. Every snooze offered on the page carries both: a day / a week / until it changes, and
+  all three watch a content fingerprint, so an item that moves under the snooze returns on its
+  own. Snoozed rows stay on the page, collapsed, with the wake written on them.
+- **Nothing is deleted.** His click on Dismiss *is* the approval the workspace rules require —
+  but the config list's own convention is retire-with-strikethrough, and that convention wins:
+  **a dashboard click never edits `.claude/blockers.md`.** It appends to an append-only ledger
+  (`.claude/ops/triage.jsonl`) the queue filters on. Dismissals are recoverable by construction
+  and `blocker-log --retire` stays the one writer that moves an entry to `## Resolved`.
+- **Dismiss says what it actually does**, per kind: for a release candidate, *"hides it here;
+  the pull request stays open on GitHub."* Conflating "off my list" with "gone" would hide real
+  work.
+
+### The critical tag, and why it is hard to claim
+
+@jwildfire, 2026-08-15: *"maybe use a 'critical' tag. but use it sparingly. I'm going to be
+annoyed if you tell me something is critical when it isn't."* That is a trust contract, so
+the bar is mechanical (`lib/rank.mjs`):
+
+- **No boolean an agent can write.** Two routes in, both measured by something other than the
+  thing asking for attention: a `Blocks:` reference that GitHub confirmed **open** at capture
+  time (`blocker-log` asks; no `gh`, or a closed or missing reference, means no stamp and no
+  tag), or a computed condition on the item (`item.computed`) such as the answer pipeline's
+  OVERDUE. Self-declared urgency has nowhere to go.
+- **The claim is displayed** — the row reads `critical · blocks obot.roadmap#182`, so a weak
+  claim is obvious at a glance. That is the check no rule can perform for him.
+- **Budgeted at three.** Sparingly is enforced. A fourth claim is neither shown as critical nor
+  hidden: it keeps its sentence, sorts to the top of its own section, and the page says how many
+  are over budget.
+- **Cross-section, above everything.** The three sections keep his order; the pin sits above all
+  of them, which is what "true blockers first" asks for and matches a blocking config item
+  outranking a routine RC. **What it costs:** the clean one-to-one mapping between the three
+  sections and the three worker outcomes — an agent reading Config no longer sees every config
+  item there. Mitigated by moving rather than duplicating (a row twice in a phone list is a bug),
+  by the section header saying how many moved, and by `/queue.json` keeping the unpinned grouping.
+
+Today only config items can earn route 1, because only the config list carries `Blocks:`. Route
+2 is open to any kind the moment a collector attaches `computed`.
+
 ## Why local, and why the page holds no credential
 
 The hub is a static, public site. A published page cannot write anywhere by itself,
