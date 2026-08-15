@@ -68,7 +68,8 @@ server (port 4182, `127.0.0.1` only) that serves the live dashboard at `/`,
 builds the hub's audit page with `AUDIT_MODE=local` and serves it at `/audit`.
 There ✓/✗ **stage** decisions into a queue (toggle to unstage; survives
 reloads) and an explicit **submit** hands the batch to one spawned Claude Code
-agent (`claude --bg --permission-mode auto`, sibling identity `👯🤖 <date>
+agent (`claude --bg --permission-mode auto --settings '{"remoteControlAtStartup":
+false}'` — the unbridged sibling default, sibling identity `👯🤖 <date>
 audit-apply <token>`) that runs `scripts/apply_audit_decision.mjs` in its own
 hub worktree: fresh-audit re-validation, mechanical ops, judgment findings per
 `roadmap-audit-policy.md`, ledger committed and landed on main with a

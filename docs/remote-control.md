@@ -1,10 +1,18 @@
 # Remote Control in the obot session framework
 
-@jwildfire directive (2026-07-23): every agent in the session framework should start
-with Remote Control active, so any session — lead or sibling — can be watched and
-driven from claude.ai/code or the Claude mobile app. This doc records how that is
-implemented, what was verified, the human steps the agent cannot perform, and the
-Claude Tag assessment that motivated Remote Control as the chosen path.
+**Current rule (2026-08-15): leads are bridged, background siblings are not.**
+@jwildfire's original directive (2026-07-23) was that *every* agent start with Remote
+Control active, so any session — lead or sibling — could be watched and driven from
+claude.ai/code or the Claude mobile app. He reversed the sibling half on 2026-08-15:
+"I think we can turn off the Remote control default for subagents." He no longer
+interacts with siblings at all — obot-prime is the single front door
+([D0013](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-delegation-lanes/),
+decided the same day) — so a bridge he never opens is overhead. The lead lanes are
+unchanged: prime is exactly the session he reaches from his phone.
+
+This doc records how each lane is implemented, what was verified, the human steps the
+agent cannot perform, and the Claude Tag assessment that motivated Remote Control as
+the chosen path.
 
 ## What Remote Control is
 
@@ -41,11 +49,91 @@ project and local scopes able to force it **off** (`=== false`) but not on.
 `~/.claude/settings.json` is the `userSettings` scope — the one the `/config`
 toggle writes.
 
+## The 2026-08-15 reversal: siblings off, leads on
+
+@jwildfire, 2026-08-15: *"I think we can turn off the Remote control default for
+subagents."* He meant siblings — in-conversation subagents never had a bridge to turn
+off. The reason is [D0013](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-delegation-lanes/),
+decided earlier the same day: obot-prime is his single front door, and he does not open
+sibling sessions himself. Remote Control on a sibling existed so he could drive it from
+his phone; he does not, so it is overhead.
+
+**This reverses the 2026-07-23 always-bridged directive**, which was made canon in oa#42
+and is why every line above it says "since 2026-07-23". Treat the old rule as superseded
+with a stated reason, not as something that never existed.
+
+### Removing the flag is not the fix
+
+The obvious change — drop `--remote-control` from the spawn command — **does nothing**.
+Per the startup expression above, the flag and `remoteControlAtStartup` are peers in one
+`||`, and that setting has been `true` in `~/.claude/settings.json` since 2026-07-29.
+A flagless `claude --bg` still bridges.
+
+The actual opt-out is to force the setting off for that one process, through the
+`flagSettings` scope, which sits ahead of `userSettings` in the `??` chain:
+
+```bash
+claude --bg --permission-mode auto --settings '{"remoteControlAtStartup": false}' …
+```
+
+An agent **can** do this — it is a command-line flag, not a settings-file write, so the
+classifier block on the settings key (below) does not apply. `--settings` merges as an
+additional scope rather than replacing user settings, so only that one key changes.
+
+### Evidence (three probes, CLI 2.1.233, 2026-08-15)
+
+| Probe | Spawn | `bridgeSessionId` |
+| --- | --- | --- |
+| `rcoff-flagless-probe` | `--bg`, no flag, no opt-out | `cse_015k636z…`, `bridgeOutboundOnly: false` — **still fully bridged** |
+| `rcoff-nobridge-probe` | `--bg --settings '{"remoteControlAtStartup": false}'` | absent — **unbridged** |
+| `rcoff-permcheck-probe` | same opt-out, `--permission-mode auto`, sonnet | absent; ran a `Bash` call with **no permission prompt** and completed — auto mode and workspace settings survive the `--settings` flag |
+
+### What the bridge was actually buying siblings
+
+Reported honestly, because "nothing" would have been the convenient answer:
+
+- **Phone/web access to a sibling transcript** — the whole point, and the thing he has
+  stopped using. This is the real loss.
+- **Inbound control** (`bridgeOutboundOnly: false`): anyone signed into the claude.ai
+  account could drive any sibling. Single-owner account, so never a live risk — but it
+  was ~20 open control surfaces a day for a capability nobody used.
+- **A permanent row per sibling in the account's Remote Control session list.** This one
+  is a measurable cost, not a theory: a `ListAgents` sweep on 2026-08-15 returned 52
+  peers, of which **47 were `Remote Control · offline`** — dead sibling records going
+  back to 2026-07-24, crowding out the four sessions that were actually alive. Prime
+  reads that list to find its delegates.
+
+### What is *not* affected — verified, not assumed
+
+- **`SendMessage` between local sessions does not use the bridge.** A message from one
+  local session to the unbridged probe was delivered and processed, described by the tool
+  as going to *"another Claude session on this machine"*. Remote Control adds peers on
+  *other machines* and cloud sessions; same-machine peers are local either way. (The
+  `isolatePeerMachines` setting gates the cross-machine case only, which is consistent.)
+  **Prime's ability to message and resume siblings is untouched.**
+- **`claude agents` / `ListAgents` still list unbridged siblings** — the unbridged probe
+  appeared as a normal `bg` row seconds after spawn. They are local jobs; the agents view
+  reads job directories.
+- **Nothing in the dashboard, the session-hub, or the Navigator reads bridge state** —
+  `tools/` and `scripts/` contain no reference to `bridgeSessionId` outside comments in
+  `obot-auto` and `obot-prime`.
+
+### What is lost
+
+The always-on health check in `session-spawn` step 6 was a continuous canary on the
+undocumented `--bg` + `--remote-control` combination, sampled ~20 times a day. It now
+runs only on opt-in spawns, which are rare. The lead lanes (`obot-prime`, `obot-auto`)
+still pass the flag on every launch, so a CLI regression would still *occur* there — but
+it would surface as @jwildfire reporting prime missing from his phone, not as an agent
+noticing. The triage one-liner below is the check when that happens.
+
 ## The activation lanes
 
 | Lane | Who | How | Bridged? |
 | --- | --- | --- | --- |
-| Sibling `👯🤖` spawns | agent (automatic) | `--remote-control` on the `claude --bg` command — [`session-spawn`](../skills/session-spawn/SKILL.md) step 4, verified at step 6 | yes, since 2026-07-23 |
+| Background sibling `👯🤖` spawns | agent (automatic) | `--settings '{"remoteControlAtStartup": false}'` on the `claude --bg` command — [`session-spawn`](../skills/session-spawn/SKILL.md) step 3/4 | **no, since 2026-08-15** (see [the reversal](#the-2026-08-15-reversal-siblings-off-leads-on)) |
+| Opted-in sibling (e.g. an interactive reviewer) | agent, per spawn | `--remote-control` instead of the `--settings` opt-out — verified at [`session-spawn`](../skills/session-spawn/SKILL.md) step 6 | yes, on request |
+| Standing `🎩🤖` obot-prime | agent (automatic) | `--remote-control` in [`scripts/obot-prime`](../scripts/obot-prime) | yes — **this is the lane @jwildfire actually uses** |
 | Autonomous `🦾🤖` lead | agent (automatic) | `--remote-control` in [`scripts/obot-auto`](../scripts/obot-auto) | yes, since oa#54 (landed on `main` in oa#77) |
 | Agents-view dispatch | @jwildfire | no flag available — relies entirely on the global setting | yes, since 2026-07-29 |
 | Any interactive session | @jwildfire, once | `/config` → **Enable Remote Control for all sessions** → `true` | yes, since 2026-07-29 |
@@ -65,11 +153,17 @@ spawn. Evidence from throwaway probes in the obot2 workspace:
 
 **Caveat: this is undocumented behavior.** The official docs say Remote Control
 supports one remote session per *interactive* process and don't mention `--bg`.
-It works on 2.1.218 and 2.1.220; treat it as fragile. That is why the health
-check is a **required step** in `session-spawn`, not an aside: after a spawn,
-`bridgeSessionId` must appear in `~/.claude/jobs/{id}/state.json` within ~15s.
-If it stops appearing after a CLI update, log the regression to the scratchpad —
-the spawn itself is unaffected.
+It works on 2.1.218, 2.1.220 and 2.1.233; treat it as fragile. That is why the
+health check is a **required step** in `session-spawn` for any spawn that passes
+the flag, not an aside: `bridgeSessionId` must appear in
+`~/.claude/jobs/{id}/state.json` within ~15s. If it stops appearing after a CLI
+update, log the regression to the scratchpad — the spawn itself is unaffected.
+
+Since 2026-08-15 that check no longer runs on every sibling (they are unbridged by
+design), only on opt-in spawns. The lead launchers `obot-prime` and `obot-auto`
+still pass the flag on every launch, so they exercise this combination daily — but
+nothing checks them automatically. See
+[the reversal](#the-2026-08-15-reversal-siblings-off-leads-on).
 
 The flag survives respawn: it is recorded in the job's `respawnFlags`, so a "done"
 background session that gets a follow-up message re-registers with the bridge.
@@ -159,9 +253,13 @@ sessions started from claude.ai/code or the phone land in the chosen directory,
 
 ## "Why is my session not bridged?"
 
-Start by identifying the lane that launched it — the fix differs per lane, and
-guessing wrong costs a session. Every background session has a job directory;
-interactive ones do not.
+**First: is it supposed to be?** Since 2026-08-15 a background `👯🤖` sibling is
+unbridged *by design* — that is not a fault and needs no diagnosis. This section is for
+a session that should be bridged and is not: `🎩🤖 obot-prime`, an autonomous
+`🦾🤖` lead, an interactive session, or a sibling deliberately opted in.
+
+Then identify the lane that launched it — the fix differs per lane, and guessing wrong
+costs a session. Every background session has a job directory; interactive ones do not.
 
 ```bash
 python3 - <<'PY'
@@ -176,8 +274,10 @@ PY
 
 | What you see | Lane | Why it is unbridged | Fix |
 | --- | --- | --- | --- |
-| `template: bg`, flags include `--remote-control` | sibling spawn | should not happen | CLI regression — record the version, see lane 1 |
-| `template: bg`, flags have `-n 👯🤖 …` but no `--remote-control` | sibling spawn | spawned without the flag | `session-spawn` step 4 was not followed |
+| `template: bg`, flags have `-n 👯🤖 …` and `--settings '{"remoteControlAtStartup": false}'` | background sibling | **correct — not a fault** | nothing to fix; this is the 2026-08-15 default |
+| `template: bg`, flags have `-n 👯🤖 …` and `--remote-control` | opted-in sibling | should not happen | CLI regression — record the version, see lane 1 |
+| `template: bg`, flags have `-n 👯🤖 …`, neither the flag nor the opt-out | sibling spawn | spawned off-contract | `session-spawn` step 4 was not followed — it bridges anyway via the global setting |
+| `template: bg`, flags have `-n 🎩🤖 obot-prime` but no `--remote-control` | `obot-prime` | launcher edited | restore the flag in `scripts/obot-prime` — this is the lane he uses |
 | `template: bg`, flags have `-n 🦾🤖 …` but no `--remote-control` | `obot-auto` | pre-oa#54 `obot-auto` | fixed — re-run on current `main` |
 | `template: claude`, flags `['--agent','claude','--model',…]` | agents-view dispatch | no flag exists for this lane | lane 2 (global setting); this session needs a restart or `/remote-control` |
 | no job directory at all | interactive terminal | started before lane 2 was on | `/remote-control` in that session |
@@ -195,7 +295,9 @@ Two cross-cutting rules worth remembering before diagnosing anything else:
 
 - Inbound control (`bridgeOutboundOnly: false`) means anyone with the claude.ai
   account can drive the session — single-owner account here, so acceptable by
-  design. The transport never opens inbound ports on the Mac.
+  design. The transport never opens inbound ports on the Mac. Since 2026-08-15 the
+  surface is much smaller anyway: background siblings, the highest-volume lane at
+  ~20 sessions a day, no longer register at all.
 - Kill switch: `"disableRemoteControl": true` in any settings scope disables the
   feature entirely (documented, v2.1.128+).
 - `isolatePeerMachines` (settings) requires explicit approval before a
@@ -227,16 +329,23 @@ Adjacent options, for completeness:
   documented today.
 
 **Recommendation (implemented): Remote Control is the mobile/remote path for the
-main obot session and all siblings.** It gives exactly the asked-for capability —
-watch and steer the live local sessions from anywhere — without a plan upgrade.
+main obot session.** It gives exactly the asked-for capability — watch and steer the
+live local session from anywhere — without a plan upgrade. As written in 2026-07-23
+this said "and all siblings"; the sibling half was
+[reversed on 2026-08-15](#the-2026-08-15-reversal-siblings-off-leads-on). The verdict
+on Claude Tag itself is unaffected.
 
 ## @jwildfire checklist
 
 **Step 1 — done 2026-07-29 06:11.** `/config` → **Enable Remote Control for all
 sessions** → `true`. Verified present in `~/.claude/settings.json`, and verified
 to cover `--bg` spawns as well as interactive ones. Every session started from
-that moment on is bridged regardless of lane. Nothing to redo unless the key
-gets reset — and if it does, an agent cannot put it back.
+that moment on is bridged regardless of lane — **except background siblings since
+2026-08-15**, which now opt themselves out per spawn
+([the reversal](#the-2026-08-15-reversal-siblings-off-leads-on)). Nothing to redo
+unless the key gets reset — and if it does, an agent cannot put it back, and
+`obot-prime` and `obot-auto` would be carried by their explicit flag while
+interactive sessions would go dark.
 
 **Step 2 — resolved by attrition, 2026-08-14.** The one session left outstanding
 when this was written (the pre-step-1 lead 😺🤖, job `96636d0f`) has since ended;

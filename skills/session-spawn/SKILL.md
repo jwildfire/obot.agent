@@ -105,20 +105,34 @@ than defaulting to your own settings:
   own `~/.claude/jobs/{id}/state.json`).
 - **Permission mode**: siblings always spawn in auto mode — pass
   `--permission-mode auto` explicitly rather than relying on inheritance.
-- **Remote Control**: siblings always spawn with `--remote-control` so the
-  session shows up in claude.ai/code and the Claude mobile app and can be
-  driven from there (@jwildfire directive, 2026-07-23). This flag combination
-  is undocumented for `--bg` (verified working on CLI 2.1.218 and 2.1.220; see
-  [`docs/remote-control.md`](../../docs/remote-control.md)), so step 6 verifies
-  it rather than assuming it.
+- **Remote Control**: background siblings spawn **unbridged** — pass
+  `--settings '{"remoteControlAtStartup": false}'`. @jwildfire reversed the
+  2026-07-23 always-bridged directive on 2026-08-15: he no longer drives
+  siblings himself (obot-prime is the single front door —
+  [D0013](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-delegation-lanes/)),
+  so a bridge he never opens is pure overhead: an inbound-control surface on
+  every sibling, and a permanent row in his claude.ai/code session list.
+  **Dropping the `--remote-control` flag is not enough.** The flag and the
+  global `remoteControlAtStartup: true` setting are peers in one `||`, so a
+  flagless spawn still bridges — the `--settings` opt-out is what actually
+  unbridges. It overrides that one key only: permission mode, workspace
+  settings, hooks and plugins are unaffected (verified CLI 2.1.233 — evidence
+  in [`docs/remote-control.md`](../../docs/remote-control.md)).
+- **Opting a sibling back in**: drop the `--settings` argument and pass
+  `--remote-control` instead. Do that for any sibling @jwildfire will talk to
+  himself — an interactive reviewer
+  ([`session-reviews`](../session-reviews/SKILL.md)), or a long-runner he has
+  asked to be able to check on from his phone. Step 6 then applies.
 
 ### 4. Run it
 
 ```bash
-claude --bg --permission-mode auto --remote-control --model <model> -n "👯🤖 <date> <slug>" "<briefing>\n\n---\n\nTASK: $ARGUMENTS"
+claude --bg --permission-mode auto --settings '{"remoteControlAtStartup": false}' \
+  --model <model> -n "👯🤖 <date> <slug>" "<briefing>\n\n---\n\nTASK: $ARGUMENTS"
 ```
 
-(add `--effort <level>` when deviating from the default)
+(add `--effort <level>` when deviating from the default; on the opt-in lane
+above, swap the `--settings` argument for `--remote-control`)
 
 ### 5. Log the spawn — in the same call, and ack in the same message
 
@@ -141,22 +155,29 @@ is emitted *before* the spawn call** — reply-first ordering
 a long briefing composed as the spawn argument runs behind an already-visible
 ack, but composed ahead of the ack it is dead air (the 2026-08-15 31-minute
 prime turn, obot.agent#102). One line: what was delegated, to which slug, and
-how to reach it (`claude agents`, or claude.ai/code via Remote Control). Then
-return to whatever he asked, and relay the sibling's result at your next turn.
+how to reach it — `claude agents` from the terminal, or just ask prime, which
+can `SendMessage` any local sibling whether or not it is bridged. Then return
+to whatever he asked, and relay the sibling's result at your next turn.
 
 The wrapup then knows the sibling exists even if it never logs a line — that
 mismatch is exactly the "known gap" that justifies transcript mining in
 [`session-wrapup`](../session-wrapup/SKILL.md) step 0.
 
-### 6. Verify the bridge — required, but never before the ack
+### 6. Verify the bridge — only on the opt-in lane
 
-The spawn command printing a job ID does **not** mean Remote Control came up.
-Check it explicitly — but **not** as a round trip wedged between the spawn and
-the ack, which is exactly what the round-trip budget forbids. Either batch it
-into the next Bash call you were going to make anyway, or run it at your next
-turn (when you relay the sibling's first result); the bridge appears within
-~15s of spawn and stays for the life of the job, so a late check is as good as
-a prompt one:
+**Skip this step for an ordinary background sibling.** Since 2026-08-15 those
+spawn unbridged on purpose, so `bridgeSessionId` is *expected* to be absent and
+checking it would report a false problem on every spawn.
+
+It stays **required for a sibling you opted back in** (step 3) — the
+`--bg` + `--remote-control` combination is undocumented, so a CLI regression
+would silently leave @jwildfire unable to find on his phone the one session he
+asked to reach from it. Check it explicitly — but **not** as a round trip
+wedged between the spawn and the ack, which is exactly what the round-trip
+budget forbids. Either batch it into the next Bash call you were going to make
+anyway, or run it at your next turn (when you relay the sibling's first
+result); the bridge appears within ~15s of spawn and stays for the life of the
+job, so a late check is as good as a prompt one:
 
 ```bash
 python3 -c "import json,sys; d=json.load(open(sys.argv[1])); \
@@ -168,13 +189,24 @@ print(d.get('name'), '| bridge:', d.get('bridgeSessionId') or 'MISSING')" \
   and the phone. Nothing more to do; do not spend a message saying so.
 - **Missing** → say so in your next reply to @jwildfire (he will look for that
   session on his phone and not find it) and log it to the scratchpad, then keep
-  going — the spawn itself is unaffected and the sibling still works locally.
-  Then check the two known causes: the flag missing from the command, or
-  `"remoteControlAtStartup"` no longer `true` in `~/.claude/settings.json`
-  (an agent cannot restore that key — it is classifier-blocked; ask
-  @jwildfire). If neither explains it, it is a CLI regression on an
-  undocumented combination: note the version and see
+  going — the spawn itself is unaffected and the sibling still works locally,
+  and prime can still reach it. Then check the two known causes: the
+  `--remote-control` flag missing from the command, or the `--settings`
+  opt-out left in by mistake. If neither explains it, it is a CLI regression on
+  an undocumented combination: note the version and see
   [`docs/remote-control.md`](../../docs/remote-control.md).
+
+**What the old always-on check bought, and what replaces it.** Running on every
+spawn, it was a continuous canary on that undocumented combination — roughly
+twenty samples a day. It now fires only on opt-in spawns, which are rare. The
+remaining continuous canaries are the two **lead** lanes, which still pass the
+flag every launch: [`scripts/obot-prime`](../../scripts/obot-prime) and
+[`scripts/obot-auto`](../../scripts/obot-auto). A regression there is what
+@jwildfire would actually feel, since prime is the session he opens on his
+phone — but nothing checks those automatically, so it would surface as him
+reporting prime missing rather than as an agent noticing. The triage one-liner
+in [`docs/remote-control.md`](../../docs/remote-control.md) is the check; run it
+if he ever says a session is missing from Remote Control.
 
 **This skill only owns the sibling lane.** Sessions started any other way — the
 lead 😺🤖 session, anything dispatched from the agents view, `obot-auto`'s
