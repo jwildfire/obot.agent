@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-15 23:55 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/123 on 2026-08-16 00:05 EDT -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0, Labels: enhancement, Assignee: @me -->
 
 ## What this does
