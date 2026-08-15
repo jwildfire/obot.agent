@@ -152,6 +152,21 @@ judgement call, a policy carve-out, a missing prerequisite — it writes a
 **decision artifact** instead of stalling or guessing:
 
 - Self-contained HTML at `obot.roadmap/reports/decisions/{YYYY-MM-DD}-{slug}/index.html`.
+- **A permanent ID, claimed before the page is written** (@jwildfire, 2026-08-15):
+  the artifact is `D0001`, its questions are `D0001.1`, `D0001.2`, … in page order.
+  `node scripts/claim_decision_id.mjs <slug> --title "…" --q "A1: …"` in obot.roadmap
+  allocates it and `node scripts/stamp_decision_ids.mjs` writes it onto the page. He
+  approves by quoting an ID back in chat, so it must be unique across every artifact
+  — the artifact's own codes (A1, BL2, M3 …) stay beside it as secondary labels, never
+  in place of it, and the ID never replaces the sentence saying what is being decided.
+- **A one-line description in the page head**, written with the page:
+  `<meta name="description" content="...">` directly after `<title>`, 40–260
+  characters. It is what the hub's news feed shows, and therefore what @jwildfire
+  decides from before opening anything: say what the artifact contains and why he
+  would open it, in plain English, naming things rather than numbering them. Not
+  "AI-generated report." — that was the hardcoded feed fallback until 2026-08-15 and
+  it is now rejected by name. `node scripts/check_artifact_descriptions.mjs` in
+  obot.roadmap fails the deploy without one.
 - Contents, in order: the situation in three sentences; the options, each with
   what it costs and what it forecloses; **a recommendation, stated plainly**;
   and what unblocks on each choice.
