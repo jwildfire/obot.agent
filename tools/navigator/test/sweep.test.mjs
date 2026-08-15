@@ -1,0 +1,121 @@
+// Tests for the Navigator RC-review sweep's pure core (hub#157, first capability).
+// The gh-facing orchestration is exercised live; everything that decides or
+// renders is pure and tested here so CI guards the contract:
+//   - which PRs count as RCs (release-role base / review requested / reviewed)
+//   - what deltas become events (new review, RC appeared/gone, decision change)
+//   - the state file prime reads (proof-of-life header, provenance stamps,
+//     failure mode that never masquerades as fresh)
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { discoverRepos, classifyRC, diff, renderState } from '../sweep.mjs'
+
+const policy = {
+  repos: {
+    'jwildfire/safety.viz': { class: 'clinical', branches: { integration: 'dev', release: ['main'] } },
+    'jwildfire/obot.roadmap': { class: 'operational', branches: { integration: 'main', release: [] } },
+  },
+}
+
+test('discoverRepos: every policy repo is swept; release roles carried', () => {
+  const repos = discoverRepos(policy)
+  assert.equal(repos.length, 2)
+  const sv = repos.find(r => r.repo === 'jwildfire/safety.viz')
+  assert.deepEqual(sv.release, ['main'])
+  const rm = repos.find(r => r.repo === 'jwildfire/obot.roadmap')
+  assert.deepEqual(rm.release, []) // no release branch — still swept via the review-requested lane
+})
+
+const pr = (over = {}) => ({
+  number: 1, title: 't', url: 'u', baseRefName: 'dev', isDraft: false,
+  reviewRequests: [], reviewDecision: '', updatedAt: '2026-08-15T00:00:00Z', ...over,
+})
+
+test('classifyRC: release-role base target is an RC', () => {
+  assert.equal(classifyRC(pr({ baseRefName: 'main' }), ['main']), true)
+})
+
+test('classifyRC: review requested from jwildfire is an RC regardless of base', () => {
+  assert.equal(classifyRC(pr({ reviewRequests: [{ login: 'jwildfire' }] }), ['main']), true)
+})
+
+test('classifyRC: an already-reviewed open PR stays in the queue', () => {
+  // sv#131 case: review submitted → reviewRequests empties, but the PR is
+  // still open and still his — reviewDecision keeps it visible.
+  assert.equal(classifyRC(pr({ reviewDecision: 'CHANGES_REQUESTED' }), []), true)
+})
+
+test('classifyRC: drafts and ordinary integration PRs are not RCs', () => {
+  assert.equal(classifyRC(pr({ baseRefName: 'main', isDraft: true }), ['main']), false)
+  assert.equal(classifyRC(pr(), ['main']), false)
+})
+
+const rc = (over = {}) => ({
+  repo: 'jwildfire/safety.viz', number: 131, title: 'RC v1.7.0',
+  url: 'https://github.com/jwildfire/safety.viz/pull/131', base: 'main',
+  reviewDecision: '', reviews: [], commentCount: 0, ...over,
+})
+const review = { author: 'jwildfire', state: 'CHANGES_REQUESTED', submittedAt: '2026-08-15T08:29:35Z', excerpt: 'major: dropdown' }
+
+test('diff: identical snapshots yield no events', () => {
+  const a = { 'jwildfire/safety.viz#131': rc({ reviews: [review] }) }
+  assert.deepEqual(diff(a, a), [])
+})
+
+test('diff: a new review on a known RC is the headline event', () => {
+  const prev = { 'jwildfire/safety.viz#131': rc() }
+  const next = { 'jwildfire/safety.viz#131': rc({ reviewDecision: 'CHANGES_REQUESTED', reviews: [review] }) }
+  const events = diff(prev, next)
+  const kinds = events.map(e => e.type)
+  assert.ok(kinds.includes('review-new'))
+  const ev = events.find(e => e.type === 'review-new')
+  assert.match(ev.line, /CHANGES_REQUESTED/)
+  assert.match(ev.line, /safety\.viz#131/)
+})
+
+test('diff: RC appearing and disappearing are both events', () => {
+  const appeared = diff({}, { 'jwildfire/safety.viz#131': rc() })
+  assert.equal(appeared[0].type, 'rc-new')
+  const gone = diff({ 'jwildfire/safety.viz#131': rc() }, {}, { 'jwildfire/safety.viz#131': 'MERGED' })
+  assert.equal(gone[0].type, 'rc-gone')
+  assert.match(gone[0].line, /MERGED/)
+})
+
+test('diff: comment growth and decision changes surface', () => {
+  const prev = { 'jwildfire/safety.viz#131': rc({ commentCount: 1, reviewDecision: 'CHANGES_REQUESTED', reviews: [review] }) }
+  const next = { 'jwildfire/safety.viz#131': rc({ commentCount: 3, reviewDecision: 'APPROVED', reviews: [review] }) }
+  const kinds = diff(prev, next).map(e => e.type)
+  assert.ok(kinds.includes('comments-new'))
+  assert.ok(kinds.includes('decision-change'))
+})
+
+test('diff: a repo the sweep failed to list emits no rc-gone events', () => {
+  const prev = { 'jwildfire/safety.viz#131': rc() }
+  const events = diff(prev, {}, {}, new Set(['jwildfire/safety.viz']))
+  assert.deepEqual(events, [])
+})
+
+const meta = { sweptAt: '2026-08-15 09:41', cadenceMin: 5, repoCount: 7, ok: true, errors: [] }
+
+test('renderState: proof-of-life header, stamps, and review excerpt', () => {
+  const md = renderState({ snapshot: { 'jwildfire/safety.viz#131': rc({ reviewDecision: 'CHANGES_REQUESTED', reviews: [review] }) }, events: [], meta })
+  assert.match(md, /swept: 2026-08-15 09:41/)
+  assert.match(md, /cadence 5m/)
+  assert.match(md, /stale/i) // the staleness rule is stated in the file itself
+  assert.match(md, /\[verified gh 09:41\]/)
+  assert.match(md, /CHANGES_REQUESTED by @jwildfire/)
+  assert.match(md, /major: dropdown/)
+})
+
+test('renderState: a failed sweep never reads as fresh', () => {
+  const md = renderState({
+    snapshot: { 'jwildfire/safety.viz#131': rc() }, events: [],
+    meta: { ...meta, ok: false, errors: ['gh: auth'], sweptAt: '2026-08-15 09:46', lastGoodAt: '2026-08-15 09:41' },
+  })
+  assert.match(md, /FAILED/)
+  assert.match(md, /09:41/) // last good sweep time is what the data is stamped to
+})
+
+test('renderState: empty queue says so explicitly', () => {
+  const md = renderState({ snapshot: {}, events: [], meta })
+  assert.match(md, /RC queue: EMPTY/)
+})
