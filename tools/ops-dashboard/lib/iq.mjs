@@ -120,7 +120,10 @@ export function parseIQ(entry = '') {
   }
 
   if (iq.verify) Object.assign(iq.verify, splitVerify(iq.verify.text));
-  iq.blocks = parseBlocks(iq.blocks);
+  // The refs go alongside the field, never over it: `blocks` stays a field like
+  // every other one so it still renders as text he can read, and `blockRefs` is
+  // the machine-readable half the critical tag is derived from.
+  iq.blockRefs = parseBlocks(iq.blocks);
   return iq;
 }
 

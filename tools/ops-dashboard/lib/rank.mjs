@@ -8,12 +8,23 @@
 // That last sentence is a trust contract, so the tag is built to be hard to claim
 // rather than easy to set:
 //
-// **Earned, not asserted.** There is no boolean an agent can write. An item is
-// critical only if it names filed work stuck behind it - `Blocks: owner/repo#12`
-// - and something resolved that reference to an open issue or PR. `blocker-log`
-// asks GitHub at capture time and writes the `(verified open ...)` stamp only on
-// a real answer; with no `gh`, or a closed or missing reference, no stamp is
-// written and the item is ordinary. Fail-closed in every direction.
+// **Earned, not asserted.** There is no boolean an agent can write. Exactly two
+// routes in, and both are things something else measured:
+//
+//   1. **Filed work is stuck behind it.** The item names it - `Blocks:
+//      owner/repo#12` - and something resolved that reference to an open issue
+//      or PR. `blocker-log` asks GitHub at capture time and writes the
+//      `(verified open ...)` stamp only on a real answer; with no `gh`, or a
+//      closed or missing reference, no stamp is written and the item is
+//      ordinary. Fail-closed in every direction.
+//   2. **A computed condition holds.** `item.computed = {label, detail}`, set by
+//      whatever measures it and never by the thing that wants attention. The
+//      case this was generalised for is the answer pipeline's OVERDUE (an answer
+//      of his captured but unapplied for more than an hour, obot.agent#123): a
+//      clock decides it, so it cannot be talked up.
+//
+// What both routes exclude is the same thing: an agent's opinion that its own
+// work matters. There is no field to write it in.
 //
 // **Displayed, so a weak claim is visible.** The row does not say "critical", it
 // says `critical - blocks obot.roadmap#182`. He can judge the claim at a glance,
@@ -35,16 +46,21 @@
 // bug), and the section header says how many moved up. `/queue.json` keeps the
 // unpinned grouping, so machine consumers are unaffected.
 //
-// Today only config items can earn the tag, because only the config list carries
+// Today only config items can earn route 1, because only the config list carries
 // a `Blocks:` field. Release candidates come from `reviews-queue`, which holds no
 // evidence of what is stuck behind a PR; decisions come from the hub collector,
-// same. The seam is `item.blocks` on any item - when a collector can populate it,
-// that kind starts competing here with no change to this file. Nothing is ever
-// promoted on age, size, or how urgent the filing agent felt.
+// same. Route 2 is open to any kind the moment a collector attaches `computed`.
+// Both seams live on the item, so a new source competes here with no change to
+// this file. Nothing is ever promoted on age, size, or how urgent an agent felt.
 export const CRITICAL_BUDGET = 3;
 
 /** The claim a row displays, or null when the item has earned nothing. */
 export function criticalClaim(item) {
+  // A measured condition first: it is the stronger evidence of the two, because
+  // nothing had to assert it at all.
+  const c = item?.computed;
+  if (c?.label) return c.detail ? `${c.label} - ${c.detail}` : String(c.label);
+
   const refs = (item?.blocks ?? []).filter((b) => b?.verified && b.ref);
   if (!refs.length) return null;
   const [first, ...rest] = refs;
@@ -63,7 +79,7 @@ const days = (date) => {
  */
 export function score(item) {
   const refs = (item?.blocks ?? []).filter((b) => b?.verified).length;
-  return refs * 100 + days(item?.date) * 0.1;
+  return (item?.computed?.label ? 500 : 0) + refs * 100 + days(item?.date) * 0.1;
 }
 
 const sorted = (items) => [...items].sort((a, b) => score(b) - score(a)

@@ -129,7 +129,7 @@ export function collectConfig(workspace) {
         date: iq.filed,
         verified: iq.verified,
         iq,
-        blocks: iq.blocks,
+        blocks: iq.blockRefs,
         complete: iqComplete(iq),
         fingerprint: fingerprint({ kind: 'config', key, title: iq.title, body: iq.body }),
       });

@@ -43,6 +43,25 @@ test('an IQ entry parses into the steps, the expected result, and the proof', ()
   assert.equal(iq.verify.expect, 'prints 1 or more');
   assert.match(iq.unblocks.text, /heartbeat/);
   assert.equal(iq.source.text, 'obot.agent#91');
+  // A field the entry does not have must stay absent, or the panel renders an
+  // empty labelled block for it.
+  assert.equal(iq.blocks, null);
+  assert.deepEqual(iq.blockRefs, []);
+  assert.equal(iq.why, null);
+});
+
+test('a Blocks field stays readable text as well as machine-readable refs', () => {
+  const iq = parseIQ(`- [ ] c0001 — **x**
+  Do: a
+  Expect: b
+  Verify: test -f /tmp/x → it exists
+  Source: s
+  Blocks: jwildfire/obot.roadmap#182 (verified open 2026-08-16), hub#9 (unverified)
+`);
+  assert.match(iq.blocks.text, /obot\.roadmap#182/, 'he reads the field');
+  assert.equal(iq.blockRefs.length, 2);
+  assert.equal(iq.blockRefs[0].verified, true);
+  assert.equal(iq.blockRefs[1].verified, false);
 });
 
 test('an IQ is complete only with an action, an expected result and a proof', () => {
@@ -390,4 +409,56 @@ test('an expected output is checked when the entry states one', async () => {
   // `not X` is how "it is no longer the old value" is stated.
   assert.equal(judge(0, 'https://a/u/3680095?v=4', 'not u/3680095'), 'fail');
   assert.equal(judge(0, 'https://a/u/999?v=4', 'not u/3680095'), 'pass');
+});
+
+test('a measured condition earns the tag too, and outranks a blocks claim', () => {
+  // OVERDUE (obot.agent#123) is decided by a clock, not by the thing asking for
+  // attention — which is exactly the property the bar is testing for.
+  const overdue = { kind: 'decision', key: 'd1', title: 'an answer nothing picked up', date: '2026-08-16', computed: { label: 'overdue', detail: 'captured 3h ago, nothing applied it' } };
+  const blocks = { kind: 'config', key: 'c1', title: 'x', date: '2026-08-01', blocks: [{ ref: 'hub#1', verified: true }] };
+  assert.match(criticalClaim(overdue), /overdue/);
+  assert.match(criticalClaim(overdue), /3h ago/, 'the measurement is shown, not just the word');
+
+  const r = rankQueue({ rcs: { items: [] }, decisions: { items: [overdue] }, config: { items: [blocks] } });
+  assert.deepEqual(r.critical.map((i) => i.key), ['d1', 'c1']);
+
+  // And still nothing an agent can simply declare about its own work.
+  assert.equal(criticalClaim({ kind: 'rc', key: 'r', title: 'y', computed: {} }), null);
+  assert.equal(criticalClaim({ kind: 'rc', key: 'r', title: 'y', urgent: true }), null);
+});
+
+test('the page script actually parses — a template-literal escape is not a typo you see', () => {
+  // Found the hard way: `\n` inside the page's own template literal became a real
+  // newline in the emitted script, so the whole inline script failed to parse and
+  // every control on the page went dead — silently, with no console error and a
+  // page that still looked right. Nothing was checking that the script the
+  // browser receives is valid JavaScript. Now something is.
+  const html = render({ queue: { ...ranked(), items: [] } });
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  assert.ok(scripts.length, 'the page carries an inline script');
+  for (const s of scripts) {
+    assert.doesNotThrow(() => new Function(s), 'the emitted page script must parse');
+  }
+});
+
+test('retiring an entry moves it out of Open with its id and body intact', () => {
+  const ws = tmp();
+  capture(ws, ['first', '--do', 'a', '--expect', 'b', '--verify', 'test -f /tmp/a -> it exists', '--source', 's']);
+  capture(ws, ['second', '--do', 'c', '--expect', 'd', '--verify', 'test -f /tmp/b -> it exists', '--source', 's']);
+  capture(ws, ['third', '--do', 'e', '--expect', 'f', '--verify', 'test -f /tmp/c -> it exists', '--source', 's']);
+
+  // A retirement needs a reason: one without is a deletion with better manners.
+  assert.ok(captureFails(ws, ['--retire', 'c0002']), 'no reason, no retirement');
+  capture(ws, ['--retire', 'c0002', '--reason', 'folded into c0001']);
+
+  const md = fs.readFileSync(path.join(ws, '.claude', 'blockers.md'), 'utf8');
+  assert.deepEqual(collectConfig(ws).items.map((i) => i.id), ['c0001', 'c0003']);
+  assert.match(md, /## Resolved[\s\S]*c0002[\s\S]*folded into c0001/, 'it moves, it does not vanish');
+  assert.match(md, /- \[x\] c0002/, 'and it closes rather than being cut');
+  assert.match(md.slice(md.indexOf('c0002')), /Do: c/, 'the whole entry travels, not just the headline');
+
+  // The number is spent forever, even though the item is no longer open.
+  capture(ws, ['fourth', '--do', 'g', '--expect', 'h', '--verify', 'test -f /tmp/d -> it exists', '--source', 's']);
+  assert.deepEqual(collectConfig(ws).items.map((i) => i.id), ['c0001', 'c0003', 'c0004']);
+  assert.ok(captureFails(ws, ['--retire', 'c0002', '--reason', 'again']), 'a retired id is not open twice');
 });

@@ -160,7 +160,11 @@ const DASHBOARD_CSS = `
   .q.config { border-left-color:var(--warn); cursor:default; }
   .q.decision { border-left-color:var(--good); }
   .q-id { color:var(--faint); font-size:0.68rem; flex:none; }
-  .q-title { font-size:0.82rem; }
+  /* Two lines, hard. The titles say what he gets rather than naming a setting,
+     which makes them longer — worth it in the panel, not worth an unbounded row
+     in a list he scrolls on a phone. The full title is the panel's heading. */
+  .q-title { font-size:0.82rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+             overflow:hidden; }
   .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; }
   .q-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
   .q-moved { font-size:0.62rem; color:var(--faint); text-transform:none; letter-spacing:0; }
@@ -188,8 +192,12 @@ const DASHBOARD_CSS = `
   .iq-f > .lab { font-size:0.62rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
                  display:block; margin-bottom:0.1rem; }
   .iq-f p { margin:0; font-size:0.86rem; }
+  /* Wrapped, not scrolled: on a phone a horizontal scrollbar inside a code block
+     hides the half of the command he has not discovered yet. Wrapping is purely
+     visual — the copy button hands over the exact text either way. */
   .iq-f pre { margin:0.3rem 0 0; padding:0.45rem 0.55rem; background:var(--paper); border:1px solid var(--line);
-              border-radius:7px; font-family:var(--mono); font-size:0.74rem; overflow-x:auto; white-space:pre; }
+              border-radius:7px; font-family:var(--mono); font-size:0.74rem; overflow-x:auto;
+              white-space:pre-wrap; word-break:break-word; }
   .iq-f .copy { font-size:0.66rem; padding:0.1rem 0.4rem; border:1px solid var(--line); border-radius:5px;
                 background:var(--card); color:var(--accent); cursor:pointer; margin-left:0.35rem; }
   .iq-check { display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap; margin-top:0.35rem; }
@@ -569,9 +577,9 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
       wrap.appendChild(el('span', 'lab', LABEL[f.name] || f.name));
       if (f.text) wrap.appendChild(el('p', null, f.text));
       if (f.code && f.code.length) {
-        const pre = el('pre', null, f.code.join('\n'));
+        const pre = el('pre', null, f.code.join('\\n'));
         wrap.appendChild(pre);
-        wrap.appendChild(copyBtn(f.code.join('\n')));
+        wrap.appendChild(copyBtn(f.code.join('\\n')));
       }
       if (f.name === 'verify') wrap.appendChild(checkRow(key, iq));
       box.appendChild(wrap);
@@ -608,9 +616,13 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
       const j = await r.json().catch(() => ({}));
       btn.disabled = false;
       out.classList.add(j.result || 'refused');
+      // A failure has to say what was expected. "exit 1" tells him nothing he
+      // can act on; "printed 0, expected 2" tells him the edit did not land.
       out.textContent = j.result === 'pass' ? 'PASS — ' + (j.stdout || 'exit 0')
-        : j.result === 'fail' ? 'FAIL — exit ' + j.exitCode + (j.stdout ? ' · ' + j.stdout : '')
-        : (j.why || 'could not run');
+        : j.result === 'fail'
+          ? 'FAIL — ' + (j.stdout ? 'printed ' + j.stdout : 'exit ' + j.exitCode)
+            + (iq.verify.expect ? ', expected ' + iq.verify.expect.replace(/^prints /, '') : '')
+          : (j.why || 'could not run');
       if (j.result === 'pass') $('tri-done').hidden = false;
     });
     if (iq.verify.manual || !iq.verify.command) {

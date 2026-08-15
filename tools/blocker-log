@@ -85,8 +85,11 @@ try:
     open_i = lines.index("## Open")
 except ValueError:
     sys.exit("blocker-log: no ## Open section")
-start = next((i for i in range(open_i + 1, len(lines))
-              if re.match(rf"^-\s+\[.\]\s*{re.escape(rid)}\b", lines[i], re.I)), None)
+# Bounded to the Open section: scanning to end-of-file would find the same id
+# already sitting in ## Resolved and "retire" it a second time.
+end_of_open = next((i for i in range(open_i + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+start = next((i for i in range(open_i + 1, end_of_open)
+              if re.match(rf"^-\s+\[ \]\s*{re.escape(rid)}\b", lines[i], re.I)), None)
 if start is None:
     sys.exit(f"blocker-log: {rid} is not open in {p}")
 end = start + 1
