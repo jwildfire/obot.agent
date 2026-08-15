@@ -167,18 +167,22 @@ export function upcomingVersion(workspace, repo) {
 }
 
 /**
- * A release candidate's label: `package version — what it is`.
+ * A release candidate's label: `{package} vX.Y.Z-RCn`, and nothing else.
  *
- * @jwildfire, 2026-08-15: "release candidate PRs should all start with a package name
- * and a version number." That is a naming rule for PRs written from here on (it is in
- * the RC framework), but the queue also carries PRs written before it — and a PR title
- * is not something this page can fix. So the label is derived: package from the repo,
- * version from the title when the title names *this* package's version, otherwise from
- * the release the repo is heading for.
+ * @jwildfire, 2026-08-15: "New rule for release candidate names: {package} Vx.x.x-RCx.
+ * No other summary allowed." This supersedes his own earlier rule the same day ("RC PRs
+ * should all start with a package name and a version number"), under which this function
+ * *synthesised* `package version — what it is` from a messy title. A correctly-titled RC
+ * now already is its label, so the work here is only to normalise what the queue still
+ * carries: PRs written before the rule, whose titles hold a summary the rule has retired.
  *
- * Idempotent by construction — a title that already reads correctly is stripped of its
- * lead and given the same one back, so nothing is ever doubled. And a version is never
- * invented: with no evidence of one, the label is the package alone.
+ * Stripping rather than keeping that summary is the point — a page that keeps rendering
+ * descriptions makes a title that has one look correct.
+ *
+ * Idempotent by construction. A version is never invented: with no evidence of one the
+ * label is the package alone, and with no version there is no candidate to number either.
+ * An `-RCn` already in the title is authoritative — the counter is a review-round fact
+ * this page cannot see, so it is read, never derived.
  */
 export function rcLabel({ repo, title, version = null } = {}) {
   const pkg = String(repo || '').split('/').pop() || '';
@@ -186,13 +190,114 @@ export function rcLabel({ repo, title, version = null } = {}) {
   if (!pkg) return rest;
 
   rest = rest.replace(/^(release candidate|rc)\s*[:—–-]\s*/i, '');
-  const lead = new RegExp(`^${escapeRe(pkg)}\\s+v?(\\d+(?:\\.\\d+)*)\\s*[:—–-]?\\s*`, 'i');
+  const lead = new RegExp(`^${escapeRe(pkg)}\\s+v?(\\d+(?:\\.\\d+)*)(?:-RC(\\d+))?\\s*[:—–-]?\\s*`, 'i');
   const named = lead.exec(rest);
-  if (named) rest = rest.slice(named[0].length);
 
   const v = named?.[1] ?? version ?? null;
-  const head = v ? `${pkg} v${v}` : pkg;
-  return rest ? `${head} — ${rest}` : head;
+  if (!v) return pkg;
+  return `${pkg} v${v}-RC${named?.[2] ?? 1}`;
+}
+
+// One plain line: markdown emphasis, inline links and trailing punctuation-noise off.
+const SUB_MAX = 120;
+const plain = (s) => String(s)
+  .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  .replace(/[*_`]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+/**
+ * The RC row's second line — the cost of "no other summary allowed" paid back.
+ *
+ * A bare `gsm.safety v1.1.0-RC1` in a queue of five says nothing about which release it
+ * is, and the queue is read on a phone. So the description moves off the title and onto
+ * a second line taken from the PR body's one-sentence executive summary, which the RC
+ * body contract (@jwildfire, 2026-08-15, item 2) requires and puts first. `reviews-queue`
+ * already extracts it as `lead`, so this costs no extra network call.
+ *
+ * That is a better line than the old derived label: the old summary was whatever an
+ * author typed into a title, while this sentence is contract-mandated and has to be
+ * accurate, because it is also the first thing he reads when he opens the PR.
+ */
+export function rcSub({ lead } = {}) {
+  const text = plain(lead ?? '');
+  // reviews-queue's own miss marker is not a sentence — show nothing rather than it.
+  if (!text || text === '(no summary in the body)') return null;
+  if (text.length <= SUB_MAX) return text;
+  const cut = text.slice(0, SUB_MAX);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > 40 ? cut.slice(0, space) : cut).replace(/[,;:.\s]+$/, '')}…`;
+}
+
+// Only our own Pages site is framed. github.com answers `x-frame-options: deny` on a
+// PR (verified 2026-08-15), so the PR itself can never be embedded; anything else
+// off-site is not ours to embed either. Everything unframeable is still a link.
+const PAGES_HOST = 'jwildfire.github.io';
+const isFrameable = (url) => {
+  try { return new URL(url).hostname === PAGES_HOST; } catch { return false; }
+};
+
+const MD_LINK_G = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+
+/**
+ * The RC body, parsed into the panel the dashboard renders in the middle column.
+ *
+ * @jwildfire asked (2026-08-15) for a release candidate to open *in* the dashboard
+ * rather than sending him to GitHub. A PR cannot be iframed — github.com sets
+ * `x-frame-options: deny` — and proxying his authenticated GitHub session to get around
+ * that would be a security hole, not a workaround. So the panel is built natively out of
+ * the body, which is possible only because the RC body contract gives every RC the same
+ * shape: one-sentence exec summary, a bulleted link list carrying the demo page and
+ * NEWS.md, then the requirements closed. The contract makes the panel renderable; the
+ * panel is why the contract is worth enforcing. (The demo page *is* framed — Pages sets
+ * no frame headers.)
+ *
+ * Everything is optional. RCs written before the contract still have to open, so each
+ * field degrades to null or an empty list rather than throwing.
+ */
+export function parseRCBody(body) {
+  const out = { summary: null, links: [], demo: null, news: null, requirements: [], ask: null, frameable: false };
+  const lines = String(body ?? '').split('\n');
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // `**See it move:**` and `**The ask:**` are their own thing wherever they appear.
+    // The contract puts them in the bullet list, but bodies written before it use bold
+    // paragraphs (open.gismo#10), and either way they are never the exec summary.
+    const seeItMove = /^[-*]?\s*\*\*See it move:?\*\*/i.test(line);
+    const ask = /^[-*]?\s*\*\*The ask:?\*\*\s*(.+)$/i.exec(line);
+    if (ask) { if (!out.ask) out.ask = plain(ask[1]); continue; }
+
+    const closes = /^[-*]\s*Closes\s+(#\d+)\s*[—–-]?\s*(.*)$/i.exec(line);
+    if (closes) {
+      out.requirements.push({ ref: closes[1], text: plain(closes[2]) });
+      continue;
+    }
+
+    // Links are collected from anywhere, so the panel can show what he actually linked.
+    // Demo and NEWS.md are identified by *target*, never by a passing mention: a bullet
+    // reading "publishes the release with the NEWS.md section via #8" links a PR, and
+    // matching on the words alone picks it up as the release notes.
+    const all = [...line.matchAll(MD_LINK_G)].map((m) => ({ label: plain(m[1]), url: m[2] }));
+    if (/^[-*]\s/.test(line) || seeItMove) out.links.push(...all);
+    for (const { label, url } of all) {
+      if (!out.news && /\/NEWS\.md(\?|#|$)/i.test(url)) out.news = url;
+      if (!out.demo && (seeItMove || /^demo$|demo page|annotated demo/i.test(label))) out.demo = url;
+    }
+    if (seeItMove) continue;
+
+    // The exec summary: the first line that is prose — not a heading, not a bullet, not
+    // the ⛔ banner, not the attribution footer.
+    if (!out.summary && !/^[#>|*-]/.test(line) && !/^This PR was drafted/.test(line)
+        && !line.startsWith('Closes #') && !line.startsWith('⛔')) {
+      out.summary = plain(line);
+    }
+  }
+
+  out.frameable = out.demo ? isFrameable(out.demo) : false;
+  return out;
 }
 
 /**
@@ -206,9 +311,12 @@ export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
   const cached = readCache(workspace, 'rcs', maxAgeMin);
   // Relabelled on the way out as well as on the way in, so a cache written before the
   // naming rule existed still reads right. `rcLabel` is idempotent, so this is free.
+  // `sub` is rebuilt the same way: a cache predating the second line has a `lead` but
+  // no `sub`, and this fills it in without a refresh.
   const label = (items) => (items ?? []).map((it) => ({
     ...it,
     title: rcLabel({ repo: it.repo ?? String(it.key || '').split('#')[0], title: it.title, version: it.version }),
+    sub: it.sub ?? rcSub({ lead: it.lead }),
   }));
   if (cached && !cached.stale) return { items: label(cached.value), ageMin: cached.ageMin, refreshing: false };
   if (agent) refreshRCs(workspace, agent);
@@ -237,6 +345,15 @@ export function refreshRCs(workspace, script) {
           version,
           rawTitle: pr.title,
           title: rcLabel({ repo: pr.repo, title: pr.title, version }),
+          // Kept on the item so a relabel on the way out of the cache can rebuild the
+          // second line without going back to the network.
+          lead: pr.lead ?? null,
+          sub: rcSub({ lead: pr.lead }),
+          // Parsed once here, not in the browser: the panel then renders from the
+          // cache, so it opens instantly and still opens with the network down.
+          rc: parseRCBody(pr.body),
+          checks: pr.checks ?? null,
+          size: pr.size ?? null,
           // `why` is the field reviews-queue emits; the old `reason` never existed, so
           // every row read "ready for your call" whatever the sweep actually said.
           detail: `${pr.repo} — ${pr.why ?? 'ready for your call'}`,
