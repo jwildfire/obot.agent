@@ -8,7 +8,7 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.5.0 (Upcoming)
 
-Nothing yet — merged-but-unreleased work accumulates here until the v0.5.0 release is cut.
+- **A reply now comes before the work that supports it.** After obot-prime answered one question in 31 silent minutes (bookkeeping, a long sibling briefing, and a post-spawn wrap-up all composed ahead of the reply), the responsiveness contract gained a mechanical turn-ordering rule: the first content block of any turn answering @jwildfire is text, a delegating turn's first tool call is the spawn, and all bookkeeping follows the reply. Prime additionally caps every turn at two tool calls before its first visible text, defers memory and state writes to after the ack, and composes briefings as pointers to on-disk artifacts rather than paraphrases. Briefing depth is unchanged — only its position in the turn moved. ([#102](https://github.com/jwildfire/obot.agent/issues/102))
 
 # obot.agent v0.4.0
 

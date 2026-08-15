@@ -52,6 +52,39 @@ boundary**: at the start of each reply, if a corrections file it is expecting ex
 holds unrelayed content, lead with a one-line `Since the first paint: …` /
 `Since the draft: …` revision, then answer whatever @jwildfire actually asked.
 
+## Reply first — turn ordering
+
+"Ack + spawn in the same message" was not enough: on 2026-08-15 obot-prime honoured it
+and still went **~31 minutes silent** on one question, because within the turn it put a
+memory write, a long briefing, and post-spawn composition *ahead of* the reply
+([obot.agent#102](https://github.com/jwildfire/obot.agent/issues/102)). So the ordering
+inside a turn is itself a contract term, stated mechanically:
+
+- **What "user-visible" means here — verified harness behaviour, not an assumption:**
+  text blocks stream to the terminal and to Remote Control the moment they are emitted;
+  extended thinking and tool-call argument generation show *nothing* while they run. The
+  only event that stops the silence clock is an emitted text block. (The 2026-08-15
+  transcript shows a 19.5-minute gap that was pure thinking + a `Write`, and a 10-minute
+  gap composing a wrap-up after the spawn had already returned.)
+- **The first content block of a turn answering @jwildfire is text** — the answer, or a
+  one-line ack naming what is being delegated. Never a `Write`, `Edit`, memory update, or
+  state-file touch ahead of it.
+- **On a delegating turn, the first tool call is the spawn** (batched with its log line
+  per session-spawn step 5). All bookkeeping — memory, state files, scratchpad — comes
+  after the reply text and the spawn: same turn or next turn, never before.
+- **Checkable, not judgment**: in the transcript, a text block precedes the turn's first
+  `tool_use` block. If it doesn't, the turn was out of order.
+- **Escape hatch**: the moment you notice a turn has gone long with nothing emitted, emit
+  text *now* — a bare `Spawning now — back shortly.` counts — before any further tool
+  call or deliberation.
+- **After the spawn returns, end the turn** in one short message. Anything composed after
+  the delegate is already running is silence @jwildfire is paying for; it belongs to the
+  next turn's relay.
+- **Scope**: binds every session in live conversation with @jwildfire — the lead,
+  [🎩🤖 obot-prime](../skills/session-prime/SKILL.md) (which adds harder per-turn caps),
+  and interactive siblings (e.g. `session-reviews`). Background siblings are exempt: the
+  lead is not waiting on them, and their contract is the heartbeat.
+
 ## First paint
 
 **Time-to-first-paint is the clock that stops the SLA** — not time-to-final-answer
@@ -186,6 +219,9 @@ approved in [Q&A #154](https://github.com/jwildfire/obot.roadmap/discussions/154
 - **Closing-bookend decisions** — [hub#148](https://github.com/jwildfire/obot.roadmap/issues/148).
 - **Heartbeat / timestamp / report-back corrections** —
   [obot.agent#57](https://github.com/jwildfire/obot.agent/issues/57).
+- **Reply-first turn ordering** — @jwildfire, 2026-08-15 ("pretty big fail with a 30
+  minute wait and big context spend here. harden your rules …"), evidence and fix in
+  [obot.agent#102](https://github.com/jwildfire/obot.agent/issues/102).
 - hub#91's design bar for init first paint is **`<10 seconds`** — stricter than the
   1-minute SLA, and therefore satisfying it. The stricter number stands; it is not loosened
   here.
