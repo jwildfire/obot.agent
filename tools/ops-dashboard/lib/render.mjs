@@ -17,9 +17,11 @@
 import { wakeText, DISMISS_MEANS } from './triage.mjs';
 import { CRITICAL_BUDGET } from './rank.mjs';
 import { parseNavigatorState } from './navigator.mjs';
+import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
-import { rosterHtml, ROSTER_CSS } from './roster-view.mjs';
+import { rosterHtml, briefParts, ROSTER_CSS } from './roster-view.mjs';
+import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
 
 /**
  * The long form of the header's last-look phrase, for the tooltip.
@@ -413,41 +415,13 @@ const DASHBOARD_CSS = `
  * different tool on its own watch loop — wrapping it means the merge costs neither
  * generator a line of layout, and nothing in it can be lost in translation.
  */
-/**
- * The Agents tab: the roster IS the page.
- *
- * It used to be a roster stacked on top of the entire older session-hub view, each
- * with its own stat cards and its own answer to "how many agents" — 23 on one, 28 on
- * the other. @jwildfire's verdict on 2026-08-16 was "the sessions page is still a
- * mess", and the duplication was the worst of it: one page answering the same
- * question twice with different numbers leaves a reader unable to tell which is true.
- *
- * The older view is kept rather than deleted — its accomplishments feed is real and
- * nothing else carries it — but it is collapsed, and its summary says why its count
- * differs instead of leaving him to discover the contradiction. One live answer on
- * screen at a time.
- *
- * `roster` is the MODEL now, not markdown. The generic section renderer that used to
- * lay this out cannot express groups, columns or weight, which is what made the page
- * a wall; see lib/roster-view.mjs.
- */
-export function sessionShell({ frame = '/session/frame', missing = null, roster = null } = {}) {
-  const body = roster && typeof roster === 'object' && Array.isArray(roster.rows)
-    ? rosterHtml(roster)
-    // A roster that could not be assembled arrives as a string, and says so in
-    // place of the page rather than rendering an empty one that reads as "no agents".
-    : (roster ? `<p class="ag-empty">${esc(String(roster))}</p>` : '');
-  const live = missing
-    ? `<p class="why">No session view yet — start the watch loop: <code>${esc(missing)}</code></p>`
-    : `<p class="why">The session-level view, kept for its accomplishments feed. Its AGENTS card counts sessions reporting into the session hub, which is a different population from the agents above — expect the two numbers to differ.</p>
-    <iframe title="Session hub" src="${esc(frame)}" loading="lazy"></iframe>`;
-  return `<!doctype html>
+const agentsPage = (body, { lastLook = null } = {}) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agents · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}${ROSTER_CSS}
+<style>${SHELL_CSS}${NAV_CSS}${ROSTER_CSS}${METRICS_CSS}${LOG_CSS}
 </style>
 </head>
 <body>
@@ -455,17 +429,71 @@ export function sessionShell({ frame = '/session/frame', missing = null, roster 
   <span class="brand">🍊😺 obot</span>
   ${tabs('session')}
   <span class="spacer"></span>
-  <span class="where"><span class="wide">local only</span></span>
+  <span class="where" title="${esc(lastLookTitle(lastLook))}"><span class="wide">local only · </span>${esc(phrase(lastLook))}</span>
 </header>
 <div class="ag-wrap">
 ${body}
-<details class="livewrap">
-  <summary>Live session view</summary>
-  ${live}
-</details>
 </div>
 </body>
 </html>`;
+
+/**
+ * The Agents tab — the brief, for a reader who was not present
+ * (jwildfire/obot.roadmap#218).
+ *
+ * The headline first, then what changed as a feed, then only the groups that need
+ * him now: running, and ended badly. The delivered and produced-nothing rosters,
+ * the folds, the legend and the old live view live at /session/log — his page
+ * says "twelve delivered" and links the record rather than rendering it, because
+ * the record's register is for its dense readers and he said so: the pages read
+ * like audit logs for bots.
+ *
+ * `roster` is the MODEL; a roster that could not be assembled arrives as a string
+ * and says so in place of the page rather than rendering an empty one that reads
+ * as "no agents".
+ */
+export function sessionShell({ roster = null, feed = [], lastLook = null } = {}) {
+  const ok = roster && typeof roster === 'object' && Array.isArray(roster.rows);
+  const parts = ok ? briefParts(roster) : null;
+  // The feed and the record link are the page's frame and render in every state:
+  // an empty or unassemblable roster costs the roster's sections, never the way
+  // to the record. CI proved the point — with no job records on the runner, the
+  // populated branch never ran and the brief was one sentence with no exits.
+  const body = parts && !parts.empty
+    ? `${parts.headline}
+${feedHtml(feed)}
+${parts.live}
+${parts.bad}
+${parts.countsLine}
+${parts.foot}`
+    : `<p class="ag-empty">${esc(String(parts?.empty ? 'No agent has run since the worker ledger was adopted.' : (typeof roster === 'string' ? roster : 'The roster could not be assembled.')))}</p>
+${feedHtml(feed)}
+<p class="ag-more"><a href="/session/log">The full record →</a></p>`;
+  return agentsPage(body, { lastLook });
+}
+
+/**
+ * The full record — /session/log, the log as an actual table, written for the
+ * readers who come to check one thing against another: every agent grouped by
+ * outcome, every delivery verdict and every Navigator call from the typed
+ * journal, the pre-ledger fold, and the old session-level live view.
+ */
+export function sessionLogShell({ roster = null, delivery = { verdicts: [], calls: [] }, frame = '/session/frame', missing = null, lastLook = null } = {}) {
+  const rosterBody = roster && typeof roster === 'object' && Array.isArray(roster.rows)
+    ? rosterHtml(roster)
+    : `<p class="ag-empty">${esc(String(roster ?? 'The roster could not be assembled.'))}</p>`;
+  const live = missing
+    ? `<p class="why">No session view yet — start the watch loop: <code>${esc(missing)}</code></p>`
+    : `<p class="why">The session-level view, kept for its history. Its AGENTS card counts sessions reporting into the session hub, which is a different population from the agents above — expect the two numbers to differ.</p>
+    <iframe title="Session hub" src="${esc(frame)}" loading="lazy"></iframe>`;
+  const body = `<p class="reclink"><a href="/session">← The brief</a></p>
+${rosterBody}
+${deliveryTablesHtml(delivery)}
+<details class="livewrap">
+  <summary>Live session view</summary>
+  ${live}
+</details>`;
+  return agentsPage(body, { lastLook });
 }
 
 const NAV_CSS = `
@@ -492,6 +520,18 @@ const NAV_CSS = `
   /* A reference, a URL or a long agent name must wrap rather than push the page
      sideways — 390px is a gate here, not a nicety. */
   .nav-list li, .nav-sub li, .nav-list summary { overflow-wrap:anywhere; }
+
+  .reclink { font-size:0.74rem; margin:0 0 0.5rem; }
+  .reclink a { text-decoration:none; }
+  .reclink-why { color:var(--faint); font-size:0.68rem; }
+
+  /* The ledger verdicts: quiet when clean, unmissable when not. */
+  .lstat { font-size:0.68rem; color:var(--faint); font-family:var(--mono); margin:0 0 0.35rem; overflow-wrap:anywhere; }
+  .lstat-d { display:block; color:var(--faint); opacity:0.8; padding-left:0.8rem; }
+  .nav-list li.nav-h3 { border-left:0; padding:0.5rem 0 0.1rem; font-size:0.64rem; letter-spacing:0.1em;
+                        text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .nav-list li.nav-note { border-left-color:transparent; color:var(--muted); font-size:0.74rem; }
+  .nav-list li.nav-alarm { border-left-color:var(--accent); background:var(--accent-soft); }
 `;
 
 /**
@@ -518,27 +558,58 @@ const navItem = (it) => `${it.url
  */
 export const sectionsHtml = (sections = []) => sections.map((s) => `<h2 class="nav-h">${esc(s.title)}</h2>
 ${s.items.length
-    ? `<ul class="nav-list">${s.items.map((it) => ((it.details ?? []).length
-      ? `<li><details><summary>${navItem(it)}</summary><ul class="nav-sub">${
-        it.details.map((d) => `<li>${navItem(d)}</li>`).join('')}</ul></details></li>`
-      : `<li>${navItem(it)}</li>`)).join('')}</ul>`
+    ? `<ul class="nav-list">${s.items.map((it) => {
+      if (it.heading) return `<li class="nav-h3">${esc(it.text)}</li>`;
+      const cls = [it.alarm ? 'nav-alarm' : '', it.note && !it.alarm ? 'nav-note' : ''].filter(Boolean).join(' ');
+      const attr = cls ? ` class="${cls}"` : '';
+      return (it.details ?? []).length
+        ? `<li${attr}><details><summary>${navItem(it)}</summary><ul class="nav-sub">${
+          it.details.map((d) => `<li>${navItem(d)}</li>`).join('')}</ul></details></li>`
+        : `<li${attr}>${navItem(it)}</li>`;
+    }).join('')}</ul>`
     : '<p class="nav-empty">Nothing.</p>'}`).join('\n');
 
-export function navigatorShell({ state = null, missing = null } = {}) {
-  const body = missing || !state
-    ? `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code>.</p>`
-    : `${state.stale
-      ? `<p class="dead"><strong>The observer is dead</strong> — last swept ${esc(state.sweptAt ?? 'never')}${state.ageMin === null ? '' : ` (${state.ageMin} min ago, cadence ${state.cadenceMin}m)`}. What follows is <strong>not current</strong>. Restart: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`
-      : `<p class="swept">swept ${esc(state.sweptAt)}${state.summary ? ` · ${esc(state.summary)}` : ''}</p>`}
-${sectionsHtml(state.sections)}`;
+/**
+ * The sweep's preamble notes — the config-ledger and worker-ledger verdicts.
+ * Wired since 2026-08-16 morning, renderable since 2026-08-16 night: the old
+ * parser dropped everything above the first heading, so a ledger gap could fire
+ * every five minutes and never reach a page. An alarm gets the banner; a clean
+ * verdict gets one line of small print, because a detector that only ever speaks
+ * on failure is indistinguishable from a dead one (the sweep's own rule).
+ */
+export const ledgerNotes = (state, { full = false } = {}) => (state?.notes ?? []).map((n) => (n.alarm
+  ? `<p class="dead">${esc(n.text)}${n.details.length ? ` — ${esc(n.details.map((d) => d.text).join(' · '))}` : ''}</p>`
+  : `<p class="lstat">${esc(n.text)}${full && n.details.length
+    ? n.details.map((d) => `<span class="lstat-d">${esc(d.text)}</span>`).join('')
+    : ''}</p>`)).join('\n');
 
-  return `<!doctype html>
+/** The sweep's proof-of-life header, shared by both Navigator views: the dead-observer
+ * banner when stale, the one-line swept stamp when alive. The stale rule is the one
+ * thing neither view may lose — this is the surface he would trust to say a review
+ * landed, and presenting a dead observer's content as current is the failure mode. */
+const sweepHead = (state, missing) => {
+  if (missing || !state) {
+    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code>.</p>`;
+  }
+  if (state.stale) {
+    return `<p class="dead"><strong>The observer is dead</strong> — last swept ${esc(state.sweptAt ?? 'never')}${state.ageMin === null ? '' : ` (${state.ageMin} min ago, cadence ${state.cadenceMin}m)`}. What follows is <strong>not current</strong>. Restart: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`;
+  }
+  // A sweep can fail and still be recent: the writer puts FAILED in the head line
+  // and keeps serving the last good queue. Age alone misses that, and small grey
+  // print is where the one sentence that matters goes to die.
+  if (/FAILED/.test(state.summary ?? '')) {
+    return `<p class="dead"><strong>The sweep is failing</strong> — ${esc(state.summary)}. Last attempt ${esc(state.sweptAt ?? 'unknown')}.</p>`;
+  }
+  return `<p class="swept">swept ${esc(state.sweptAt)}${state.summary ? ` · ${esc(state.summary)}` : ''}</p>`;
+};
+
+const navigatorPage = (body) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Navigator · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}
+<style>${SHELL_CSS}${NAV_CSS}${METRICS_CSS}
 </style>
 </head>
 <body>
@@ -553,6 +624,38 @@ ${body}
 </div>
 </body>
 </html>`;
+
+/**
+ * The Navigator tab, for a reader who was not present: release metrics first
+ * (jwildfire/obot.roadmap#218 — "Show me key release metrics … in the last
+ * 1/3/7/30/365 days"), then the sweep's typed events as a what-changed feed.
+ *
+ * Nothing the old view carried is deleted: the full record — RC queue, delivery
+ * verdicts, discipline findings, ledger audits — lives whole at /navigator/record
+ * for its dense readers, and the link here is how he reaches it when a number
+ * needs its receipts.
+ */
+export function navigatorShell({ state = null, missing = null, metrics = null, feed = [] } = {}) {
+  const body = `${sweepHead(state, missing)}
+${ledgerNotes(state)}
+<p class="reclink"><a href="/navigator/record">Full sweep record →</a> <span class="reclink-why">the RC queue, delivery verdicts and discipline findings, whole — what these numbers are built beside</span></p>
+${metricsHtml(metrics)}
+${feedHtml(feed)}`;
+  return navigatorPage(body);
+}
+
+/**
+ * The full sweep record — the pre-2026-08-16 Navigator tab, kept whole. Its
+ * readers are the agents that read the state file densely, and him when a metric
+ * needs its receipts; every `##` section in the state file still renders as
+ * itself, including ones this code has never heard of.
+ */
+export function navigatorRecordShell({ state = null, missing = null } = {}) {
+  const body = `${sweepHead(state, missing)}
+${ledgerNotes(state, { full: true })}
+<p class="reclink"><a href="/navigator">← Metrics and what changed</a></p>
+${state && !missing ? sectionsHtml(state.sections) : ''}`;
+  return navigatorPage(body);
 }
 
 /**

@@ -29,6 +29,7 @@ export function discoverRepos(policy) {
   return Object.entries(policy.repos || {}).map(([repo, entry]) => ({
     repo,
     release: (entry.branches && entry.branches.release) || [],
+    integration: (entry.branches && entry.branches.integration) || null,
     class: entry.class || 'unclassified',
   }))
 }

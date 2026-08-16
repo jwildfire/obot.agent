@@ -22,7 +22,7 @@ import {
   DEAD_SHOWN, PRICE_NOTE, ID_NOTE,
 } from '../lib/roster.mjs';
 import { parseNavigatorState } from '../lib/navigator.mjs';
-import { sessionShell } from '../lib/render.mjs';
+import { sessionShell, sessionLogShell } from '../lib/render.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'roster-'));
 
@@ -344,8 +344,10 @@ test('an indented bullet attaches to the row above it as its detail', () => {
   assert.deepEqual(b.details, []);
 });
 
-test('the session tab carries the roster above the live view and keeps both', () => {
-  const html = sessionShell({ roster: rosterMarkdown(fullModel()) });
+test('the record page carries the roster above the live view and keeps both', () => {
+  // The live view moved to /session/log with the rest of the record
+  // (jwildfire/obot.roadmap#218); the brief carries neither roster wall nor iframe.
+  const html = sessionLogShell({ roster: fullModel() });
   assert.match(html, /W0001/);
   assert.match(html, /<details/, 'the row expands rather than printing everything');
   assert.match(html, /iframe/, 'the live session view is still there');
@@ -671,15 +673,19 @@ test('every row is rendered with its own kind, not with its index', () => {
   assert.match(html, /not judged on delivery/);
 });
 
-test('the page carries one roster and no second set of totals under it', () => {
+test('the record keeps the older view collapsed and explained; the brief carries neither', () => {
   // It used to be the roster stacked on the whole older session view, each with its
   // own agent count — 23 against 28 — so a reader could not tell which was true.
-  const html = sessionShell({ roster: twoWorkers() });
-  assert.match(html, /class="ag-wrap"/);
-  assert.match(html, /class="livewrap"/, 'the older view is kept');
+  const log = sessionLogShell({ roster: twoWorkers() });
+  assert.match(log, /class="ag-wrap"/);
+  assert.match(log, /class="livewrap"/, 'the older view is kept');
   // Kept, but collapsed and explained: one live answer on screen at a time.
-  assert.match(html, /<details class="livewrap">[\s\S]*?<summary>/);
-  assert.match(html, /different population/i);
+  assert.match(log, /<details class="livewrap">[\s\S]*?<summary>/);
+  assert.match(log, /different population/i);
+  // And the brief holds one answer only: counts plus a link to this record.
+  const brief = sessionShell({ roster: twoWorkers() });
+  assert.doesNotMatch(brief, /class="livewrap"/);
+  assert.match(brief, /\/session\/log/);
 });
 
 test('an unassemblable roster says so instead of rendering an empty page', () => {
@@ -711,4 +717,15 @@ test('a cost cell carries a short form as well as its sentence', () => {
   assert.match(html, /<span class="ag-cost cost-unpriced"[^>]*>unpriced<\/span>/);
   assert.equal((html.match(/<ul class="ag-legend">/g) ?? []).length, 1);
   assert.match(html, /<li><code>unpriced<\/code>[^<]*started after the last usage build/);
+});
+
+test('an empty roster still carries the feed and the record link — CI has no job records', () => {
+  // The red build on obot.agent#149: locally the workstation's real ~/.claude/jobs
+  // made the roster non-empty, so the brief always took the populated branch; in CI
+  // the roster is empty and the page rendered one sentence with no way to the
+  // record and no feed. The brief's frame must not depend on the roster having rows.
+  const html = sessionShell({ roster: { rows: [] } });
+  assert.match(html, /No agent has run/);
+  assert.match(html, /\/session\/log/);
+  assert.match(html, /What changed/);
 });

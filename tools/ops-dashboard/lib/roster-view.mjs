@@ -207,9 +207,10 @@ const group = (g) => `<section class="ag-g">
   ${g.rows.map((r) => agentRow(r)).join('\n')}
 </section>`;
 
+const tile = (label, big, sub) => `<div class="hl-t"><span class="hl-k">${esc(label)}</span><span class="hl-v">${big}</span><span class="hl-s">${sub}</span></div>`;
+
 /** The three numbers the page exists to show, at the top where they belong. */
 function headline(h) {
-  const tile = (label, big, sub) => `<div class="hl-t"><span class="hl-k">${esc(label)}</span><span class="hl-v">${big}</span><span class="hl-s">${sub}</span></div>`;
   const u = h.unattributed;
   return `<div class="hl">
   ${tile('Workers today', `${h.workers}`, `${esc(money(h.cost))} spent`)}
@@ -217,6 +218,44 @@ function headline(h) {
   ${tile('Standing sessions', esc(money(h.standingCost)), 'concierge and officer, not judged on delivery')}
   ${u ? tile('Before worker ids', esc(money(u.cost)), `${plural(u.agents, 'agent')}, none traceable`) : ''}
 </div>`;
+}
+
+/**
+ * The brief — his page's pieces (jwildfire/obot.roadmap#218): the headline, what
+ * is running, what ended badly, and one line of counts pointing at the full
+ * record. The delivered and produced-nothing rosters, the folds, the legend and
+ * the old live view all live on /session/log now — the log is written for its
+ * dense readers, and his page is written for someone who was not present. The
+ * caller interleaves the what-changed feed between headline and groups.
+ */
+export function briefParts(model) {
+  if (!model || !(model.rows ?? []).length) {
+    return { empty: '<p class="ag-empty">No agent has run since the worker ledger was adopted.</p>' };
+  }
+  const v = groupRoster(model);
+  const h = v.headline;
+  const u = h.unattributed;
+  const g = (id) => v.groups.filter((x) => x.id === id).map(group).join('\n');
+  const delivered = v.groups.find((x) => x.id === 'delivered')?.rows.length ?? 0;
+  const nothing = v.groups.find((x) => x.id === 'nothing')?.rows.length ?? 0;
+  const standing = v.groups.find((x) => x.id === 'standing')?.rows.length ?? 0;
+  const counts = [
+    delivered ? `${delivered} delivered` : null,
+    nothing ? `${nothing} produced nothing` : null,
+    standing ? `${standing} standing` : null,
+    v.quiet.length ? `${plural(v.quiet.length, 'quiet agent')}` : null,
+  ].filter(Boolean).join(' · ');
+  return {
+    headline: `<div class="hl">
+  ${tile('Workers today', `${h.workers}`, `${esc(money(h.cost))} spent`)}
+  ${tile('Moved something', `${h.delivered}`, h.nothing ? `${h.nothing} produced nothing` : 'every one delivered')}
+</div>
+<p class="hl-clause">Standing sessions ${esc(money(h.standingCost))} — concierge and officer, not judged on delivery.${u ? ` Before worker ids: ${plural(u.agents, 'agent')}, ${esc(money(u.cost))} — in the full record.` : ''}</p>`,
+    live: g('live'),
+    bad: g('bad'),
+    countsLine: `<p class="ag-more">${esc(counts)} — <a href="/session/log">the full record →</a> <span class="ag-morewhy">every agent as a table, every delivery verdict, every Navigator call</span></p>`,
+    foot: foot(v),
+  };
 }
 
 /**
@@ -285,7 +324,11 @@ export const ROSTER_CSS = `
   .ag-wrap { padding:0.7rem 0.8rem 1.4rem; max-width:64rem; margin:0 auto; }
 
   /* The headline, first. It used to be the last row on the page. */
-  .hl { display:grid; grid-template-columns:repeat(auto-fit, minmax(9rem, 1fr)); gap:0.4rem; margin:0 0 1rem; }
+  .hl { display:grid; grid-template-columns:repeat(auto-fit, minmax(9rem, 1fr)); gap:0.4rem; margin:0 0 0.5rem; }
+  .hl-clause { font-size:0.68rem; color:var(--muted); margin:0 0 0.9rem; line-height:1.4; }
+  .ag-more { font-size:0.76rem; margin:0.9rem 0 0; }
+  .ag-more a { text-decoration:none; }
+  .ag-morewhy { color:var(--faint); font-size:0.66rem; }
   .hl-t { border:1px solid var(--line); border-radius:8px; padding:0.5rem 0.6rem; min-width:0; }
   .hl-k { display:block; font-size:0.6rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--faint); }
   .hl-v { display:block; font-size:1.35rem; line-height:1.15; margin:0.1rem 0; font-variant-numeric:tabular-nums; }

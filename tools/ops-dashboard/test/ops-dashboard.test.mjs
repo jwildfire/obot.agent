@@ -17,7 +17,7 @@ import {
   markApplied, resolveDecision, answersSection, OVERDUE_MIN,
 } from '../lib/answers.mjs';
 import { artifactPath, parseArgs, serve } from '../ops-dashboard.mjs';
-import { render, sessionShell, navigatorShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
+import { render, sessionShell, sessionLogShell, navigatorShell, navigatorRecordShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
 import { parseNavigatorState } from '../lib/navigator.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'opsdash-'));
@@ -313,10 +313,14 @@ test('both views are tabs on one site and the dashboard is the default', () => {
   assert.ok(/href="\/"[^>]*aria-current="page"/.test(ops), 'the Operations tab is current on /');
   assert.ok(ops.includes('href="/live.html"'), 'the session hub is reachable as the second tab');
 
-  const session = sessionShell({ frame: '/session/frame' });
+  const session = sessionShell({});
   assert.ok(session.includes('class="tabs"'), 'the same header carries across both tabs');
   assert.ok(/href="\/live\.html"[^>]*aria-current="page"/.test(session), 'the session tab is current on /live.html');
-  assert.ok(session.includes('src="/session/frame"'), 'the session view renders unchanged inside the shell');
+  // The old live view moved to the record page — the brief links it, one answer
+  // per page (jwildfire/obot.roadmap#218).
+  assert.ok(!session.includes('src="/session/frame"'), 'the brief carries no second dashboard');
+  const log = sessionLogShell({ roster: null });
+  assert.ok(log.includes('src="/session/frame"'), 'the session view renders unchanged inside the record shell');
 });
 
 test('an empty queue says so rather than rendering an empty frame', () => {
@@ -582,7 +586,11 @@ test('one site, one port: the dashboard is / and the session hub is /live.html',
     // on the session tab, not a 404.
     const session = await get('/live.html');
     assert.equal(session.status, 200);
-    assert.ok(session.body.includes('/session/frame'), 'the session tab wraps the session-hub view');
+    assert.ok(session.body.includes('/session/log'), 'the brief links the full record');
+    // The old live view lives on the record page now, not on the brief.
+    const log = await get('/session/log');
+    assert.equal(log.status, 200);
+    assert.ok(log.body.includes('/session/frame'), 'the record page wraps the session-hub view');
 
     const frame = await get('/session/frame');
     assert.ok(frame.body.includes('<p>live</p>'), 'the session-hub render is served unchanged');
@@ -596,7 +604,13 @@ test('one site, one port: the dashboard is / and the session hub is /live.html',
       'swept: 2020-01-01 00:00 · cadence 5m · ok\n\n## RC queue\n\n- **repo#1** something https://example.test/1 [verified gh 00:00]\n');
     const swept = await get('/navigator');
     assert.ok(swept.body.includes('observer is dead'), 'a 2020 sweep is not current data');
-    assert.ok(swept.body.includes('repo#1'));
+    // The tab is metrics + what changed now; with no cache written it says so
+    // rather than rendering zeros that read as a quiet year.
+    assert.ok(swept.body.includes('No numbers yet'));
+    // The full record keeps the queue rows, whole, one click behind.
+    const record = await get('/navigator/record');
+    assert.ok(record.body.includes('observer is dead'), 'the record view carries the same honesty banner');
+    assert.ok(record.body.includes('repo#1'));
 
     // The marker is how the status line finds the merged site.
     const marker = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'session-hub', 'serve.json'), 'utf8'));
@@ -660,10 +674,11 @@ test('the navigator state parses into its swept stamp and its sections', () => {
 
 test('a section the sweep has not invented yet still renders — the ledger seam', () => {
   // Per-agent attribution is a different sibling's problem; when its writer adds a
-  // section this tab must render it without being touched.
+  // section the record view must render it without being touched. The seam lives on
+  // /navigator/record now — the tab itself is metrics + what changed.
   const s = parseNavigatorState(`${NAV_STATE}\n## By agent\n\n- 22:10 👯🤖 opsdb2 — opened obot.agent#118 https://github.com/jwildfire/obot.agent/issues/118\n`, new Date('2026-08-15T22:33:00'));
   assert.deepEqual(s.sections.map((x) => x.title), ['RC queue', 'Recent events', 'By agent']);
-  const html = navigatorShell({ state: s });
+  const html = navigatorRecordShell({ state: s });
   assert.ok(html.includes('By agent'), 'an unknown section renders as itself, no code change needed');
   assert.ok(html.includes('opsdb2'));
 });
@@ -979,3 +994,67 @@ test('an answer written before the join still gets its id from the registry', ()
   deliverAnswers(ws, { hub });
   assert.equal(JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'ops', 'answers', 'legacy.json'), 'utf8')).decisionId, 'D0003');
 });
+
+// ---------------------------------------------------------------------------
+// The four dead alarm paths (jwildfire/obot.roadmap#218 recon; obot.agent#129
+// inverted): the sweep writes ledger verdicts in the preamble and the discipline
+// headline as a plain line, and the old parser could never render any of them.
+
+const NAV_STATE_ALARMS = `# navigator-state — 🧭🤖 Navigator RC-review sweep
+
+Sole writer: \`sweep.mjs\`. **Stale rule: 3× cadence.**
+
+swept: 2026-08-15 22:30 · cadence 5m · ok — 7 repos, 2 RCs
+
+config ledger: ledger clean - 11 id(s) allocated, 11 present
+  note - blockers.md changed outside this tool since it was last written
+
+**WORKER LEDGER FINDING** — 1 id(s) claimed but never launched: W0005
+
+## Roadmap discipline
+
+roadmap discipline: **94 findings** across the project repos, last 14 days
+  nightly audit: last run 13h ago — anything filed since then is invisible to it
+  bounded: 104 older than 14 days not shown
+
+### Work that shipped with no requirement above it (59)
+
+- safety.viz#120 closed with no requirement above it
+`;
+
+test('the preamble ledger verdicts parse as notes, alarms flagged, details attached', () => {
+  const s = parseNavigatorState(NAV_STATE_ALARMS, new Date('2026-08-15T22:33:00'));
+  assert.equal(s.notes.length, 2);
+  assert.match(s.notes[0].text, /config ledger: ledger clean/);
+  assert.equal(s.notes[0].alarm, false);
+  assert.match(s.notes[0].details[0].text, /changed outside this tool/);
+  assert.match(s.notes[1].text, /WORKER LEDGER FINDING/);
+  assert.equal(s.notes[1].alarm, true);
+})
+
+test('a section keeps its verdict headline, its indented context, and its ### groups, in order', () => {
+  const s = parseNavigatorState(NAV_STATE_ALARMS, new Date('2026-08-15T22:33:00'));
+  const disc = s.sections.find((x) => x.title === 'Roadmap discipline');
+  assert.equal(disc.items[0].note, true);
+  assert.match(disc.items[0].text, /94 findings across the project repos/);
+  // "94 findings" is a count, not an alarm — the alarm regex is case-sensitive.
+  assert.equal(disc.items[0].alarm, false);
+  assert.match(disc.items[0].details[0].text, /nightly audit/);
+  assert.match(disc.items[0].details[1].text, /104 older than 14 days not shown/);
+  assert.equal(disc.items[1].heading, true);
+  assert.match(disc.items[1].text, /Work that shipped with no requirement/);
+  assert.match(disc.items[2].text, /safety\.viz#120/);
+})
+
+test('an alarm reaches both Navigator views; a clean verdict is quiet small print', () => {
+  const s = parseNavigatorState(NAV_STATE_ALARMS, new Date('2026-08-15T22:33:00'));
+  for (const html of [navigatorShell({ state: s }), navigatorRecordShell({ state: s })]) {
+    assert.match(html, /WORKER LEDGER FINDING/);
+    assert.match(html, /config ledger: ledger clean/);
+  }
+  // The record carries the clean note's dating detail; the metrics view stays terse.
+  assert.match(navigatorRecordShell({ state: s }), /changed outside this tool/);
+  assert.doesNotMatch(navigatorShell({ state: s }), /changed outside this tool/);
+  // And the discipline verdict now renders above its findings on the record.
+  assert.match(navigatorRecordShell({ state: s }), /94 findings/);
+})

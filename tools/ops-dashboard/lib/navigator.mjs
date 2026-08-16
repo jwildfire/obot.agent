@@ -44,13 +44,35 @@ function parseItem(text) {
   };
 }
 
+// The alarm forms the sweep writes, exactly as it writes them (uppercase, bold):
+// **CONFIG LEDGER GAP**, **WORKER LEDGER FINDING**, **DELIVERY RECORD GAP**,
+// **FAILED**. Case-sensitive on purpose — "94 findings" in a discipline headline
+// is a count, not an alarm.
+const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED)[A-Z0-9 ]*\*\*/;
+
+// Lines before the first `##` that are structure, not content: the file's own
+// title and the sole-writer/stale-rule paragraph.
+const BOILER_RE = /^(#\s|Sole writer:|swept:)/;
+
 /**
- * The state file as data: the sweep stamp, whether the observer is alive, and every
- * `##` section with its bullets. Sections are generic by design — see the header.
+ * The state file as data: the sweep stamp, whether the observer is alive, the
+ * preamble notes, and every `##` section with everything under it. Sections are
+ * generic by design — see the header.
  *
- * An indented bullet is the detail of the row above it rather than a row of its own.
- * That is what lets one line carry a summary and the evidence behind it without a
- * table: the row stays one line on a phone, and the detail opens when asked for.
+ * An indented bullet is the detail of the row above it rather than a row of its
+ * own. That is what lets one line carry a summary and the evidence behind it
+ * without a table: the row stays one line on a phone, and the detail opens when
+ * asked for.
+ *
+ * Until 2026-08-16 this parser kept only `##` headings and `-` bullets, which
+ * silently discarded four wired alarm paths: the config-ledger and worker-ledger
+ * verdicts live in the preamble, the discipline headline is a plain line, and
+ * none of them could ever render — a detector whose verdict cannot reach the page
+ * is indistinguishable from a clean one (obot.agent#129, inverted: there the
+ * headline was swallowed and here it was discarded). Now: preamble lines become
+ * `notes` (alarm-flagged), plain lines and `###` headings inside a section become
+ * items in order (`note: true` / `heading: true`), and indented plain lines are
+ * the details of the line above them.
  */
 export function parseNavigatorState(md = '', now = new Date()) {
   const swept = SWEPT_RE.exec(md);
@@ -61,9 +83,15 @@ export function parseNavigatorState(md = '', now = new Date()) {
   // Three cadences, the threshold the file itself writes down.
   const stale = ageMin === null || ageMin > cadenceMin * 3;
 
+  const notes = [];
   const sections = [];
   let current = null;
   for (const raw of md.split(/\r?\n/)) {
+    const h3 = /^###\s+(.+)$/.exec(raw);
+    if (h3 && current) {
+      current.items.push({ text: h3[1].trim(), url: null, verified: null, heading: true, details: [] });
+      continue;
+    }
     const h = /^##\s+(.+)$/.exec(raw);
     if (h) {
       // Headings carry their own gloss after an em dash or a parenthesis; the tab is
@@ -72,7 +100,16 @@ export function parseNavigatorState(md = '', now = new Date()) {
       sections.push(current);
       continue;
     }
-    if (!current) continue;
+    if (!current) {
+      // The preamble: the ledger verdicts and anything else the sweep puts above
+      // its first heading. Boilerplate and blanks are structure; the rest is a
+      // note, and an indented line is the note's detail.
+      if (!raw.trim() || BOILER_RE.test(raw)) continue;
+      const ind = /^\s+(\S.*)$/.exec(raw);
+      if (ind && notes.length) { notes.at(-1).details.push(parseItem(ind[1])); continue; }
+      notes.push({ ...parseItem(raw), alarm: ALARM_RE.test(raw), details: [] });
+      continue;
+    }
     const b = /^-\s+(.*)$/.exec(raw);
     if (b) {
       current.items.push({ ...parseItem(b[1]), details: [] });
@@ -81,7 +118,18 @@ export function parseNavigatorState(md = '', now = new Date()) {
     const sub = /^\s+-\s+(.*)$/.exec(raw);
     // A detail with no row above it is dropped rather than promoted: it would read
     // as a row, which is the one thing it is not.
-    if (sub && current.items.length) current.items.at(-1).details.push(parseItem(sub[1]));
+    if (sub) {
+      if (current.items.length) current.items.at(-1).details.push(parseItem(sub[1]));
+      continue;
+    }
+    // A plain line inside a section — the discipline headline class. Kept in
+    // stream order so a verdict renders above the findings it judges.
+    if (/^\S/.test(raw)) {
+      current.items.push({ ...parseItem(raw), alarm: ALARM_RE.test(raw), note: true, details: [] });
+      continue;
+    }
+    const indPlain = /^\s+(\S.*)$/.exec(raw);
+    if (indPlain && current.items.length) current.items.at(-1).details.push(parseItem(indPlain[1]));
   }
-  return { sweptAt, summary, cadenceMin, ageMin, stale, sections };
+  return { sweptAt, summary, cadenceMin, ageMin, stale, notes, sections };
 }

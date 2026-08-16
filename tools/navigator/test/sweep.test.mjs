@@ -231,3 +231,38 @@ test('renderState: the two ledgers are independent — one silent does not silen
   assert.match(md, /config ledger: ledger clean/)
   assert.match(md, /\*\*WORKER LEDGER FINDING\*\*/)
 })
+
+// ---- typed events for the dashboard feed (jwildfire/obot.roadmap#218) ----
+//
+// The state file wants the sentence; the dashboard's Navigator feed wants the
+// parts. Every event carries ref and url beside line so the feed never has to
+// recover structure from prose with a regex.
+
+test('diff: every event type carries ref and url beside its line', () => {
+  const withReview = rc({ reviews: [review], reviewDecision: 'CHANGES_REQUESTED', commentCount: 3 })
+  const appeared = diff({}, { k: withReview })
+  for (const e of appeared) {
+    assert.equal(e.ref, 'safety.viz#131', `${e.type} ref`)
+    assert.equal(e.url, 'https://github.com/jwildfire/safety.viz/pull/131', `${e.type} url`)
+  }
+  const changed = diff({ k: rc() }, { k: withReview })
+  for (const e of changed) {
+    assert.equal(e.ref, 'safety.viz#131', `${e.type} ref`)
+    assert.equal(e.url, 'https://github.com/jwildfire/safety.viz/pull/131', `${e.type} url`)
+  }
+  const gone = diff({ k: rc() }, {}, { k: 'MERGED' })
+  assert.equal(gone[0].type, 'rc-gone')
+  assert.equal(gone[0].ref, 'safety.viz#131')
+  assert.equal(gone[0].url, 'https://github.com/jwildfire/safety.viz/pull/131')
+})
+
+test('renderState: shows at most MAX_EVENTS even when the snapshot remembers more', () => {
+  const events = Array.from({ length: 40 }, (_, i) => ({ type: 'rc-new', at: '09:00', line: `EVENT ${i}` }))
+  const md = renderState({
+    snapshot: {}, events,
+    meta: { sweptAt: '2026-08-16 22:30', cadenceMin: 5, repoCount: 7, ok: true },
+  })
+  assert.match(md, /EVENT 0\b/)
+  assert.match(md, /EVENT 14\b/)
+  assert.doesNotMatch(md, /EVENT 15\b/)
+})
