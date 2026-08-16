@@ -44,6 +44,7 @@ import { render, sessionShell, navigatorShell, NOT_LISTENING } from './lib/rende
 import { parseNavigatorState } from './lib/navigator.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { ensureStore } from './lib/store.mjs';
+import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
@@ -55,6 +56,11 @@ const DEFAULT_PORT = 7326;
 const SESSION_DIR = ['.claude', 'session-hub'];
 const SESSION_LIVE = 'live.html';
 const WATCH_CMD = 'node obot.agent/tools/session-hub/session-hub.mjs --watch';
+
+// The routes that serve one page are one surface: `/index.html` is the dashboard,
+// and `/session` is the address the tab strip uses for the live view the status
+// line calls `/live.html`. Recording them apart would split one look into three.
+const SURFACE_ALIASES = { '/index.html': '/', '/session': '/live.html' };
 
 export function parseArgs(argv) {
   const a = { port: DEFAULT_PORT, serve: false, open: false };
@@ -144,7 +150,7 @@ export function delivererState(workspace) {
   }
 }
 
-async function page(args) {
+async function page(args, lastLook = null) {
   const queue = await collectQueue(args.workspace, args.hub, {
     agent: path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue'),
   });
@@ -161,6 +167,7 @@ async function page(args) {
     },
     answers: currentAnswers(args.workspace, { hub: args.hub }),
     deliverer: delivererState(args.workspace),
+    lastLook,
     workspace: args.workspace,
     hub: args.hub,
   });
@@ -242,11 +249,19 @@ export function serve(args) {
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, 'text/plain', 'method not allowed');
 
+      // When he last opened each page, recorded where the page is actually handed
+      // over — a 404 is not a surface, a poll is not a look, and the read has to
+      // happen before the write or the page would only ever say "just now" (oa#143).
+      const look = () => seenAndNote(args.workspace, req, { aliases: SURFACE_ALIASES });
+
       const file = artifactPath(args.hub, req.url);
-      if (file) return send(200, 'text/html; charset=utf-8', fs.readFileSync(file));
+      if (file) {
+        look();
+        return send(200, 'text/html; charset=utf-8', fs.readFileSync(file));
+      }
 
       const p = req.url.split('?')[0];
-      if (p === '/' || p === '/index.html') return send(200, 'text/html; charset=utf-8', await page(args));
+      if (p === '/' || p === '/index.html') return send(200, 'text/html; charset=utf-8', await page(args, look().before));
 
       // The second tab. `/live.html` is the address the status line already builds;
       // `/session` is the readable alias, and `/session/frame` is the session hub's
@@ -258,6 +273,7 @@ export function serve(args) {
       // it throws, the tab still serves the live view — the roster is an addition
       // to this tab and must not be able to take it down.
       if (p === '/live.html' || p === '/session' || p === '/session/') {
+        look();
         let roster = null;
         try {
           roster = collectRoster({ workspace: args.workspace, hub: args.hub });
@@ -279,6 +295,7 @@ export function serve(args) {
       // request — the file is rewritten every five minutes and a cached copy of an
       // observer's state is exactly the thing that must not go stale silently.
       if (p === '/navigator' || p === '/navigator/') {
+        look();
         const file = path.join(args.workspace, ...SESSION_DIR, 'navigator-state.md');
         let md = null;
         try { md = fs.readFileSync(file, 'utf8'); } catch { /* no sweep yet */ }
@@ -326,6 +343,7 @@ if (invoked) {
     console.log(`ops-dashboard: ${url}`);
     if (args.open) console.log(url);
   } else {
-    process.stdout.write(await page(args));
+    // Rendering to stdout is not a look, so it reads the record without touching it.
+    process.stdout.write(await page(args, lastSeen(args.workspace, '/')));
   }
 }
