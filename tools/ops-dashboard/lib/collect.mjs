@@ -310,15 +310,22 @@ export function parseRCBody(body) {
 }
 
 /**
- * The RC cache's shape version.
+ * Where the swept release candidates are cached, and the shape version inside it.
  *
- * Bumped when a cached entry can no longer be trusted to mean what the current code
- * thinks it means. A cache written before the release-lane classifier holds whatever
- * the bucket-only test admitted, and the items carry no base branch, so there is no way
- * to re-judge them on the way out — the only honest move is to treat that cache as
- * absent and sweep again. Relabelling (below) can be retrofitted; a wrong membership
- * list cannot.
+ * A new file rather than a new shape in the old one, and that is not tidiness. The
+ * cache is shared with whatever ops-dashboard process is already running, and this one
+ * is long-lived — nothing restarts it on a merge. Writing a new shape into `rcs.json`
+ * therefore reaches into a *running older server* and hands it something it cannot
+ * parse: doing exactly that on 2026-08-16 turned his live queue page into a 500 in one
+ * request, from a change that had not been deployed yet. The file name is the schema.
+ *
+ * The version field stays as the second guard. A cache written before the release-lane
+ * classifier holds whatever the bucket-only test admitted and its items carry no base
+ * branch, so it cannot be re-judged on the way out — the only honest move is to treat
+ * it as absent and sweep again. Relabelling can be retrofitted; a wrong membership list
+ * cannot.
  */
+export const RC_CACHE = 'rcs-lane';
 export const RC_CACHE_V = 2;
 
 /**
@@ -334,7 +341,7 @@ export const RC_CACHE_V = 2;
  * "nothing there" and "there, and not yours" stays visible.
  */
 export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
-  const raw = readCache(workspace, 'rcs', maxAgeMin);
+  const raw = readCache(workspace, RC_CACHE, maxAgeMin);
   // A pre-v2 cache is an array of items; a current one is `{v, items, standard}`.
   const shaped = raw && !Array.isArray(raw.value) && raw.value?.v === RC_CACHE_V ? raw : null;
   const cached = shaped ?? (raw ? { ...raw, stale: true } : null);
@@ -438,7 +445,7 @@ export function refreshRCs(workspace, script) {
         });
       } catch { /* a non-JSON line is the human table; skip it */ }
     }
-    writeCache(workspace, 'rcs', { v: RC_CACHE_V, items, standard });
+    writeCache(workspace, RC_CACHE, { v: RC_CACHE_V, items, standard });
   });
 }
 

@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import {
   collectConfig, collectRCs, isReleaseCandidate, nextConfigId, parseRCBody, rcLabel,
-  rcSub, upcomingVersion, RC_CACHE_V,
+  rcSub, upcomingVersion, RC_CACHE, RC_CACHE_V,
 } from '../lib/collect.mjs';
 import { ensureStore, readCache, writeCache, SENTINEL } from '../lib/store.mjs';
 import {
@@ -121,17 +121,30 @@ test('he can still be pulled in by name, and a repo off the policy degrades to t
   assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/not-in-policy', base: 'main', reviewRequests: ['jwildfire'] }), RELEASES), true);
 });
 
+test('the lane cache is its own file, so a running older server cannot choke on it', () => {
+  // Not hypothetical. Writing the new shape into `rcs.json` on 2026-08-16 reached
+  // into the server already running on his machine and turned the live queue page
+  // into a 500 in one request — from a change that had not been deployed yet.
+  assert.notEqual(RC_CACHE, 'rcs');
+  const ws = tmp();
+  ensureStore(ws);
+  writeCache(ws, 'rcs', [{ kind: 'rc', key: 'jwildfire/gsm.safety#51' }]);
+  collectRCs(ws, {});
+  assert.deepEqual(readCache(ws, 'rcs', 30).value, [{ kind: 'rc', key: 'jwildfire/gsm.safety#51' }],
+    'the old file is left exactly as the old code wrote it');
+});
+
 test('a cache written before the classifier is treated as absent, not relabelled', () => {
   const ws = tmp();
   ensureStore(ws);
   // The old shape: a bare array, whose membership was decided by the bucket alone
   // and whose items carry no base branch — so it cannot be re-judged, only refetched.
-  writeCache(ws, 'rcs', [{ kind: 'rc', key: 'jwildfire/gsm.safety#51', title: 'x' }]);
+  writeCache(ws, RC_CACHE, [{ kind: 'rc', key: 'jwildfire/gsm.safety#51', title: 'x' }]);
   const stale = collectRCs(ws, {});
   assert.deepEqual(stale.items, []);
   assert.equal(stale.refreshing, true);
 
-  writeCache(ws, 'rcs', { v: RC_CACHE_V, items: [{ kind: 'rc', key: 'jwildfire/gsm.safety#52', repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC1' }], standard: [{ key: 'jwildfire/gsm.safety#51', base: 'dev' }] });
+  writeCache(ws, RC_CACHE, { v: RC_CACHE_V, items: [{ kind: 'rc', key: 'jwildfire/gsm.safety#52', repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC1' }], standard: [{ key: 'jwildfire/gsm.safety#51', base: 'dev' }] });
   const fresh = collectRCs(ws, {});
   assert.equal(fresh.refreshing, false);
   assert.deepEqual(fresh.items.map((i) => i.key), ['jwildfire/gsm.safety#52']);
