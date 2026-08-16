@@ -57,41 +57,51 @@ const SCRATCHPAD_LOG = join(REPO_ROOT, 'tools', 'scratchpad-log')
 const HUB = process.env.OBOT_HUB || join(WS, 'obot.roadmap')
 const CADENCE_MIN = 5
 const MAX_EVENTS = 15
+// The snapshot keeps more history than the state file shows: the dashboard's
+// Navigator tab renders these events as a feed, and a feed that forgets everything
+// past fifteen entries cannot answer "what happened while I was away". The state
+// file's cap is a readability budget for agents; this one is the feed's memory.
+const FEED_EVENTS = 60
 
 const short = (repo, n) => `${repo.replace(/^jwildfire\//, '')}#${n}`
 const reviewKey = r => `${r.author}:${r.submittedAt}`
 
-// diff(prev, next, goneStates, failedRepos) → events, each {type, line}.
+// diff(prev, next, goneStates, failedRepos) → events, each {type, ref, url, line}.
 // goneStates maps a key present in prev but not next to its resolved final
 // state (MERGED/CLOSED/unknown). failedRepos: repos whose listing failed this
 // run — their prev entries are neither diffed nor declared gone.
+//
+// `ref` and `url` ride beside `line` rather than being parsed back out of it:
+// the state file wants the sentence, the dashboard's feed wants the parts, and
+// recovering parts from a sentence with a regex is how the feed would drift the
+// first time a sentence changed shape.
 export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
   const events = []
   for (const [key, cur] of Object.entries(next)) {
     const old = prev[key]
     const name = short(cur.repo, cur.number)
     if (!old) {
-      events.push({ type: 'rc-new', line: `NEW RC ${name} "${cur.title}" → ${cur.base} ${cur.url}` })
+      events.push({ type: 'rc-new', ref: name, url: cur.url, line: `NEW RC ${name} "${cur.title}" → ${cur.base} ${cur.url}` })
       for (const r of cur.reviews) {
-        events.push({ type: 'review-new', line: `REVIEW ${name} ${r.state} by @${r.author} ${r.submittedAt} — "${r.excerpt}"` })
+        events.push({ type: 'review-new', ref: name, url: cur.url, line: `REVIEW ${name} ${r.state} by @${r.author} ${r.submittedAt} — "${r.excerpt}"` })
       }
       continue
     }
     const oldReviews = new Set(old.reviews.map(reviewKey))
     for (const r of cur.reviews.filter(r => !oldReviews.has(reviewKey(r)))) {
-      events.push({ type: 'review-new', line: `NEW REVIEW ${name} ${r.state} by @${r.author} ${r.submittedAt} — "${r.excerpt}"` })
+      events.push({ type: 'review-new', ref: name, url: cur.url, line: `NEW REVIEW ${name} ${r.state} by @${r.author} ${r.submittedAt} — "${r.excerpt}"` })
     }
     if (cur.reviewDecision !== old.reviewDecision) {
-      events.push({ type: 'decision-change', line: `DECISION ${name} ${old.reviewDecision || '(none)'} → ${cur.reviewDecision || '(none)'}` })
+      events.push({ type: 'decision-change', ref: name, url: cur.url, line: `DECISION ${name} ${old.reviewDecision || '(none)'} → ${cur.reviewDecision || '(none)'}` })
     }
     if (cur.commentCount > old.commentCount) {
-      events.push({ type: 'comments-new', line: `COMMENTS ${name} +${cur.commentCount - old.commentCount} (now ${cur.commentCount})` })
+      events.push({ type: 'comments-new', ref: name, url: cur.url, line: `COMMENTS ${name} +${cur.commentCount - old.commentCount} (now ${cur.commentCount})` })
     }
   }
   for (const [key, old] of Object.entries(prev)) {
     if (next[key] || failedRepos.has(old.repo)) continue
     const state = goneStates[key] || 'unknown'
-    events.push({ type: 'rc-gone', line: `RC GONE ${short(old.repo, old.number)} — ${state}` })
+    events.push({ type: 'rc-gone', ref: short(old.repo, old.number), url: old.url, line: `RC GONE ${short(old.repo, old.number)} — ${state}` })
   }
   return events
 }
@@ -164,7 +174,9 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
 
   lines.push('', `## Recent events (newest first, capped ${MAX_EVENTS})`, '')
   if (!events.length) lines.push('- (none recorded yet)')
-  for (const e of events) lines.push(`- ${e.at || meta.sweptAt.slice(-5)} ${e.line} ${e.stamp || stamp}`)
+  // The snapshot remembers more than this file shows (FEED_EVENTS vs MAX_EVENTS):
+  // the file is an agent's five-minute read, the dashboard feed is his catch-up.
+  for (const e of events.slice(0, MAX_EVENTS)) lines.push(`- ${e.at || meta.sweptAt.slice(-5)} ${e.line} ${e.stamp || stamp}`)
   return lines.join('\n') + '\n'
 }
 
@@ -398,11 +410,15 @@ function main() {
   const hhmm = sweptAt.slice(-5)
   // Provenance is per source: RC events are verified against GitHub, answer
   // events come off the local ops store. One stamp for both would be a lie.
+  //
+  // `ts` is the full ISO instant. The `at` clock reads fine in a file swept every
+  // five minutes, but the snapshot now outlives the day, and "10:41" with no date
+  // is unanswerable the morning after — the exact question the feed exists for.
   const stamped = [
     ...events.map(e => ({ ...e, stamp: `[verified gh ${hhmm}]` })),
     ...answerEvents.map(e => ({ ...e, stamp: `[ops store ${hhmm}]` })),
-  ].map(e => ({ ...e, at: hhmm }))
-  const allEvents = [...stamped.reverse(), ...(prevWrap.events || [])].slice(0, MAX_EVENTS)
+  ].map(e => ({ ...e, at: hhmm, ts: new Date().toISOString() }))
+  const allEvents = [...stamped.reverse(), ...(prevWrap.events || [])].slice(0, FEED_EVENTS)
 
   // A broken ledger check must not break the RC sweep, exactly as a broken answer
   // store must not: this is an extra pair of eyes, never a precondition.
