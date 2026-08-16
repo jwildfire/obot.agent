@@ -91,6 +91,20 @@ const group = (title, items, empty, moved = 0) => `<h2 class="q-h">${esc(title)}
 ${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="q-empty">${esc(empty)}</p>`}`;
 
 /**
+ * The open pull requests that are ready but are *not* his — standard-lane work,
+ * excluded from the release-candidate panel by the lane classifier.
+ *
+ * One line, naming them, because the alternative is a silent drop. Until 2026-08-16
+ * these were listed as release candidates and one of the three on the page was an
+ * ordinary feature PR into `dev`; removing them is the fix, and saying where they went
+ * is what stops the fix from looking like a queue that lost something.
+ */
+export const standardLane = (standard = []) => (standard.length
+  ? `<p class="q-aside">${standard.length === 1 ? 'One other open PR is' : `${standard.length} other open PRs are`} on the standard lane, not yours to review: ${
+    standard.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(String(s.key).replace(/^jwildfire\//, ''))}</a> &rarr; <code>${esc(s.base ?? '')}</code>`).join(', ')}.</p>`
+  : '');
+
+/**
  * Snoozed and cleared rows: on the page, collapsed.
  *
  * Nothing he acts on may vanish. A snooze he cannot see is a silent delete, and
@@ -216,6 +230,11 @@ const DASHBOARD_CSS = `
   .q-sub { font-size:0.72rem; color:var(--muted); line-height:1.25; min-width:0;
            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; }
+  /* Wraps rather than ellipsizes: it is one short line naming one or two PRs, and
+     the point of it is that the refs stay readable at 390px. */
+  .q-aside { font-size:0.7rem; color:var(--faint); margin:0.1rem 0 0.4rem; line-height:1.35; }
+  .q-aside a { color:var(--muted); }
+  .q-aside code { font-family:var(--mono); font-size:0.92em; }
   .q-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
   .q-moved { font-size:0.62rem; color:var(--faint); text-transform:none; letter-spacing:0; }
 
@@ -579,6 +598,7 @@ export function render({ queue, answers = [], deliverer = null, lastLook = null,
     ${critical.length ? group('Critical', critical, '') : ''}
     ${queue.overBudget ? `<p class="overbudget">${queue.overBudget} more item${queue.overBudget === 1 ? '' : 's'} claim${queue.overBudget === 1 ? 's' : ''} critical. The tag is capped at ${CRITICAL_BUDGET} so it keeps meaning something — the rest are at the top of their own sections.</p>` : ''}
     ${group('Release candidates', queue.rcs.items, queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.', queue.rcs.moved)}
+    ${standardLane(queue.rcs.standard)}
     ${group('Decisions', queue.decisions.items, 'All answered.', queue.decisions.moved)}
     ${group('Config', queue.config.items, 'Nothing needs your keyboard.', queue.config.moved)}
     ${queue.decisions.error ? `<p class="q-empty">Decisions unavailable: ${esc(queue.decisions.error)}</p>` : ''}

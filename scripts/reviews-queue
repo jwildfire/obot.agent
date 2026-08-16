@@ -39,7 +39,8 @@ import sys
 
 FIELDS = (
     "number,title,isDraft,mergeable,mergeStateStatus,baseRefName,reviewDecision,"
-    "statusCheckRollup,additions,deletions,changedFiles,url,author,updatedAt,createdAt,body"
+    "reviewRequests,statusCheckRollup,additions,deletions,changedFiles,url,author,"
+    "updatedAt,createdAt,body"
 )
 BOTS = {"dependabot[bot]", "renovate[bot]", "github-actions[bot]"}
 FAIL = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "ERROR"}
@@ -154,6 +155,16 @@ def main():
             "url": detail["url"],
             "draft": detail["isDraft"],
             "base": detail["baseRefName"],
+            # Carried so a consumer can tell a release candidate from ordinary work.
+            # This script's own buckets answer "is it ready", never "is it his lane" —
+            # the Operations Dashboard read `bucket == "you"` as "release candidate"
+            # and listed a feature PR into `dev` as one (2026-08-16, gsm.safety#51).
+            # The lane judgement belongs to tools/navigator/classify.mjs, and these are
+            # the three fields it needs.
+            "reviewDecision": detail.get("reviewDecision"),
+            "reviewRequests": [
+                r.get("login") for r in (detail.get("reviewRequests") or []) if r.get("login")
+            ],
             "author": detail["author"]["login"],
             "created": detail["createdAt"][:10],
             "updated": detail["updatedAt"][:10],

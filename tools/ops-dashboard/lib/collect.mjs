@@ -21,6 +21,7 @@ import { readCache, writeCache } from './store.mjs';
 import { parseIQ, iqComplete } from './iq.mjs';
 import { fingerprint, applyTriage } from './triage.mjs';
 import { rankQueue } from './rank.mjs';
+import { classifyRC, readPolicy, releaseBranchesByRepo } from '../../navigator/classify.mjs';
 
 /**
  * Open decisions, read from the hub clone's own collector.
@@ -309,14 +310,34 @@ export function parseRCBody(body) {
 }
 
 /**
+ * The RC cache's shape version.
+ *
+ * Bumped when a cached entry can no longer be trusted to mean what the current code
+ * thinks it means. A cache written before the release-lane classifier holds whatever
+ * the bucket-only test admitted, and the items carry no base branch, so there is no way
+ * to re-judge them on the way out — the only honest move is to treat that cache as
+ * absent and sweep again. Relabelling (below) can be retrofitted; a wrong membership
+ * list cannot.
+ */
+export const RC_CACHE_V = 2;
+
+/**
  * Release candidates, from the sweep `reviews-queue` already does.
  *
  * Cached, and the cache is served immediately while a refresh runs behind it: the
  * sweep crosses the network over every repo he owns and takes seconds, and a queue
  * that makes him wait to see his own todo list has missed the point.
+ *
+ * `standard` rides alongside: the green, unblocked pull requests that are *not* his to
+ * review because they are on the standard lane. They are not shown as RCs and never
+ * counted as ones — the page names them in a single line so the difference between
+ * "nothing there" and "there, and not yours" stays visible.
  */
 export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
-  const cached = readCache(workspace, 'rcs', maxAgeMin);
+  const raw = readCache(workspace, 'rcs', maxAgeMin);
+  // A pre-v2 cache is an array of items; a current one is `{v, items, standard}`.
+  const shaped = raw && !Array.isArray(raw.value) && raw.value?.v === RC_CACHE_V ? raw : null;
+  const cached = shaped ?? (raw ? { ...raw, stale: true } : null);
   // Relabelled on the way out as well as on the way in, so a cache written before the
   // naming rule existed still reads right. `rcLabel` is idempotent, so this is free.
   // `sub` is rebuilt the same way: a cache predating the second line has a `lead` but
@@ -326,25 +347,69 @@ export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
     title: rcLabel({ repo: it.repo ?? String(it.key || '').split('#')[0], title: it.title, version: it.version }),
     sub: it.sub ?? rcSub({ lead: it.lead }),
   }));
-  if (cached && !cached.stale) return { items: label(cached.value), ageMin: cached.ageMin, refreshing: false };
+  const items = label(shaped?.value?.items);
+  const standard = shaped?.value?.standard ?? [];
+  if (shaped && !shaped.stale) return { items, standard, ageMin: shaped.ageMin, refreshing: false };
   if (agent) refreshRCs(workspace, agent);
-  return { items: label(cached?.value), ageMin: cached?.ageMin ?? null, refreshing: true };
+  return { items, standard, ageMin: cached?.ageMin ?? null, refreshing: true };
+}
+
+/**
+ * Is this row from `reviews-queue` a release candidate?
+ *
+ * Delegated to the Navigator sweep's classifier, which is now the program's only
+ * answer to that question (`tools/navigator/classify.mjs`). Until 2026-08-16 this
+ * module had no classifier at all: it took `bucket === 'you'` — mergeable, checks
+ * green, nothing sent back — and called that a release candidate. Those are different
+ * claims, and the difference was visible on the page: the sweep listed two RCs and the
+ * dashboard listed three, the third being `gsm.safety#51`, ordinary work into `dev`.
+ *
+ * `bucket` is still required and still means what it meant. An RC with a failing check
+ * or unaddressed review comments is the agent's to fix before it is his to read, so the
+ * two tests compose: the lane says whether it is his at all, the bucket says whether it
+ * is his *yet*.
+ *
+ * The shapes differ by one field — `reviews-queue` flattens `reviewRequests` to logins
+ * — so it is adapted here rather than in the classifier, which keeps gh's own shape.
+ */
+export function isReleaseCandidate(pr, releases) {
+  if (pr.bucket && pr.bucket !== 'you') return false;
+  return classifyRC({
+    isDraft: pr.draft ?? pr.isDraft ?? false,
+    baseRefName: pr.base ?? pr.baseRefName,
+    reviewRequests: (pr.reviewRequests ?? []).map((r) => (typeof r === 'string' ? { login: r } : r)),
+    reviewDecision: pr.reviewDecision || null,
+  }, releases.get(pr.repo) ?? []);
 }
 
 let refreshing = false;
 export function refreshRCs(workspace, script) {
   if (refreshing) return;
   refreshing = true;
+  // Read once per sweep, not once per PR. A policy file that cannot be read is not a
+  // reason to show him a wrong queue, so the whole refresh is abandoned rather than
+  // falling back to the bucket-only test this change exists to retire.
+  let releases;
+  try { releases = releaseBranchesByRepo(readPolicy()); } catch { refreshing = false; return; }
   execFile(script, ['--json'], { timeout: 60000, maxBuffer: 4 << 20 }, (err, stdout) => {
     refreshing = false;
     if (err) return;
     const items = [];
+    const standard = [];
     for (const line of String(stdout).split('\n')) {
       if (!line.trim()) continue;
       try {
         const pr = JSON.parse(line);
-        // `you` is the bucket where nothing is blocking but him.
-        if (pr.bucket && pr.bucket !== 'you') continue;
+        if (!isReleaseCandidate(pr, releases)) {
+          // Not dropped in silence. A PR that is green and unblocked but on the
+          // standard lane is somebody's work in flight, and a reader who saw it here
+          // yesterday should be able to find out where it went rather than wonder
+          // whether the queue lost it — the same rule the folded decisions get.
+          if ((!pr.bucket || pr.bucket === 'you') && !pr.draft) {
+            standard.push({ key: `${pr.repo}#${pr.number}`, base: pr.base, url: pr.url });
+          }
+          continue;
+        }
         const version = upcomingVersion(workspace, pr.repo);
         items.push({
           kind: 'rc',
@@ -373,7 +438,7 @@ export function refreshRCs(workspace, script) {
         });
       } catch { /* a non-JSON line is the human table; skip it */ }
     }
-    writeCache(workspace, 'rcs', items);
+    writeCache(workspace, 'rcs', { v: RC_CACHE_V, items, standard });
   });
 }
 

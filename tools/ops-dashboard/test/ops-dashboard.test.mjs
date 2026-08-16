@@ -7,7 +7,10 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
-import { collectConfig, nextConfigId, parseRCBody, rcLabel, rcSub, upcomingVersion } from '../lib/collect.mjs';
+import {
+  collectConfig, collectRCs, isReleaseCandidate, nextConfigId, parseRCBody, rcLabel,
+  rcSub, upcomingVersion, RC_CACHE_V,
+} from '../lib/collect.mjs';
 import { ensureStore, readCache, writeCache, SENTINEL } from '../lib/store.mjs';
 import {
   recordAnswer, readAnswers, currentAnswers, pendingAnswers, deliverAnswers,
@@ -78,6 +81,61 @@ test('a changed answer supersedes the earlier one and never deletes it', () => {
 
 test('a fresh store has no answers and does not throw reading them', () => {
   assert.deepEqual(readAnswers(tmp()), []);
+});
+
+// The release-lane classifier, on the exact rows that were wrong on 2026-08-16: the
+// dashboard showed three release candidates and the Navigator sweep showed two.
+const RELEASES = new Map([
+  ['jwildfire/gsm.safety', ['main']],
+  ['jwildfire/open.gismo', ['main']],
+  ['jwildfire/obot.agent', ['stable']],
+  ['jwildfire/obot.roadmap', []],
+]);
+const row = (o) => ({ bucket: 'you', repo: 'jwildfire/gsm.safety', number: 1, base: 'main', draft: false, reviewRequests: [], reviewDecision: '', ...o });
+
+test('the RC panel classifies by release lane, not by readiness', () => {
+  // gsm.safety#52 and open.gismo#10 — both into a release-role branch.
+  assert.equal(isReleaseCandidate(row({ number: 52, base: 'main' }), RELEASES), true);
+  assert.equal(isReleaseCandidate(row({ number: 10, repo: 'jwildfire/open.gismo', base: 'main' }), RELEASES), true);
+  // gsm.safety#51 — green, unblocked, and ordinary work into the integration branch.
+  assert.equal(isReleaseCandidate(row({ number: 51, base: 'dev' }), RELEASES), false);
+});
+
+test('readiness still gates: an RC the agent owns is not in his queue', () => {
+  assert.equal(isReleaseCandidate(row({ bucket: 'agent' }), RELEASES), false);
+  assert.equal(isReleaseCandidate(row({ bucket: 'waiting' }), RELEASES), false);
+});
+
+test('a repo whose release branch is not main is judged on its own lane', () => {
+  // obot.agent releases main -> stable, so a PR into main is integration work.
+  assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/obot.agent', base: 'main' }), RELEASES), false);
+  assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/obot.agent', base: 'stable' }), RELEASES), true);
+  // obot.roadmap has no release branch at all; nothing there is an RC by lane.
+  assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/obot.roadmap', base: 'main' }), RELEASES), false);
+});
+
+test('he can still be pulled in by name, and a repo off the policy degrades to that', () => {
+  assert.equal(isReleaseCandidate(row({ base: 'dev', reviewRequests: ['jwildfire'] }), RELEASES), true);
+  assert.equal(isReleaseCandidate(row({ base: 'dev', reviewDecision: 'APPROVED' }), RELEASES), true);
+  assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/not-in-policy', base: 'main' }), RELEASES), false);
+  assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/not-in-policy', base: 'main', reviewRequests: ['jwildfire'] }), RELEASES), true);
+});
+
+test('a cache written before the classifier is treated as absent, not relabelled', () => {
+  const ws = tmp();
+  ensureStore(ws);
+  // The old shape: a bare array, whose membership was decided by the bucket alone
+  // and whose items carry no base branch — so it cannot be re-judged, only refetched.
+  writeCache(ws, 'rcs', [{ kind: 'rc', key: 'jwildfire/gsm.safety#51', title: 'x' }]);
+  const stale = collectRCs(ws, {});
+  assert.deepEqual(stale.items, []);
+  assert.equal(stale.refreshing, true);
+
+  writeCache(ws, 'rcs', { v: RC_CACHE_V, items: [{ kind: 'rc', key: 'jwildfire/gsm.safety#52', repo: 'jwildfire/gsm.safety', title: 'gsm.safety v1.1.0-RC1' }], standard: [{ key: 'jwildfire/gsm.safety#51', base: 'dev' }] });
+  const fresh = collectRCs(ws, {});
+  assert.equal(fresh.refreshing, false);
+  assert.deepEqual(fresh.items.map((i) => i.key), ['jwildfire/gsm.safety#52']);
+  assert.deepEqual(fresh.standard.map((s) => s.key), ['jwildfire/gsm.safety#51']);
 });
 
 test('a cache entry goes stale on the age it was asked for', () => {
