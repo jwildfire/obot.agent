@@ -31,11 +31,14 @@
 // judges, corrects, or touches other agents' work. Nothing it writes is
 // published.
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdirSync, statSync, appendFileSync } from 'node:fs'
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, statSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { answersSection, deliverAnswers, pendingAnswers } from '../ops-dashboard/lib/answers.mjs'
+import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
+         orphansOutsideWindow, parseIndexRows, readJson, registryDisagreement,
+         shapeRepo } from './checks.mjs'
 
 const WS = process.env.OBOT_WORKSPACE || join(process.env.HOME, 'Documents/obot2')
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -104,7 +107,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   const head = meta.ok
     ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · ok — ${meta.repoCount} repos, ${Object.keys(snapshot).length} RCs`
@@ -165,6 +168,11 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // so the delivery record reaches him with no rendering code at all.
   if (delivery && delivery.trim()) lines.push('', delivery.trimEnd())
 
+  // The four checks that missed the night of 2026-08-15 (D0017). Rendered even when
+  // clean, because a detector that only ever speaks up on failure is
+  // indistinguishable from a dead one — the same reason the ledgers report clean.
+  if (checks && checks.trim()) lines.push('', checks.trimEnd())
+
   lines.push('', `## Recent events (newest first, capped ${MAX_EVENTS})`, '')
   if (!events.length) lines.push('- (none recorded yet)')
   for (const e of events) lines.push(`- ${e.at || meta.sweptAt.slice(-5)} ${e.line} ${e.stamp || stamp}`)
@@ -219,6 +227,92 @@ function readDelivery() {
 // that leaves no record is indistinguishable from no decision.
 const auditDelivery = () => shellAudit('delivery-log')
 
+// The four checks (#136, under D0017). Scope is every repo in the policy file — all
+// seven project repos, not the hub alone — which is @jwildfire's directive and also
+// the only reason last night's failure is detectable by a machine at all: those six
+// issues were invisible because they sat in a spoke repo and the nightly audit read
+// only the hub.
+//
+// A repo that fails to read is named in the section rather than skipped silently. A
+// check that quietly covers six of seven repos and prints "clean" is worse than no
+// check, because the reader takes it as complete.
+function runChecks(repos) {
+  const items = []
+  const errors = []
+  for (const { repo } of repos) {
+    const [owner, name] = repo.split('/')
+    try {
+      const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${ORPHAN_QUERY}`,
+        '-F', `owner=${owner}`, '-F', `name=${name}`])).data
+      items.push(...shapeRepo(repo, data))
+    } catch (e) {
+      errors.push(`${repo}: ${String(e.message).slice(0, 90)}`)
+    }
+  }
+
+  // The decision registry against the index the site publishes from (hub#196): two
+  // files answer "has he decided this" and until now nothing compared them.
+  let registry = []
+  try {
+    const reg = readJson(join(HUB, 'reports/decisions/registry.json'))
+    const idx = parseIndexRows(readFileSync(join(HUB, 'reports/decisions/README.md'), 'utf8'))
+    if (reg && idx.length) registry = registryDisagreement(reg, idx)
+    else errors.push('decision registry or index unreadable')
+  } catch (e) {
+    errors.push(`decisions: ${String(e.message).slice(0, 90)}`)
+  }
+
+  // Agents that finished having produced nothing. Local job records, no API calls.
+  let closeouts = []
+  try {
+    closeouts = emptyCloseouts(readJobs(), new Date())
+  } catch (e) {
+    errors.push(`jobs: ${String(e.message).slice(0, 90)}`)
+  }
+
+  // How old the thing this design leans on actually is. The 2026-08-16 investigation
+  // found the audit had not run at all while its day-old output was being quoted as
+  // this morning's board state; the file has always carried its timestamp and nothing
+  // ever made a reader look at it.
+  const audit = auditFreshness(readJson(join(HUB, 'site/audit/findings.json')), new Date())
+
+  const now = new Date()
+  return checksSection({
+    audit,
+    orphans: orphanedWork(items, now),
+    orphansOutsideWindow: orphansOutsideWindow(items, now),
+    registry,
+    closeouts,
+    errors,
+  }, now)
+}
+
+// The harness's own job ledger. `firstTerminalAt` is the closeout watermark; the
+// state file alone is not proof a job finished well, so the timeline is read where
+// it exists and the state is the fallback.
+function readJobs() {
+  const dir = join(process.env.HOME, '.claude', 'jobs')
+  const out = []
+  let names = []
+  try { names = readdirSync(dir) } catch { return out }
+  for (const id of names) {
+    let state
+    try { state = JSON.parse(readFileSync(join(dir, id, 'state.json'), 'utf8')) } catch { continue }
+    let firstTerminalAt = state.firstTerminalAt || null
+    if (!firstTerminalAt && state.state === 'done') {
+      try {
+        const lines = readFileSync(join(dir, id, 'timeline.jsonl'), 'utf8').trim().split('\n')
+        for (const l of lines) {
+          const ev = JSON.parse(l)
+          if (['done', 'blocked', 'failed'].includes(ev.state || ev.type)) { firstTerminalAt = ev.at || ev.ts; break }
+        }
+      } catch { /* no timeline — the state file is what there is */ }
+    }
+    out.push({ id, name: state.name, state: state.state, firstTerminalAt, children: state.children || [] })
+  }
+  return out
+}
+
 // The worker ledger: is the W-id convention actually being applied? (#130)
 //
 // This is the one that would otherwise be invisible. The other checks ask whether
@@ -254,6 +348,7 @@ const safePending = () => { try { return pendingAnswers(WS, { hub: HUB }) } catc
 const safeLedger = () => { try { return auditLedger() } catch { return null } }
 const safeWorkers = () => { try { return auditWorkers() } catch { return null } }
 const safeDelivery = () => { try { return readDelivery() } catch { return null } }
+const safeChecks = (repos) => { try { return runChecks(repos) } catch { return null } }
 
 function main() {
   const sweptAt = nowStamp()
@@ -268,7 +363,7 @@ function main() {
     // A sweep that cannot read the policy still reports his answers: they come
     // from the local store, and a failed RC sweep is no reason to imply there is
     // nothing waiting on an agent.
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([]) }))
     log(`FAILED policy.json: ${e.message}`)
     process.exit(0)
   }
@@ -328,6 +423,8 @@ function main() {
   try { workers = auditWorkers() } catch (e) { errors.push(`workers: ${String(e.message).slice(0, 120)}`) }
   let delivery = null
   try { delivery = readDelivery() } catch (e) { errors.push(`delivery: ${String(e.message).slice(0, 120)}`) }
+  let checks = null
+  try { checks = runChecks(repos) } catch (e) { errors.push(`checks: ${String(e.message).slice(0, 120)}`) }
   // The gap check rides along with the record itself: a finding is prepended to
   // the section so it cannot be read as a quiet day.
   let deliveryAudit = null
@@ -339,7 +436,7 @@ function main() {
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks }))
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
