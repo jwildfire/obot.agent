@@ -43,14 +43,25 @@ import { collectQueue, refreshRCs } from './lib/collect.mjs';
 import { render, sessionShell, navigatorShell, NOT_LISTENING } from './lib/render.mjs';
 import { parseNavigatorState } from './lib/navigator.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
-import { ensureStore } from './lib/store.mjs';
+import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
+import { captureCode, codeState, fetchHub, resolveHub } from './lib/provenance.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 7326;
+
+// The commit this process is running, taken at load rather than at render time — a
+// long-running server's checkout moves on beneath it, so reading HEAD during a request
+// describes the code that is precisely *not* being served. See lib/provenance.mjs.
+const CODE = captureCode(path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..'));
+
+// How often the hub clone's remote-tracking refs are refreshed, so "what has he
+// decided" is never answered out of a clone that stopped looking when the server
+// started. Read-only: no branch and no working tree is touched.
+const HUB_FETCH_MIN = 5;
 
 // The session hub's live view, written by its own watch loop.
 const SESSION_DIR = ['.claude', 'session-hub'];
@@ -150,8 +161,20 @@ export function delivererState(workspace) {
   }
 }
 
+/**
+ * Where this render's decisions come from — his clone, or the freshest committed state
+ * of it. Resolved once per request, so the queue, the answers panel and the artifact
+ * routes all read the same tree and cannot disagree about what he has decided.
+ */
+export function hubSource(args) {
+  try { return resolveHub(args.hub, path.join(opsDir(args.workspace), 'cache')); } catch {
+    return { root: args.hub, source: 'clone', warn: 'hub provenance unavailable — reading the clone as-is' };
+  }
+}
+
 async function page(args, lastLook = null) {
-  const queue = await collectQueue(args.workspace, args.hub, {
+  const hub = hubSource(args);
+  const queue = await collectQueue(args.workspace, hub.root, {
     agent: path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue'),
   });
   // The last recorded pass/fail per item, so an installation qualification opens
@@ -165,8 +188,9 @@ async function page(args, lastLook = null) {
       config: withChecks(queue.config),
       critical: (queue.critical ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)),
     },
-    answers: currentAnswers(args.workspace, { hub: args.hub }),
+    answers: currentAnswers(args.workspace, { hub: hub.root }),
     deliverer: delivererState(args.workspace),
+    provenance: { code: codeState(CODE), hub },
     lastLook,
     workspace: args.workspace,
     hub: args.hub,
@@ -190,6 +214,14 @@ export function serve(args) {
   const rq = path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue');
   if (fs.existsSync(rq)) refreshRCs(args.workspace, rq);
 
+  // Keep the hub clone's remote-tracking refs current for as long as this server runs.
+  // Only in `--serve`: a one-shot render must not reach the network, and the fetch
+  // never blocks a request — a slow or offline remote costs freshness, not the page.
+  const pull = () => { try { fetchHub(args.hub); } catch { /* offline is a state, not a fault */ } };
+  pull();
+  const ticker = setInterval(pull, HUB_FETCH_MIN * 60000);
+  ticker.unref?.();
+
   const server = http.createServer(async (req, res) => {
     const send = (code, type, body) => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
     try {
@@ -197,7 +229,10 @@ export function serve(args) {
         const answer = JSON.parse(await readBody(req));
         let result;
         try {
-          result = recordAnswer(args.workspace, answer, { hub: args.hub });
+          // The same tree the queue was rendered from: an answer's decision id is
+          // resolved out of the hub registry, and resolving it against a staler copy
+          // than the row he clicked is how an answer lands on the wrong id.
+          result = recordAnswer(args.workspace, answer, { hub: hubSource(args).root });
         } catch (e) {
           // A refusal he can act on. The old handler took anything with a verdict
           // string, which is how a "per-question" answer holding no questions
@@ -254,7 +289,9 @@ export function serve(args) {
       // happen before the write or the page would only ever say "just now" (oa#143).
       const look = () => seenAndNote(args.workspace, req, { aliases: SURFACE_ALIASES });
 
-      const file = artifactPath(args.hub, req.url);
+      // Artifacts are served from the tree the queue was built from, so the page he
+      // opens is the page the row promised — never a staler copy of it.
+      const file = artifactPath(hubSource(args).root, req.url);
       if (file) {
         look();
         return send(200, 'text/html; charset=utf-8', fs.readFileSync(file));
@@ -305,7 +342,7 @@ export function serve(args) {
       }
 
       if (p === '/queue.json') {
-        const q = await collectQueue(args.workspace, args.hub);
+        const q = await collectQueue(args.workspace, hubSource(args).root);
         return send(200, 'application/json', JSON.stringify({ items: q.items }, null, 2));
       }
       return send(404, 'text/plain', 'not found');

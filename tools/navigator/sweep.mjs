@@ -39,10 +39,16 @@ import { answersSection, deliverAnswers, pendingAnswers } from '../ops-dashboard
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
          orphansOutsideWindow, parseIndexRows, readJson, registryDisagreement,
          shapeRepo } from './checks.mjs'
+// What counts as a release candidate now lives beside this file rather than in it,
+// because the Operations Dashboard has to answer the same question and used to answer
+// it differently. Re-exported so this module's callers and tests are unaffected.
+import { classifyRC, discoverRepos, POLICY_FILE } from './classify.mjs'
+
+export { classifyRC, discoverRepos }
 
 const WS = process.env.OBOT_WORKSPACE || join(process.env.HOME, 'Documents/obot2')
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const POLICY = join(REPO_ROOT, 'scripts', 'policy.json')
+const POLICY = POLICY_FILE
 const STATE_MD = join(WS, '.claude/session-hub/navigator-state.md')
 const SNAPSHOT = join(WS, '.claude/session-hub/cache/navigator-rc.json')
 const LOG = join(WS, '.claude/session-hub/navigator-sweep.log')
@@ -50,24 +56,7 @@ const SCRATCHPAD_LOG = join(REPO_ROOT, 'tools', 'scratchpad-log')
 // The hub clone, for joining an artifact slug to the decision id he quotes.
 const HUB = process.env.OBOT_HUB || join(WS, 'obot.roadmap')
 const CADENCE_MIN = 5
-const REVIEWER = 'jwildfire'
 const MAX_EVENTS = 15
-
-export function discoverRepos(policy) {
-  return Object.entries(policy.repos || {}).map(([repo, entry]) => ({
-    repo,
-    release: (entry.branches && entry.branches.release) || [],
-    class: entry.class || 'unclassified',
-  }))
-}
-
-export function classifyRC(pr, releaseBranches) {
-  if (pr.isDraft) return false
-  if (releaseBranches.includes(pr.baseRefName)) return true
-  if ((pr.reviewRequests || []).some(r => r.login === REVIEWER)) return true
-  if (pr.reviewDecision) return true // reviewed already, still open — still his queue
-  return false
-}
 
 const short = (repo, n) => `${repo.replace(/^jwildfire\//, '')}#${n}`
 const reviewKey = r => `${r.author}:${r.submittedAt}`

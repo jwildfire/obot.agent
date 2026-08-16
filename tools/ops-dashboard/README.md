@@ -47,12 +47,14 @@ node obot.agent/tools/ops-dashboard/ops-dashboard.mjs           # render once to
 
 One queue, three sources:
 
-- **Release candidates** — from the sweep `scripts/reviews-queue` already does, cached
-  in the ops store so the page opens instantly and works offline. Clicking one opens
-  the pull request on GitHub; release candidates are reviewed there.
-- **Decisions** — every open decision artifact, read from the hub clone's own
-  collector (`scripts/lib/collect/decision-log.mjs`) rather than the deployed
-  `decisions.json`, so a decision recorded five minutes ago is already here.
+- **Release candidates** — from the sweep `scripts/reviews-queue` already does,
+  classified by release lane (see below) and cached in the ops store so the page opens
+  instantly and works offline. Clicking one opens the pull request on GitHub; release
+  candidates are reviewed there.
+- **Decisions** — every open decision artifact, read from the hub's own collector
+  (`scripts/lib/collect/decision-log.mjs`) rather than the deployed `decisions.json`,
+  so a decision recorded five minutes ago is already here. Which *copy* of the hub is
+  read is decided per request — see [What the page is made of](#what-the-page-is-made-of).
 - **Config** — the workspace list at `<workspace>/.claude/blockers.md` and nowhere
   else. **Headlines only**: an item's body describes exactly which control stopped an
   agent, and there is no reason to render that on a queue row.
@@ -77,6 +79,57 @@ this package's version, otherwise from the `(Upcoming)` heading of the local clo
 `NEWS.md`; a version is never invented, and with none the label is the package alone. An
 `-RCn` already in the title is authoritative and never renumbered: the counter is a
 review-round fact this page cannot see.
+
+### What counts as a release candidate
+
+By **release lane**, never by readiness — one classifier, `tools/navigator/classify.mjs`,
+shared with the Navigator sweep. A pull request is his to review when it targets a branch
+holding the `release` role in `scripts/policy.json`, or he was asked for a review by name,
+or he has already reviewed it and it is still open. Drafts are out.
+
+Readiness still gates on top of that: `reviews-queue`'s `you` bucket (mergeable, checks
+green, nothing sent back) says whether it is his *yet*. The lane says whether it is his
+*at all*.
+
+Until 2026-08-16 this module had no classifier and read `bucket == "you"` as "release
+candidate". Those are different claims and the difference showed: the sweep listed two
+RCs, the page listed three, and the third was `gsm.safety#51` — ordinary feature work
+into `dev`, sitting in the panel the RC-only review rule exists to protect. Anything the
+lane excludes is named in one line under the panel rather than dropped in silence.
+
+The lane-classified sweep caches to `rcs-lane.json`, deliberately not `rcs.json`. The
+cache is shared with any ops-dashboard process already running, and that process is
+long-lived because nothing restarts it on a merge — writing a new shape into the old
+file hands a running older server something it cannot parse. That is not hypothetical:
+it turned the live queue page into a 500 on 2026-08-16. The file name is the schema.
+
+## What the page is made of
+
+The page states two things about itself, on the healthy path as well as the bad one:
+
+- **The code it is running** — the commit, its age, and whether the checkout has moved
+  past it. Captured when the process loads, not read during a request: a long-running
+  server's checkout moves on beneath it, so reading `HEAD` live names the code that is
+  precisely *not* being served. A stale build cannot fix itself — a process cannot
+  reload its own modules — so it says so and gives the restart.
+- **Where its decisions came from** — the clone, or the freshest committed state of it.
+  The clone is preferred, for the reason this page reads a clone at all: a decision
+  recorded five minutes ago is in the working tree and in no published feed. It stops
+  being preferred in exactly one case, a clean clone strictly behind its upstream, where
+  the upstream is the clone plus more with nothing of his to lose. Then that tree is
+  materialised into the ops cache and the hub's own collector is imported out of it —
+  the same code the published log runs, so there is no second parser to drift from it.
+
+His checkout is never moved to get that answer: no pull, no checkout, no stash. A
+background `git fetch` every five minutes updates remote-tracking refs and nothing else,
+and a clone with uncommitted decision edits keeps priority even when behind, because his
+unsaved work outranks a tidier answer.
+
+Both lines print when everything is fine. Twice on 2026-08-16 the running dashboard was
+many merges behind `main` — eleven, the second time — and the hub clone it read was four
+commits behind `origin/main`, which is why a decision he made that morning was still
+listed as awaiting him. Both sat well inside any sane staleness threshold, so a line that
+only appears when something is late would have caught neither.
 
 ### The release-candidate panel
 
