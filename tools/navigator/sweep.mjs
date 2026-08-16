@@ -43,6 +43,7 @@ import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWo
 // because the Operations Dashboard has to answer the same question and used to answer
 // it differently. Re-exported so this module's callers and tests are unaffected.
 import { classifyRC, discoverRepos, POLICY_FILE } from './classify.mjs'
+import { refreshMetrics } from './metrics.mjs'
 
 export { classifyRC, discoverRepos }
 
@@ -51,6 +52,11 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const POLICY = POLICY_FILE
 const STATE_MD = join(WS, '.claude/session-hub/navigator-state.md')
 const SNAPSHOT = join(WS, '.claude/session-hub/cache/navigator-rc.json')
+// The release-metrics cache (jwildfire/obot.roadmap#218). Written here and only
+// here — the sweep is the sole writer of session-hub files — read by the
+// dashboard's Navigator tab, which never reaches the network at render time.
+const METRICS = join(WS, '.claude/session-hub/cache/metrics.json')
+const METRICS_TTL_MIN = 60
 const LOG = join(WS, '.claude/session-hub/navigator-sweep.log')
 const SCRATCHPAD_LOG = join(REPO_ROOT, 'tools', 'scratchpad-log')
 // The hub clone, for joining an artifact slug to the decision id he quotes.
@@ -438,6 +444,22 @@ function main() {
     delivery = `**DELIVERY RECORD GAP** — ${deliveryAudit.summary}\n\n${delivery}`
   }
 
+  // Release metrics, refreshed hourly on this five-minute ride. A failed refresh
+  // costs freshness, never the sweep: the old cache keeps its honest fetchedAt and
+  // the renderer shows the age. Not an error even when it fails — the RC queue is
+  // this sweep's contract, the metrics are a passenger.
+  let metricsNote = 'skipped'
+  try {
+    mkdirSync(dirname(METRICS), { recursive: true })
+    const r = refreshMetrics({
+      repos, hub: HUB, cacheFile: METRICS, ttlMin: METRICS_TTL_MIN,
+      read: (f) => readFileSync(f, 'utf8'), write: (f, body) => writeFileSync(f, body),
+    })
+    metricsNote = r.refreshed ? 'refreshed' : (r.failed ? `refresh failed (${r.failed.length})` : 'cached')
+  } catch (e) {
+    metricsNote = `broken: ${String(e.message).slice(0, 80)}`
+  }
+
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
@@ -445,7 +467,7 @@ function main() {
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'}${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · metrics: ${metricsNote}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()
