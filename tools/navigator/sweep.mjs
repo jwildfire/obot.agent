@@ -104,7 +104,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   const head = meta.ok
     ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · ok — ${meta.repoCount} repos, ${Object.keys(snapshot).length} RCs`
@@ -158,6 +158,13 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // because it lived somewhere nothing scheduled ever looked.
   lines.push('', answersSection(answers).trimEnd())
 
+  // The Navigator session's own record, folded in whole (D0017, 2026-08-16). Two
+  // writers, two files: the session appends to delivery.md and never touches this
+  // one; the sweep reads that file and never writes it. They rejoin here because
+  // the dashboard's Navigator tab already renders any heading this file carries,
+  // so the delivery record reaches him with no rendering code at all.
+  if (delivery && delivery.trim()) lines.push('', delivery.trimEnd())
+
   lines.push('', `## Recent events (newest first, capped ${MAX_EVENTS})`, '')
   if (!events.length) lines.push('- (none recorded yet)')
   for (const e of events) lines.push(`- ${e.at || meta.sweptAt.slice(-5)} ${e.line} ${e.stamp || stamp}`)
@@ -197,6 +204,21 @@ function shellAudit(tool) {
 // The config list: is an id allocated with no entry behind it? (obot.agent#126)
 const auditLedger = () => shellAudit('blocker-log')
 
+// The Navigator session's delivery record, rendered by the tool that owns it
+// (#134). Shelled for the same reason the audits are: one owner per record.
+function readDelivery() {
+  const r = spawnSync(join(REPO_ROOT, 'tools', 'delivery-log'), ['render'], {
+    env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 20000,
+  })
+  if (r.error || r.status !== 0) return null
+  return (r.stdout || '').trim() || null
+}
+
+// And the question the record cannot answer about itself: has a call the Navigator
+// says it made gone missing from the file @jwildfire reads? A delegated decision
+// that leaves no record is indistinguishable from no decision.
+const auditDelivery = () => shellAudit('delivery-log')
+
 // The worker ledger: is the W-id convention actually being applied? (#130)
 //
 // This is the one that would otherwise be invisible. The other checks ask whether
@@ -231,6 +253,7 @@ function log(msg) {
 const safePending = () => { try { return pendingAnswers(WS, { hub: HUB }) } catch { return [] } }
 const safeLedger = () => { try { return auditLedger() } catch { return null } }
 const safeWorkers = () => { try { return auditWorkers() } catch { return null } }
+const safeDelivery = () => { try { return readDelivery() } catch { return null } }
 
 function main() {
   const sweptAt = nowStamp()
@@ -245,7 +268,7 @@ function main() {
     // A sweep that cannot read the policy still reports his answers: they come
     // from the local store, and a failed RC sweep is no reason to imply there is
     // nothing waiting on an agent.
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery() }))
     log(`FAILED policy.json: ${e.message}`)
     process.exit(0)
   }
@@ -303,11 +326,20 @@ function main() {
   try { ledger = auditLedger() } catch (e) { errors.push(`ledger: ${String(e.message).slice(0, 120)}`) }
   let workers = null
   try { workers = auditWorkers() } catch (e) { errors.push(`workers: ${String(e.message).slice(0, 120)}`) }
+  let delivery = null
+  try { delivery = readDelivery() } catch (e) { errors.push(`delivery: ${String(e.message).slice(0, 120)}`) }
+  // The gap check rides along with the record itself: a finding is prepended to
+  // the section so it cannot be read as a quiet day.
+  let deliveryAudit = null
+  try { deliveryAudit = auditDelivery() } catch { /* an extra pair of eyes, never a precondition */ }
+  if (delivery && deliveryAudit && !deliveryAudit.ok) {
+    delivery = `**DELIVERY RECORD GAP** — ${deliveryAudit.summary}\n\n${delivery}`
+  }
 
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery }))
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)

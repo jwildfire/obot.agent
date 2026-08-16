@@ -79,7 +79,13 @@ CMD+=(--model "$MODEL")
 CMD+=("/s-prime")
 
 if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
-  printf 'obot-prime: would run (from %s):' "$WORKSPACE"; printf ' %q' "${CMD[@]}"; printf '\n'
+  # Printed with %s rather than %q: %q escapes every non-ASCII byte, so the
+  # session name came out as mojibake on the one line a reader checks.
+  printf 'obot-prime: would run (from %s):' "$WORKSPACE"
+  for arg in "${CMD[@]}"; do
+    case "$arg" in *[[:space:]]*) printf " '%s'" "$arg" ;; *) printf ' %s' "$arg" ;; esac
+  done
+  printf '\n'
   exit 0
 fi
 

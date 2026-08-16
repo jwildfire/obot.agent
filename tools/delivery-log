@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""delivery-log - the Navigator's delivery record: what the agents did to the roadmap.
+
+@jwildfire, approving D0017 on 2026-08-16: "I'm good with D0017 recommendations.
+Implement." One of those recommendations is that every judgment the Navigator makes
+on his behalf leaves a line, and every call that changes the plan leaves a
+permanent id he can quote when he wants it reversed.
+
+    delivery-log verdict --worker W0007 --produced obot.agent#132 \
+                         --requirement hub#194 --verdict confirmed [--note '...']
+    delivery-log call --kind requirement-filed --summary 'filed hub#199'
+    delivery-log render                    the ## Delivery section the sweep folds in
+    delivery-log --audit                   read-only; exit 1 on a finding
+
+`call` prints the bare id and nothing else, because it is consumed as
+`CID=$(delivery-log call ...)`. Everything conversational goes to stderr.
+
+Verdicts are one of confirmed, drift or none. A worker that correctly stopped to ask
+a question is `none` and is not marked down for it - only a pull request advances a
+requirement, and that is right rather than a gap.
+
+THE AUDIT'S EXIT CODE IS THE VERDICT - 0 when the journal and the record agree, 1 on
+a finding - and the verdict is the FIRST line, because callers summarise by first
+line and a check whose headline is swallowed reports nothing while looking healthy
+(obot.agent#129).
+
+Implements jwildfire/obot.agent#134 under jwildfire/obot.roadmap#195.
+"""
+
+import os
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+
+from delivery_ledger import (VERDICTS, audit, findings, render,  # noqa: E402
+                             report, write_call, write_verdict)
+
+WS = pathlib.Path(os.environ.get("OBOT_WORKSPACE") or (pathlib.Path.home() / "Documents/obot2"))
+
+
+def usage(code=0):
+    print(__doc__.strip(), file=sys.stderr if code else sys.stdout)
+    sys.exit(code)
+
+
+def flags(argv, allowed):
+    out = {}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if not a.startswith("--"):
+            print("delivery-log: unexpected argument: %s" % a, file=sys.stderr)
+            sys.exit(1)
+        key = a[2:]
+        if key not in allowed:
+            print("delivery-log: unknown argument: %s" % a, file=sys.stderr)
+            sys.exit(1)
+        if i + 1 >= len(argv):
+            print("delivery-log: %s needs a value" % a, file=sys.stderr)
+            sys.exit(1)
+        out[key] = argv[i + 1]
+        i += 2
+    return out
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        usage(0 if argv else 1)
+    cmd, argv = argv[0], argv[1:]
+
+    if cmd == "verdict":
+        f = flags(argv, {"worker", "produced", "requirement", "verdict", "note"})
+        for need in ("worker", "produced", "requirement", "verdict"):
+            if not f.get(need):
+                print("delivery-log: verdict needs --%s" % need, file=sys.stderr)
+                return 1
+        try:
+            line = write_verdict(WS, f["worker"], f["produced"], f["requirement"],
+                                 f["verdict"], f.get("note"))
+        except ValueError as e:
+            print("delivery-log: %s (got %r)" % (e, f["verdict"]), file=sys.stderr)
+            return 1
+        print("delivery-log: recorded — %s" % line[2:], file=sys.stderr)
+        return 0
+
+    if cmd == "call":
+        f = flags(argv, {"kind", "summary"})
+        for need in ("kind", "summary"):
+            if not f.get(need):
+                print("delivery-log: call needs --%s" % need, file=sys.stderr)
+                return 1
+        cid, _ = write_call(WS, f["kind"], f["summary"])
+        print(cid)  # stdout: the id, alone, for $(...)
+        print("delivery-log: %s recorded — %s: %s. He can reverse it by quoting the id."
+              % (cid, f["kind"], f["summary"]), file=sys.stderr)
+        return 0
+
+    if cmd == "render":
+        sys.stdout.write(render(WS))
+        return 0
+
+    if cmd == "--audit":
+        a = audit(WS)
+        for line in report(a):
+            print(line)
+        return 1 if findings(a) else 0
+
+    print("delivery-log: unknown command: %s (verdicts are %s)"
+          % (cmd, ", ".join(VERDICTS)), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
