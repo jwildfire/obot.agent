@@ -14,8 +14,16 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Where a look gets recorded. It lives with the ops store because that is the folder
+// that owns local-only records about him (jwildfire/obot.agent#143), not because the
+// dashboard owns this seam — both servers hand him pages and both record here.
+import { seenAndNote } from '../../ops-dashboard/lib/last-seen.mjs';
+
 export const DEFAULT_PORT = 7325;
 const HOST = '127.0.0.1';
+
+// `/` is the live view, so the two are one surface rather than two.
+const ALIASES = { '/': '/live.html' };
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -47,7 +55,20 @@ export function resolveRequest(dir, url) {
   return stat.isFile() ? target : null;
 }
 
-export function createHubServer({ dir }) {
+/**
+ * The workspace whose ops store a look belongs in.
+ *
+ * Derived only from the one layout that is actually a workspace — `<ws>/.claude/
+ * session-hub` — and null for anything else, so a server pointed at a scratch
+ * directory writes nothing rather than writing somewhere invented.
+ */
+export function workspaceFor(dir) {
+  const root = path.resolve(dir);
+  const parts = root.split(path.sep);
+  return parts.slice(-2).join('/') === '.claude/session-hub' ? parts.slice(0, -2).join(path.sep) : null;
+}
+
+export function createHubServer({ dir, workspace = workspaceFor(dir) }) {
   return http.createServer((req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { allow: 'GET, HEAD' });
@@ -60,6 +81,9 @@ export function createHubServer({ dir }) {
       res.end('not found\n');
       return;
     }
+    // A page he opened is now on his screen: record it. Only here, where the page is
+    // about to be handed over — a 404 is not a surface, and a poll is not a look.
+    if (workspace) seenAndNote(workspace, req, { aliases: ALIASES });
     const body = fs.readFileSync(file);
     res.writeHead(200, {
       'content-type': TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream',
@@ -72,9 +96,9 @@ export function createHubServer({ dir }) {
 }
 
 /** Listen on the first free port at or after `port`, giving up after `tries`. */
-export function listen({ dir, port = DEFAULT_PORT, tries = 10 }) {
+export function listen({ dir, port = DEFAULT_PORT, tries = 10, workspace }) {
   return new Promise((resolve, reject) => {
-    const server = createHubServer({ dir });
+    const server = createHubServer({ dir, workspace });
     let attempt = 0;
     const tryPort = (p) => {
       server.once('error', (err) => {
@@ -97,8 +121,8 @@ export function listen({ dir, port = DEFAULT_PORT, tries = 10 }) {
  * is removed on exit; a reader should still check that `pid` is alive, since a
  * killed process leaves it behind.
  */
-export async function serveHub({ dir, port = DEFAULT_PORT }) {
-  const started = await listen({ dir, port });
+export async function serveHub({ dir, port = DEFAULT_PORT, workspace }) {
+  const started = await listen({ dir, port, workspace });
   const marker = path.join(dir, 'serve.json');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(marker, `${JSON.stringify({

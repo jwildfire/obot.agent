@@ -60,6 +60,14 @@ no directory listings, no path escapes out of `.claude/session-hub/`, and `no-st
 regenerated view is never cached. `serve.json` is removed on exit; a killed process leaves
 it behind, which is why readers check the pid.
 
+It records one thing besides serving: **when the live view was last actually opened**, so
+surfaces built for @jwildfire's absence can answer *what changed since I last looked*
+without guessing. A 404 is not a surface and a poll is not a look — the rule, what counts
+and why a page must not be able to mark itself as seen are in
+[`tools/ops-dashboard/README.md`](../ops-dashboard/README.md#when-you-last-looked), next to
+the local-only store it writes to. A server pointed at a directory that is not
+`<workspace>/.claude/session-hub` records nothing rather than inventing a workspace.
+
 ## Audit lane (`session-audit.mjs`)
 
 The local half of the roadmap audit's no-token design (@jwildfire, 2026-07-27):

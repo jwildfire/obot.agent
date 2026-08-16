@@ -141,7 +141,7 @@ async function main() {
     // A port collision must not take the watch loop down with it: the live view is
     // still on disk, and file:// still opens it.
     try {
-      ({ url: servedUrl } = await serveHub({ dir: path.dirname(out), port: args.port }));
+      ({ url: servedUrl } = await serveHub({ dir: path.dirname(out), port: args.port, workspace }));
       console.log(`[session-hub] serving ${servedUrl}`);
     } catch (err) {
       console.error(`[session-hub] serve failed (${err.message}) — the file:// view still works`);

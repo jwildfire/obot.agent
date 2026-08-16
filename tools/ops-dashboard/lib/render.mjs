@@ -17,6 +17,22 @@
 import { wakeText, DISMISS_MEANS } from './triage.mjs';
 import { CRITICAL_BUDGET } from './rank.mjs';
 import { parseNavigatorState } from './navigator.mjs';
+import { phrase } from './last-seen.mjs';
+
+/**
+ * The long form of the header's last-look phrase, for the tooltip.
+ *
+ * Degradation is the point of this line, so each state says what it knows and
+ * stops: "first look" is not "nothing changed", and "unknown" gives the reason
+ * rather than a plausible-looking window (jwildfire/obot.roadmap#205).
+ */
+export function lastLookTitle(v) {
+  if (!v || v.state === 'unknown') {
+    return `When you last opened this page is unknown${v?.why ? ` — ${v.why}` : ''}. Nothing is being guessed in its place.`;
+  }
+  if (v.state === 'first') return 'No record of you opening this page before. This is the first look.';
+  return `You last opened this page at ${new Date(v.at).toLocaleString()}. Recorded locally, never published.`;
+}
 
 export const esc = (s = '') => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -124,7 +140,10 @@ const SHELL_CSS = `
   .pill.decision { border-color:var(--good); color:var(--good); }
   header.top .spacer { flex:1; }
   header.top .where { font-size:0.68rem; color:var(--faint); font-family:var(--mono); }
-  @media (max-width:520px) { header.top .where { display:none; } }
+  /* The narrow header drops "local only · HH:MM" but never the last-look phrase:
+     a signal about whether to look that is invisible in his usual window is the
+     same as no signal at all (jwildfire/obot.agent#143). */
+  @media (max-width:520px) { header.top .where .wide { display:none; } }
 
   .tabs { display:flex; gap:0.2rem; }
   .tabs a { font-size:0.75rem; padding:0.15rem 0.6rem; border-radius:99px; text-decoration:none;
@@ -501,7 +520,7 @@ const answersPanel = (answers, deliverer, now) => {
     </div>`;
 };
 
-export function render({ queue, answers = [], deliverer = null, workspace, hub, generated = new Date() }) {
+export function render({ queue, answers = [], deliverer = null, lastLook = null, workspace, hub, generated = new Date() }) {
   const critical = queue.critical ?? [];
   const snoozed = queue.snoozed ?? [];
   const cleared = queue.cleared ?? [];
@@ -550,7 +569,7 @@ export function render({ queue, answers = [], deliverer = null, workspace, hub, 
     <span class="pill config">${counts.config} config</span>
   </span>
   <span class="spacer"></span>
-  <span class="where">local only · ${esc(generated.toTimeString().slice(0, 5))}</span>
+  <span class="where" title="${esc(lastLookTitle(lastLook))}"><span class="wide">local only · ${esc(generated.toTimeString().slice(0, 5))} · </span>${esc(phrase(lastLook))}</span>
 </header>
 
 <div class="cols">

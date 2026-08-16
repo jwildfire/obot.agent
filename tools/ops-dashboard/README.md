@@ -367,12 +367,64 @@ unapplied answer ages loudly rather than silently.
   and supersede pointers move. So "what did he say, and when" survives an agent that
   applies it badly.
 - `cache/` — GitHub sweeps.
+- `last-seen.json` — when he last opened each page. See below.
 - Every file opens with the same local-only sentinel the hub's deploy greps for, so
   if one ever reaches an assembled site the build fails instead of publishing it.
 
 The workspace's `.claude/` is not a git repository, so the containment does not depend
 on a gitignore rule being right — the same reasoning that settled where the blockers
 list lives.
+
+## When you last looked
+
+Every surface built for his absence wants to answer *what changed since I last looked*,
+and nothing recorded when he last looked. The tempting substitutes — the last deploy, the
+newest changelog entry, a fixed 24 hours relabelled — are all worse than no signal, because
+a confidently wrong window actively tells him not to look.
+
+So both servers record one thing where a page is handed over: the last time each surface was
+opened, in `last-seen.json`. One timestamp per surface. No user agent, no referrer, no
+history — the narrowest record that answers the question is the whole design, and this is
+behavioural data about him, under the same rule as the config list.
+
+The hard part is not writing the timestamp, it is refusing to write it. The rule was
+measured against a real Chrome on 127.0.0.1 rather than assumed (2026-08-16):
+
+| what happened | Sec-Fetch-Dest | Sec-Fetch-Mode | Cache-Control | counts? |
+| --- | --- | --- | --- | --- |
+| opened the page | `document` | `navigate` | — | yes |
+| clicked a tab | `document` | `navigate` | — | yes |
+| the page's own meta refresh | `document` | `navigate` | `max-age=0` | no |
+| an iframe loaded | `iframe` | `navigate` | — | no |
+| a `fetch()` poll | `empty` | `cors` | — | no |
+| the favicon | `image` | `no-cors` | — | no |
+| curl, a watcher, a health check | *(none sent)* | *(none)* | — | no |
+
+Two readings of that table matter. A non-browser client sends no `Sec-Fetch-*` headers at
+all, so requiring them excludes every poll by construction rather than by heuristic. And a
+page refreshing itself is header-identical to a person opening it except for `max-age=0` —
+which a manual reload also sends, so both are excluded and a reload does not count as a
+fresh look. That is deliberate: the error is one-directional. An undercounted look shows him
+a longer window and tells him to look again; an overcounted one tells him not to bother, and
+only the second kind can hide something. `_r=auto` on the query is the deterministic escape
+hatch for any page we control that reloads itself.
+
+This mattered immediately: the session tab embeds the live view, which refreshes itself every
+sixty seconds. Under a naive rule a tab left open would mark itself as seen forever with
+nobody in the room — the signal destroyed by the only thing watching it. Verified live rather
+than argued: the tab was left open for eighty seconds, its frame re-requested itself once,
+and the recorded timestamp did not move.
+
+Degradation is the requirement, not a nicety:
+
+- No record renders `first look` — never *nothing changed*.
+- A record that cannot be parsed, a stamp that is not a time, or a clock that moved
+  backwards renders `last opened: unknown`, with the reason in the tooltip.
+- Nothing plausible is ever substituted for something unknown.
+
+The header consumes it (`local only · 10:03 · last opened 5h ago`), which is what keeps it
+honest: a record nobody reads rots quietly. Do not build *what changed since* on top of this
+here — that belongs to whichever surface wants it. ([roadmap #205](https://github.com/jwildfire/obot.roadmap/issues/205), [#143](https://github.com/jwildfire/obot.agent/issues/143))
 
 ## Not in this version
 
