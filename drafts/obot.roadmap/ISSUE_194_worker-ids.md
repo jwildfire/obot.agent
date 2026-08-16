@@ -1,4 +1,4 @@
-<!-- STATUS: Posted to https://github.com/jwildfire/obot.roadmap/issues/194 on 2026-08-16 06:58 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.roadmap/issues/194 on 2026-08-16 06:58 EDT; Tasks section synced 07:22 EDT -->
 <!-- GITHUB_PROPERTIES: Labels: requirement, Milestone: 2026q3, Assignee: @me, Goal: #73 (sub-issue), Related: #184 -->
 
 ### Business Requirement
@@ -99,7 +99,11 @@ The Navigator tab that renders the result is also #184's, and needs no new rende
 
 ### Tasks
 
-- jwildfire/obot.agent — the ledger generalisation, the `worker-id` tool, the sweep wiring, and the spawn conventions.
+- [jwildfire/obot.agent#130](https://github.com/jwildfire/obot.agent/issues/130) — the ledger generalisation, the `worker-id` tool, the sweep wiring, and the spawn conventions. **Done**: delivered in [PR #132](https://github.com/jwildfire/obot.agent/pull/132), merged to `main` on 2026-08-16, shipping in obot.agent v0.5.0.
+
+**Delivered against the design calls:** I1 — name shape `👯🤖 W0042 2026-08-16 slug`, produced by `worker-id name` so the convention cannot drift from the doc. I2 — subagents take `W0042.n`, with the three degradations stated in the spawn skill rather than left to be discovered. I3 — forward-only, and the epoch is stamped in the seed record (armed 2026-08-16 07:07), so what is out of scope is out of scope by record. I4 — the journal is the only source of truth and the roster is rendered on demand, never stored.
+
+**Verified live rather than merely wired:** the launchd Navigator sweep reads the ledger every five minutes, and `navigator-state.md` now carries `worker ledger: ledger clean — 0 id(s) allocated, 0 worker(s) stamped`. The finding path was exercised against the real journal and real epoch and correctly exits 1 on an unstamped worker. The concurrency test was checked for teeth: with the `flock` disabled it fails on three of three runs.
 
 ---
 
