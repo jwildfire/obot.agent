@@ -39,11 +39,61 @@ When in doubt, spawn the sibling.
 this session, no heartbeat needed) or for ultracode/Workflow jobs (`⚡️🤖
 {description}` — tracked separately, 2026-07-12).
 
+**Subagents still get an id, and it is the parent's.** Claim it with
+`worker-id claim --sub $WID --slug <what-it-does>`, which returns `W0042.1` — the hub's
+`D0001.n` shape, for the same reason: it names something that belongs to a parent rather
+than standing on its own. The parent worker is accountable for whatever the subagent
+writes, which is also the rule
+[obot.roadmap#184](https://github.com/jwildfire/obot.roadmap/issues/184) already settled.
+
+**What degrades for subagents — state this rather than let it be discovered later:**
+
+- **No harness job row.** No start or terminal timestamp of their own, so nothing can
+  detect a subagent going terminal and the audit's unstamped-worker check cannot see them
+  at all. The parent's close-out is the only coverage.
+- **The name does not carry it.** `Agent` takes a `description`, not a `-n` name, so unlike
+  a sibling — where the id rides the name for free — a sub-id has to be written into the
+  prompt and the subagent has to be *told* to stamp it. That is an instruction, not a
+  mechanism, and instructions hold less well.
+- **Allocation is voluntary.** Nothing forces the claim. A subagent that writes without a
+  sub-id is attributed to the bare parent id: lossy, but never wrong.
+
+The cost is accepted because the degraded lane is the one barely used — measured zero
+`Task` calls across all 134 transcripts in this workspace, since
+[D0013](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-delegation-lanes/)
+sends anything that leaves an artifact behind to a sibling.
+
 ## Procedure
+
+### 0. Claim the worker's id — before the briefing, before the name
+
+```bash
+WID=$(obot.agent/tools/worker-id claim --slug <slug> --task '<one line: what it will do>')
+```
+
+It prints the bare id (`W0042`) and nothing else, so it is safe to capture. Every worker
+gets one, it is permanent, and it is **never reused** — not when the worker finishes, and
+not when it dies. Two workers died on 2026-08-15; their ids are still theirs, because the
+question worth answering is what each worker did *including the ones that did nothing*, and
+an id freed by death is an id that lies about history.
+
+Why this is step 0 rather than a detail: every agent write — issue, PR, comment, commit —
+is authored by `obotclaw[bot]`, and GitHub has no field that separates one agent from
+another. The id is the only thing that can, and only if it is applied **at the moment of
+writing**. Nothing recovers it afterwards: the harness job ledger's `children` field was
+empty for 46% of jobs, and a transcript rescan cannot tell reading a reference from writing
+one (one job's transcript carried 87 references and 2 real create calls).
+
+`worker-id --audit` reports a worker that spawned without an id as a **finding**, and the
+Navigator sweep surfaces it every five minutes. That check exists because the alternative —
+this convention shipping and quietly never being used — would be indistinguishable from it
+working. ([obot.roadmap#194](https://github.com/jwildfire/obot.roadmap/issues/194))
 
 ### 1. Write the briefing
 
 Fill in [`templates/sibling-briefing.md`](../../templates/sibling-briefing.md).
+Put the id from step 0 into every `{W-id}` placeholder — the template's
+`## Your identity` block tells the sibling what its id is and where to stamp it.
 The `## Context` block is the only part composed per spawn — cwd and key paths
 already touched, findings/decisions/constraints established here, recent errors
 or state worth knowing, what has already been tried and ruled out. One line each,
@@ -100,9 +150,22 @@ than defaulting to your own settings:
   choice and why in your reply (allocation grant, 2026-07-11).
 - **Effort** (`--effort`): inherit by default; raise it for hard verification or
   judgment work, lower it for mechanical tasks.
-- **Name** (`-n`): `👯🤖 {YYYY-MM-DD} {slug}` per the workspace naming
-  convention; siblings are **green** (a background session sets `color` in its
-  own `~/.claude/jobs/{id}/state.json`).
+- **Name** (`-n`): `👯🤖 W0042 2026-08-16 {slug}`, built by the tool so the shape cannot
+  drift from this document:
+
+  ```bash
+  NAME=$(obot.agent/tools/worker-id name "$WID" <slug>)
+  ```
+
+  The id goes **first**, right after the tag: it is the field that has to survive
+  truncation in a narrow `claude agents` row, and because the counter is monotonic,
+  sorting by id sorts chronologically anyway. The date stays because an id makes a name
+  unique but not *readable* — `W0042` carries no recency, and last week's workers sit in
+  the same list as tonight's. Prime can address a worker by the bare id, which is
+  unambiguous across every worker that will ever exist.
+
+  Siblings are **green** (a background session sets `color` in its own
+  `~/.claude/jobs/{id}/state.json`).
 - **Permission mode**: siblings always spawn in auto mode — pass
   `--permission-mode auto` explicitly rather than relying on inheritance.
 - **Remote Control**: background siblings spawn **unbridged** — pass
@@ -127,9 +190,14 @@ than defaulting to your own settings:
 ### 4. Run it
 
 ```bash
-claude --bg --permission-mode auto --settings '{"remoteControlAtStartup": false}' \
-  --model <model> -n "👯🤖 <date> <slug>" "<briefing>\n\n---\n\nTASK: $ARGUMENTS"
+OBOT_WORKER_ID="$WID" claude --bg --permission-mode auto \
+  --settings '{"remoteControlAtStartup": false}' \
+  --model <model> -n "$NAME" "<briefing>\n\n---\n\nTASK: $ARGUMENTS"
 ```
+
+`OBOT_WORKER_ID` is inherited by the sibling, so everything built on the shared ledger —
+`tools/blocker-log`, and anything else that records an actor — stamps that worker without
+it having to remember.
 
 (add `--effort <level>` when deviating from the default; on the opt-in lane
 above, swap the `--settings` argument for `--remote-control`)
@@ -142,7 +210,7 @@ append in one Bash call (`&&`-chained, or the spawn backgrounded and the append
 after it), with the lead's own tag and a shelled timestamp:
 
 ```
-- $(date +%H:%M) 😺🤖 lead — spawned 👯🤖 {slug}: {task}
+- $(date +%H:%M) 😺🤖 lead — spawned 👯🤖 {W-id} {slug}: {task}
 ```
 
 (the insert-under-the-heading command is the one in

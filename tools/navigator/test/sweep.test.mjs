@@ -189,3 +189,45 @@ test('renderState: a note is kept under a clean verdict, not dropped', () => {
   assert.match(md, /config ledger: ledger clean - 11 id\(s\) allocated, 11 present/)
   assert.match(md, /note - blockers\.md changed outside this tool/)
 })
+
+// The worker ledger, carried by the same sweep (#130). Rendering is what is pinned
+// here; the reading itself is `worker-id --audit`, tested against the tool in
+// worker-id.test.mjs beside this file.
+test('renderState: a clean worker ledger is reported in one line, and reported at all', () => {
+  const md = renderState({
+    snapshot: {}, events: [], meta,
+    workers: { ok: true, summary: 'ledger clean — 4 id(s) allocated, 4 worker(s) stamped', detail: [] },
+  })
+  assert.match(md, /worker ledger: ledger clean — 4 id\(s\) allocated, 4 worker\(s\) stamped/)
+  assert.doesNotMatch(md, /WORKER LEDGER FINDING/)
+})
+
+test('renderState: an unstamped worker is shouted, and brings its instruction with it', () => {
+  const md = renderState({
+    snapshot: {}, events: [], meta,
+    workers: {
+      ok: false,
+      summary: 'WORKER LEDGER - 1 unstamped worker(s) ran with no id: 👯🤖 2026-08-16 someslug',
+      detail: ['Claim one with `worker-id claim --slug <slug>` BEFORE the spawn.'],
+    },
+  })
+  assert.match(md, /\*\*WORKER LEDGER FINDING\*\* — WORKER LEDGER - 1 unstamped worker\(s\)/)
+  // The finding has to carry the fix. A sweep line that only says something is
+  // wrong makes the next agent go and rediscover what to do about it.
+  assert.match(md, /Claim one with `worker-id claim --slug <slug>` BEFORE the spawn/)
+})
+
+test('renderState: no worker reading renders nothing rather than a false all-clear', () => {
+  const md = renderState({ snapshot: {}, events: [], meta })
+  assert.doesNotMatch(md, /worker ledger/)
+})
+
+test('renderState: the two ledgers are independent — one silent does not silence the other', () => {
+  const md = renderState({
+    snapshot: {}, events: [], meta,
+    ledger: { ok: true, summary: 'ledger clean - 13 id(s) allocated, 13 present', detail: [] },
+    workers: { ok: false, summary: 'WORKER LEDGER - 2 unstamped worker(s) ran with no id', detail: [] },
+  })
+  assert.match(md, /config ledger: ledger clean/)
+  assert.match(md, /\*\*WORKER LEDGER FINDING\*\*/)
+})

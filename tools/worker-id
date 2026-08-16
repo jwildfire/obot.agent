@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""worker-id - allocate and audit the permanent W0001 identity every worker carries.
+
+@jwildfire asked for this in one line on 2026-08-16: "I also want each worker to
+get a unique ID moving forward W000x". He asked because every agent write is
+authored by `obotclaw[bot]` and nothing can say which of the 33 workers that ran
+in a night created which issue.
+
+    worker-id init                                 arm the ledger, stamping the epoch
+    worker-id claim --slug <slug> [--task '<what it is doing>']
+    worker-id claim --sub W0042 --slug <slug>     a subagent, under its parent
+    worker-id name W0042 <slug> [--tag 🦾🤖]      the spawn name, one definition
+    worker-id list                                 the roster, rendered from the journal
+    worker-id --audit                              read-only; exit 1 on a finding
+
+`claim` prints the bare id and nothing else, because it is consumed as
+`WID=$(worker-id claim --slug foo)` and a stray word would end up inside a session
+name. Everything conversational goes to stderr.
+
+The spawn, end to end:
+
+    WID=$(obot.agent/tools/worker-id claim --slug workerids --task 'W-id identity')
+    claude --bg --permission-mode auto \
+      -n "$(obot.agent/tools/worker-id name "$WID" workerids)" ...
+
+THE AUDIT'S EXIT CODE IS THE VERDICT - 0 when the ledger and reality agree, 1 on a
+finding - the same contract every `Verify:` line on the config list follows, so
+the Navigator sweep can act on it without parsing prose. The verdict is the FIRST
+line of output: callers summarise by first line, and when the config ledger
+printed its notes first the verdict vanished from nearly every sweep while looking
+perfectly healthy (obot.agent#129).
+
+The mechanism - the lock, the append-only journal, the high-water arithmetic -
+is shared with the config list's ledger in `lib/id_ledger.py` rather than written
+again here. The failures it prevents were found the hard way once
+(obot.agent#126) and a second implementation would be the likeliest place for
+them to return.
+
+Implements jwildfire/obot.roadmap#194; prerequisite for #184's closeout check.
+"""
+
+import os
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+
+from worker_ledger import (WORKER_TAGS, audit, claim, display_name,  # noqa: E402
+                           ensure_seeded, epoch, findings, is_worker, journal_for,
+                           read_jobs, report, roster)
+from id_ledger import locked, read_journal  # noqa: E402
+
+WS = pathlib.Path(os.environ.get("OBOT_WORKSPACE") or (pathlib.Path.home() / "Documents/obot2"))
+JOBS = pathlib.Path(os.environ.get("OBOT_JOBS_DIR") or (pathlib.Path.home() / ".claude/jobs"))
+
+
+def usage(code=0):
+    print(__doc__.strip(), file=sys.stderr if code else sys.stdout)
+    sys.exit(code)
+
+
+def flags(argv, allowed):
+    out, rest = {}, []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--"):
+            key = a[2:]
+            if key not in allowed:
+                print("worker-id: unknown argument: %s" % a, file=sys.stderr)
+                sys.exit(1)
+            if i + 1 >= len(argv):
+                print("worker-id: %s needs a value" % a, file=sys.stderr)
+                sys.exit(1)
+            out[key] = argv[i + 1]
+            i += 2
+        else:
+            rest.append(a)
+            i += 1
+    return out, rest
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        usage(0 if argv else 1)
+    cmd, argv = argv[0], argv[1:]
+    jp = journal_for(WS)
+
+    if cmd == "claim":
+        f, _ = flags(argv, {"slug", "task", "sub"})
+        if not f.get("slug"):
+            print("worker-id: claim needs --slug (the short name the worker is known by)",
+                  file=sys.stderr)
+            return 1
+        wid = claim(jp, f["slug"], f.get("task"), f.get("sub"))
+        print(wid)  # stdout: the id, alone, for $(...)
+        print("worker-id: claimed %s for %s — put it in the session name: %s"
+              % (wid, f["slug"], display_name(wid, f["slug"])), file=sys.stderr)
+        return 0
+
+    if cmd == "name":
+        f, rest = flags(argv, {"tag"})
+        if len(rest) != 2:
+            print("worker-id: name needs an id and a slug, e.g. `worker-id name W0042 workerids`",
+                  file=sys.stderr)
+            return 1
+        print(display_name(rest[0], rest[1], f.get("tag") or WORKER_TAGS[0]))
+        return 0
+
+    if cmd == "list":
+        records = read_journal(jp)
+        if not records:
+            print("worker-id: no worker ledger at %s yet — the first claim creates one." % jp)
+            return 0
+        rows = roster(records, read_jobs(JOBS))
+        print("\n".join(rows) if rows else "worker-id: no ids claimed yet.")
+        return 0
+
+    if cmd == "init":
+        # Arming is its own step so the ledger exists - and the epoch is stamped -
+        # from the moment this lands, rather than from whenever somebody first
+        # remembers to claim. Until a ledger exists the audit has no epoch, and
+        # without an epoch it cannot tell "nobody has adopted this yet" from
+        # "everybody is ignoring it".
+        with locked(jp):
+            existing = read_journal(jp)
+            if existing:
+                print("worker-id: ledger already armed at %s (epoch %s)"
+                      % (jp, epoch(existing).isoformat(timespec="seconds") if epoch(existing) else "?"))
+                return 0
+            ensure_seeded(jp)
+        print("worker-id: ledger armed at %s — every worker spawned from now on needs an id." % jp)
+        return 0
+
+    if cmd == "--audit":
+        # Read-only on purpose: the Navigator sweep runs this every five minutes
+        # and a detector that mutates what it observes is not a detector.
+        records = read_journal(jp)
+        if not records:
+            # NOT the same as clean, and it must never read that way. A tool that
+            # is installed, wired into the sweep and never called would otherwise
+            # report "nothing to check" forever - success indistinguishable from a
+            # capability nobody uses, which is the failure this whole check exists
+            # to catch. If workers are running while no ledger exists, none of them
+            # can ever be attributed to what they wrote, so that is a finding.
+            running = [j for j in read_jobs(JOBS) if is_worker(j)]
+            print("worker-id: NOT ARMED — no worker ledger at %s%s.\n"
+                  "  Nothing written by any worker can be attributed until one exists.\n"
+                  "  Arm it with `worker-id init`."
+                  % (jp, " while %d worker(s) have run" % len(running) if running else ""))
+            return 1 if running else 0
+        a = audit(records, read_jobs(JOBS))
+        if not findings(a):
+            print("worker-id: ledger clean — %d id(s) allocated, %d worker(s) stamped"
+                  % (a["allocated"], a["stamped"]))
+        for line in report(a):
+            print(line)
+        return 1 if findings(a) else 0
+
+    print("worker-id: unknown command: %s" % cmd, file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

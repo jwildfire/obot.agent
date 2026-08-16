@@ -275,7 +275,7 @@ Off the critical path; do these once the list is in @jwildfire's hands.
 
 - **Naming and colour** — sessions are `😺🤖 {YYYY-MM-DD} {session # (only if
   > 1 that day)}`; the lead is **orange**, siblings **green** and tagged
-  `👯🤖 {date} {slug}`; ultracode jobs are `⚡️🤖 {description}`, no date.
+  `👯🤖 {W-id} {date} {slug}`; ultracode jobs are `⚡️🤖 {description}`, no date and no id.
   Interactive sessions set these with `/name` and `/color`, which the model
   **cannot run** — remind @jwildfire once. A background session sets `name` and
   `color` directly in its own `~/.claude/jobs/{id}/state.json`.
@@ -320,7 +320,7 @@ autonomous dev session** at autonomy level **A1**
 init, then select-and-proceed instead of present-and-stop. Launched via
 [`scripts/obot-auto`](../../scripts/obot-auto), which owns the fail-fast
 pre-flight (halt file, goal active, obotclaw token mintable, no concurrent
-autonomous session). Identity: `🦾🤖 {YYYY-MM-DD} {slug}`, color `purple`, set
+autonomous session). Identity: `🦾🤖 {W-id} {YYYY-MM-DD} {slug}`, color `purple`, set
 in the job's own `state.json` (see
 [Housekeeping](#housekeeping--after-the-first-paint), otherwise unchanged).
 

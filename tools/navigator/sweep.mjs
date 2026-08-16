@@ -104,7 +104,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   const head = meta.ok
     ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · ok — ${meta.repoCount} repos, ${Object.keys(snapshot).length} RCs`
@@ -126,6 +126,16 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   if (ledger) {
     lines.push(ledger.ok ? `config ledger: ${ledger.summary}` : `**CONFIG LEDGER GAP** — ${ledger.summary}`)
     for (const d of ledger.detail || []) lines.push(`  ${d}`)
+    lines.push('')
+  }
+  // The worker ledger (#130). Same discipline, different question: not "did the
+  // record lose something" but "is anything writing to the record at all". A
+  // worker that spawned with no id can never be attributed to what it wrote, and
+  // since every agent write is authored by the same bot identity, an unattributed
+  // worker is unattributable forever — there is no second chance to recover it.
+  if (workers) {
+    lines.push(workers.ok ? `worker ledger: ${workers.summary}` : `**WORKER LEDGER FINDING** — ${workers.summary}`)
+    for (const d of workers.detail || []) lines.push(`  ${d}`)
     lines.push('')
   }
   lines.push(
@@ -164,25 +174,36 @@ const nowStamp = () => {
 }
 const excerpt = body => (body || '').replace(/\s+/g, ' ').trim().slice(0, 180)
 
-// One reading of the config list's ledger, straight from the capture tool.
+// One reading of a local ledger, straight from the tool that owns it.
 //
-// Shelled rather than reimplemented here on purpose: `blocker-log --audit` already
-// owns this comparison, it is read-only, and its exit code is the verdict (0 agree,
-// 1 an allocated id has no entry). A second implementation in JS would be one more
-// thing to drift, which is the class of bug this whole capability exists to close.
-function auditLedger() {
-  const bin = join(REPO_ROOT, 'tools', 'blocker-log')
-  const r = spawnSync(bin, ['--audit'], {
+// Shelled rather than reimplemented here on purpose: each tool's `--audit` already
+// owns its comparison, it is read-only, and its exit code is the verdict (0 agree,
+// 1 a finding). A second implementation in JS would be one more thing to drift,
+// which is the class of bug this whole capability exists to close.
+//
+// Both tools print their verdict first and their notes after, so the first line is
+// the headline either way and everything below it is context worth keeping — the
+// note that a file was edited outside its tool is what dates a gap when one appears.
+function shellAudit(tool) {
+  const r = spawnSync(join(REPO_ROOT, 'tools', tool), ['--audit'], {
     env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 20000,
   })
   if (r.error || r.status === null) return null
+  const strip = l => l.replace(new RegExp(`^${tool}: `), '')
   const out = `${r.stdout || ''}${r.stderr || ''}`.trim().split('\n').filter(Boolean)
-  const ok = r.status === 0
-  // The tool prints its verdict first and its notes after, so the first line is the
-  // headline either way and everything below it is context worth keeping — a note
-  // that the file was edited outside the tool is what dates a gap when one appears.
-  return { ok, summary: (out[0] || 'no reading').replace(/^blocker-log: /, ''), detail: out.slice(1).map(l => l.replace(/^blocker-log: /, '')) }
+  return { ok: r.status === 0, summary: strip(out[0] || 'no reading'), detail: out.slice(1).map(strip) }
 }
+
+// The config list: is an id allocated with no entry behind it? (obot.agent#126)
+const auditLedger = () => shellAudit('blocker-log')
+
+// The worker ledger: is the W-id convention actually being applied? (#130)
+//
+// This is the one that would otherwise be invisible. The other checks ask whether
+// the ledger is internally sound; this one asks whether any worker is using it —
+// a capability that ships, gets wired in, reports success every run and is never
+// called by a spawn looks exactly like one that works.
+const auditWorkers = () => shellAudit('worker-id')
 
 function fetchRC(repo, pr) {
   const detail = JSON.parse(gh(['pr', 'view', String(pr.number), '-R', repo, '--json', 'reviews,comments,reviewDecision']))
@@ -209,6 +230,7 @@ function log(msg) {
 
 const safePending = () => { try { return pendingAnswers(WS, { hub: HUB }) } catch { return [] } }
 const safeLedger = () => { try { return auditLedger() } catch { return null } }
+const safeWorkers = () => { try { return auditWorkers() } catch { return null } }
 
 function main() {
   const sweptAt = nowStamp()
@@ -223,7 +245,7 @@ function main() {
     // A sweep that cannot read the policy still reports his answers: they come
     // from the local store, and a failed RC sweep is no reason to imply there is
     // nothing waiting on an agent.
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers() }))
     log(`FAILED policy.json: ${e.message}`)
     process.exit(0)
   }
@@ -279,15 +301,17 @@ function main() {
   // store must not: this is an extra pair of eyes, never a precondition.
   let ledger = null
   try { ledger = auditLedger() } catch (e) { errors.push(`ledger: ${String(e.message).slice(0, 120)}`) }
+  let workers = null
+  try { workers = auditWorkers() } catch (e) { errors.push(`workers: ${String(e.message).slice(0, 120)}`) }
 
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers }))
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over)${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()

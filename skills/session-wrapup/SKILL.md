@@ -168,7 +168,7 @@ writes memory.
 
 The **first output of the wrapup**, before any reading beyond today's scratchpad:
 one line confirming the wrapup started, naming the sibling
-`👯🤖 {date} wrapup-verify` and what it is checking, and saying the draft is next.
+`👯🤖 {W-id} {date} wrapup-verify` and what it is checking, and saying the draft is next.
 Then spawn it and move straight on to step 1 — never wait on it.
 
 Brief the sibling from

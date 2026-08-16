@@ -34,6 +34,14 @@ It answers the three questions the file cannot answer about itself:
     can two writers collide        -> no, the read-modify-write is inside the lock
     has an entry gone missing      -> allocated minus present, said out loud
 
+That mechanism now lives in `id_ledger.py`, shared with the worker ids
+(obot.agent#130), because the incidents it prevents are worth preventing once.
+What stays HERE is everything specific to this list: what an entry looks like on
+the page, how a list that predates the journal is adopted, and what counts as a
+finding. The worker ledger's audit compares the journal against the harness's job
+records; this one compares it against a markdown file a human edits by hand. Only
+the mechanism is common.
+
 Prevention stops at the tool's edge. An agent editing `blockers.md` with ordinary
 file tools bypasses the lock entirely and nothing here can stop that - so every
 record carries the file's digest, and a change made outside the tool is noticed
@@ -44,15 +52,15 @@ Nothing in this module ever deletes or restores an entry. Re-adding something th
 list lost is @jwildfire's call, not an agent's.
 """
 
-import contextlib
-import datetime
-import fcntl
-import hashlib
-import json
-import os
-import platform
 import re
 import sys
+
+from id_ledger import (Scheme, actor, allocated as _allocated, append_journal,  # noqa: F401
+                       high_water as _high_water, journal_path, locked,
+                       next_id as _next_id, now, read_journal, sha)
+
+# The config-item family: `c0001`, four digits, owned by tools/blocker-log.
+CONFIG = Scheme("c", 4, "blocker-log")
 
 # An id identifies an entry only when it opens one. Everything else on the page -
 # a cross-reference, a plan, a note - is prose, and prose has no vote.
@@ -62,113 +70,18 @@ ENTRY_ID_RE = re.compile(r"^-\s+\[[ xX]\]\s*(c\d{4})\b", re.M)
 ANY_ID_RE = re.compile(r"\bc(\d{4})\b", re.I)
 
 
-def now():
-    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def sha(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
 def entry_ids(text):
     """The ids that identify entries, open or resolved."""
     return {m.group(1).lower() for m in ENTRY_ID_RE.finditer(text)}
 
 
-def actor():
-    """Who is writing. Names the session where one is available.
-
-    This is the field that turns "two ids vanished" into "this session did it".
-    Reconstructing the 2026-08-15 incident took a scan of every transcript in the
-    workspace; the journal would have answered it in one line.
-    """
-    a = os.environ.get("OBOT_ACTOR", "").strip()
-    if a:
-        return a
-    jd = os.environ.get("CLAUDE_JOB_DIR", "").strip()
-    if jd:
-        return "session:" + os.path.basename(jd.rstrip("/"))
-    return "%s@%s" % (os.environ.get("USER", "?"), platform.node().split(".")[0])
-
-
-def journal_path(md_path):
-    return md_path.parent / (md_path.stem + ".journal")
-
-
-@contextlib.contextmanager
-def locked(md_path):
-    """Hold the list exclusively for a whole read-modify-write.
-
-    The lock is a separate file, so taking it never touches the list itself and a
-    crashed holder leaves nothing to clean up - the kernel drops the flock when
-    the process dies.
-    """
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(md_path.parent / (md_path.stem + ".lock")),
-                 os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
-
-
-def read_journal(jp):
-    if not jp.exists():
-        return []
-    out = []
-    for line in jp.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
-            # A damaged line loses its own record and nothing else. Refusing to
-            # run because the history is imperfect would be the wrong trade for a
-            # tool whose job is to keep capture cheap.
-            continue
-    return out
-
-
-def append_journal(jp, record):
-    """Append one record. The journal only ever grows.
-
-    O_APPEND rather than read-modify-write, so even a writer that somehow escaped
-    the lock cannot overwrite a line that is already there.
-    """
-    jp.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n"
-    fd = os.open(str(jp), os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
-    try:
-        os.write(fd, line.encode("utf-8"))
-    finally:
-        os.close(fd)
-
-
 def allocated(records):
     """Every id the ledger has ever handed out, including ones since deleted."""
-    ids = set()
-    for r in records:
-        if r.get("op") == "seed":
-            ids.update(str(x).lower() for x in r.get("known", []))
-        elif r.get("id"):
-            ids.add(str(r["id"]).lower())
-    return ids
+    return _allocated(CONFIG, records)
 
 
 def high_water(records):
-    h = 0
-    for r in records:
-        if r.get("op") == "seed":
-            h = max(h, int(r.get("high", 0)))
-        m = re.fullmatch(r"c(\d{4})", str(r.get("id", "")), re.I)
-        if m:
-            h = max(h, int(m.group(1)))
-    return h
+    return _high_water(CONFIG, records)
 
 
 def seed_record(text):
@@ -188,7 +101,7 @@ def seed_record(text):
     # they are RECORDED and not alarmed on. Without this the adoption would quietly
     # normalise a gap and the next person to notice it would start the same
     # investigation from nothing, which is exactly how this began.
-    unaccounted = ["c%04d" % n for n in range(1, high + 1) if "c%04d" % n not in known]
+    unaccounted = [CONFIG.fmt(n) for n in range(1, high + 1) if CONFIG.fmt(n) not in known]
     return {
         "ts": now(), "op": "seed", "actor": actor(),
         "high": high,
@@ -222,11 +135,7 @@ def next_id(text, records):
     body prose, which is the whole point (obot.agent#126). Headlines still count so
     that an entry somebody added by hand is respected rather than overwritten.
     """
-    n = max(
-        high_water(records),
-        max((int(i[1:]) for i in entry_ids(text)), default=0),
-    )
-    return "c%04d" % (n + 1)
+    return _next_id(CONFIG, records, floor=max((int(i[1:]) for i in entry_ids(text)), default=0))
 
 
 def audit(text, records):

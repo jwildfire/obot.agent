@@ -80,7 +80,7 @@ immediately and mention the checkbox lane as an alternative.
 ### 3. Spawn the reviewer
 
 Follow the [`session-spawn`](../session-spawn/SKILL.md) contract in full — auto
-permission mode, `👯🤖 {date} {slug}` naming, green colour, the scratchpad
+permission mode, `👯🤖 {W-id} {date} {slug}` naming, green colour, the scratchpad
 heartbeat — with one deliberate deviation: **the reviewer is the named opt-in to
 Remote Control.** Background siblings spawn unbridged since 2026-08-15, but this one
 is a session @jwildfire converses with, so it keeps `--remote-control` (in place of
