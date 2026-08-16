@@ -11,24 +11,48 @@ import {
   classifyIssue, classifyPRLane, windowCounts, readDecisions, refreshMetrics, WINDOWS,
 } from '../metrics.mjs'
 
-test('classifyIssue: first matching label names the class; bare issues are tasks', () => {
-  assert.equal(classifyIssue({ labels: [{ name: 'goal' }] }), 'goal')
-  assert.equal(classifyIssue({ labels: ['requirement', 'infrastructure'] }), 'requirement')
+const HUB = 'jwildfire/obot.roadmap'
+
+test('classifyIssue: labels name the class; the hub keeps its planning taxonomy', () => {
+  assert.equal(classifyIssue({ labels: [{ name: 'goal' }] }, HUB), 'goal')
+  assert.equal(classifyIssue({ labels: ['requirement', 'infrastructure'] }, HUB), 'requirement')
   // A requirement that is also labelled bug is a requirement — order matters.
-  assert.equal(classifyIssue({ labels: ['requirement', 'bug'] }), 'requirement')
-  assert.equal(classifyIssue({ labels: ['bug'] }), 'bug')
-  assert.equal(classifyIssue({ labels: [], type: { name: 'Bug' } }), 'bug')
-  assert.equal(classifyIssue({ labels: ['enhancement'] }), 'task')
-  assert.equal(classifyIssue({}), 'task')
+  assert.equal(classifyIssue({ labels: ['requirement', 'bug'] }, HUB), 'requirement')
+  assert.equal(classifyIssue({ labels: ['bug'] }, 'jwildfire/safety.viz'), 'bug')
+  assert.equal(classifyIssue({ labels: ['audit-decision'] }, HUB), 'audit')
+  // A bare hub issue with a parent is somebody's task; with neither it is honestly
+  // unclassified — a data-quality figure, not something to hide inside "task".
+  assert.equal(classifyIssue({ labels: [], parent_issue_url: 'https://api.github.com/x' }, HUB), 'task')
+  assert.equal(classifyIssue({ labels: [] }, HUB), 'unclassified')
+  // Implementation repos: everything that is not a bug is ordinary work.
+  assert.equal(classifyIssue({ labels: ['enhancement'] }, 'jwildfire/safety.viz'), 'task')
+  assert.equal(classifyIssue({}, 'jwildfire/gsm.safety'), 'task')
 })
 
-test('classifyPRLane: release-role base is a release candidate, by role not name', () => {
-  assert.equal(classifyPRLane({ base: { ref: 'main' } }, ['main']), 'release-candidate')
-  assert.equal(classifyPRLane({ baseRefName: 'stable' }, ['stable']), 'release-candidate')
-  // gsm.safety's lane: dev is integration, so a PR into dev is standard work.
-  assert.equal(classifyPRLane({ base: { ref: 'dev' } }, ['main']), 'standard')
+test('classifyPRLane: release-role base, guarded by the branch-model epoch', () => {
+  const gs = { release: ['main'], integration: 'dev', epoch: '2026-07-29' }
+  assert.equal(classifyPRLane({ base: { ref: 'main' }, created_at: '2026-08-15T10:00:00Z' }, gs), 'release-candidate')
+  // gsm.safety's nine early PRs into main predate its branch model — ordinary work.
+  assert.equal(classifyPRLane({ base: { ref: 'main' }, created_at: '2026-06-01T10:00:00Z' }, gs), 'standard')
+  // …unless the title says RC outright.
+  assert.equal(classifyPRLane({ base: { ref: 'main' }, created_at: '2026-06-01T10:00:00Z', title: 'gsm.safety v0.9.0-RC1' }, gs), 'release-candidate')
+  assert.equal(classifyPRLane({ base: { ref: 'dev' } }, gs), 'standard')
+  // A PR into neither lane is stacked feature-branch work — its own bucket.
+  assert.equal(classifyPRLane({ base: { ref: 'participant-profile' } }, gs), 'stacked')
   // The hub has no release branch at all — nothing there is an RC.
-  assert.equal(classifyPRLane({ base: { ref: 'main' } }, []), 'standard')
+  assert.equal(classifyPRLane({ base: { ref: 'main' } }, { release: [], integration: 'main' }), 'standard')
+  // No context at all degrades to standard, never to a guess.
+  assert.equal(classifyPRLane({ base: { ref: 'main' } }), 'standard')
+})
+
+test('windowCounts: day grain counts whole calendar days for dated-only series', () => {
+  const now = new Date('2026-08-16T22:00:00Z')
+  const c = windowCounts([
+    { date: '2026-08-16' }, // today → every window
+    { date: '2026-08-15' }, // 1 day ago → 3d and up
+    { date: '2026-08-14' }, // 2 days ago → 3d and up
+  ], now, (d) => d.date, { grain: 'day' })
+  assert.deepEqual(c, { 1: 1, 3: 3, 7: 3, 30: 3, 365: 3 })
 })
 
 test('windowCounts: windows are inclusive, move with now, and ignore unparseable dates', () => {

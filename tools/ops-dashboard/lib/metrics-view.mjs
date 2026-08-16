@@ -40,18 +40,24 @@ export function buildMetricsModel(cache, now = new Date()) {
   const releases = cache.releases ?? [];
   const filed = cache.decisions?.filed ?? [];
   const decided = cache.decisions?.decided ?? [];
-  const cls = (c) => issues.filter((i) => i.cls === c);
+  const cls = (...cs) => issues.filter((i) => cs.includes(i.cls));
   const lane = (l) => prs.filter((p) => p.lane === l);
+  const day = { grain: 'day' };
   const rows = [
     { group: 'Issues opened', label: 'requirements', counts: windowCounts(cls('requirement'), now) },
     { group: 'Issues opened', label: 'goals', counts: windowCounts(cls('goal'), now) },
     { group: 'Issues opened', label: 'bugs', counts: windowCounts(cls('bug'), now) },
-    { group: 'Issues opened', label: 'tasks & other', counts: windowCounts(cls('task'), now) },
+    { group: 'Issues opened', label: 'tasks & audit trails', counts: windowCounts(cls('task', 'audit'), now) },
+    // Hub issues with no class and no parent — mostly asks filed before the
+    // requirement discipline. A data-quality figure: the trend toward zero is
+    // the discipline working, and hiding these inside "tasks" would erase it.
+    { group: 'Issues opened', label: 'no class yet (hub)', counts: windowCounts(cls('unclassified'), now), muted: true },
     { group: 'PRs opened', label: 'release candidates', counts: windowCounts(lane('release-candidate'), now) },
     { group: 'PRs opened', label: 'standard lane', counts: windowCounts(lane('standard'), now) },
+    { group: 'PRs opened', label: 'stacked (feature branch)', counts: windowCounts(lane('stacked'), now), muted: true },
     { group: 'Shipped', label: 'releases published', counts: windowCounts(releases, now, (r) => r.publishedAt), items: releases },
-    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date), epoch: filed.map((d) => d.date).sort()[0] ?? null },
-    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date), epoch: decided.map((d) => d.date).sort()[0] ?? null },
+    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date, day), epoch: filed.map((d) => d.date).sort()[0] ?? null },
+    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date, day), epoch: decided.map((d) => d.date).sort()[0] ?? null },
   ];
   return {
     ageMin,
@@ -82,7 +88,7 @@ export function metricsHtml(model, { hubUrl = 'https://jwildfire.github.io/obot.
     const label = r.items
       ? `<details><summary>${esc(r.label)}</summary><ul class="mrel">${releaseList(r.items)}</ul></details>`
       : esc(r.label);
-    return `${groupCell}<tr><td class="mlabel">${label}</td>${WINDOWS.map((w) => `<td class="mcell">${num(r.counts[w])}</td>`).join('')}</tr>`;
+    return `${groupCell}<tr${r.muted ? ' class="mmuted"' : ''}><td class="mlabel">${label}</td>${WINDOWS.map((w) => `<td class="mcell">${num(r.counts[w])}</td>`).join('')}</tr>`;
   }).join('\n');
   const decidedEpoch = model.rows.find((r) => r.label === 'decided by him')?.epoch;
   const filedEpoch = model.rows.find((r) => r.label === 'filed for him')?.epoch;
@@ -102,7 +108,7 @@ ${staleLine}
 ${body}
 </tbody>
 </table></div>
-<p class="mepoch">History starts when measurement did: the repos moved under this account on ${HISTORY_EPOCH}, so the 365-day column is the programme's whole life, not a year. Decisions have been filed since ${esc(filedEpoch ?? 'n/a')} and recorded decided since ${esc(decidedEpoch ?? 'n/a')}.</p>
+<p class="mepoch">History starts when measurement did: the oldest issue here is ${HISTORY_EPOCH} and five of the seven repos begin with the 2026-07-02 consolidation, so the 365-day column is all time, not a year. Issue classes are derived from labels (GitHub has no type field on these repos). Decisions count recorded decision entries — one artifact may carry several — on calendar days, filed since ${esc(filedEpoch ?? 'n/a')}, decided since ${esc(decidedEpoch ?? 'n/a')}.</p>
 ${gaps.length ? `<p class="mgap">Known gaps: ${gaps.map(esc).join(' · ')}.</p>` : ''}`;
 }
 
@@ -114,7 +120,7 @@ const BADGES = {
   'decision-change': ['DECISION', 'b-review'],
   'comments-new': ['COMMENTS', 'b-quiet'],
   'rc-gone': ['RC CLOSED', 'b-done'],
-  answer: ['HIS ANSWER', 'b-answer'],
+  'answer-new': ['HIS ANSWER', 'b-answer'],
 };
 
 const cleanLine = (line = '') => line
@@ -180,6 +186,7 @@ export const METRICS_CSS = `
   table.metrics .m0 { color:var(--faint); opacity:0.6; }
   table.metrics tr.mgroup td { border-top:0; padding-top:0.6rem; font-size:0.66rem;
                                letter-spacing:0.11em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+  table.metrics tr.mmuted td { color:var(--muted); }
   table.metrics td.mlabel { color:var(--ink); overflow-wrap:anywhere; }
   table.metrics td.mlabel details summary { cursor:pointer; }
   .mrel { list-style:none; margin:0.2rem 0 0.3rem; padding:0; font-size:0.72rem; color:var(--muted); }

@@ -25,47 +25,104 @@ import { join } from 'node:path'
 
 export const WINDOWS = [1, 3, 7, 30, 365]
 
-// Where measured history actually begins. The repos moved under the `jwildfire`
-// account on 2026-07-02; their earlier life is in other orgs under other issue
-// numbers, so a 365-day column here is the programme's whole life, not a year.
-export const HISTORY_EPOCH = '2026-07-02'
+// Where measured history actually begins. The oldest issue in these repos is
+// 2026-05-09 (gsm.safety); five of the seven begin with the 2026-07-02 move under
+// the `jwildfire` account, and anything earlier lives in other orgs under other
+// issue numbers. A 365-day column here is the programme's whole life, not a year.
+export const HISTORY_EPOCH = '2026-05-09'
+export const CONSOLIDATION = '2026-07-02'
 
-// Issue classes, from the labels the repos actually use. An issue matching none of
-// these is ordinary work — a task — not an error. Order matters: the first match
-// names the class, and a requirement that is also labelled bug is a requirement.
-const ISSUE_CLASSES = [
-  ['goal', 'goal'],
-  ['requirement', 'requirement'],
-  ['bug', 'bug'],
-]
+export const HUB_REPO = 'jwildfire/obot.roadmap'
 
-/** One issue → its class. Labels may be strings or {name}; the type field wins for bugs. */
-export function classifyIssue(issue = {}) {
+// When each repo's branch model began — the date of its first PR into what is now
+// its integration branch (measured 2026-08-16, from the PR record). Before this
+// date the repo had no integration/release split, so a PR into what is now a
+// release branch was ordinary work: gsm.safety's nine pre-07-29 PRs into `main`
+// are not release candidates, and counting them as RCs overstates the lane by
+// nearly half. Title matching alone is worse (2 of 29 over history) — the naming
+// rule is only days old.
+export const BRANCH_MODEL_EPOCH = {
+  'jwildfire/obot.agent': '2026-05-26',
+  'jwildfire/obot.roadmap': '2026-07-02',
+  'jwildfire/safety.viz': '2026-07-09',
+  'jwildfire/open.gismo': '2026-07-12',
+  'jwildfire/open.csr': '2026-07-25',
+  'jwildfire/demo-301': '2026-07-29',
+  'jwildfire/gsm.safety': '2026-07-29',
+}
+
+const RC_TITLE = /-RC\d|^Release candidate:|^Release v\d|v\d+\.\d+\.\d+ RC\d|promotion/i
+
+/**
+ * One issue → its class, from the labels the repos actually use. GitHub's issue
+ * "type" field does not exist on these user-owned repos (verified over every hub
+ * row), so class is derived and the page must say so.
+ *
+ * The hub carries the planning taxonomy: goal, requirement, audit-decision, bug;
+ * an unlabelled hub issue with a parent is somebody's task, and one with neither
+ * is honestly unclassified — mostly asks filed before the requirement discipline,
+ * and worth counting as a data-quality figure rather than hiding inside "task".
+ * Implementation repos have no such taxonomy: everything that is not a bug is
+ * ordinary work, because calling 29% of real work "other" tells him nothing.
+ */
+export function classifyIssue(issue = {}, repo = '') {
   const labels = (issue.labels || []).map((l) => String(l?.name ?? l).toLowerCase())
-  const type = String(issue.type?.name ?? '').toLowerCase()
-  for (const [label, cls] of ISSUE_CLASSES) if (labels.includes(label)) return cls
-  if (type === 'bug') return 'bug'
+  if (labels.includes('goal')) return 'goal'
+  if (labels.includes('requirement')) return 'requirement'
+  if (labels.includes('bug')) return 'bug'
+  if (repo === HUB_REPO) {
+    if (labels.includes('audit-decision')) return 'audit'
+    return issue.parent_issue_url ? 'task' : 'unclassified'
+  }
   return 'task'
 }
 
 /**
- * One PR → its lane. A release candidate targets a branch holding the `release`
- * role (tools/navigator/classify.mjs owns that judgement for open PRs; this is the
- * same rule applied to history, where base is all that survives). Everything else
- * is standard-lane work.
+ * One PR → its lane, by branch role (tools/navigator/classify.mjs owns the live
+ * judgement; this is the historical form, where base is what survives). Release
+ * candidate = base holds the `release` role AND the repo's branch model existed
+ * when the PR was created (or the title says RC outright — the escape hatch for
+ * anything mislabelled around the epoch). A PR into neither a release nor the
+ * integration branch is stacked work on a feature branch — its own small lane,
+ * not standard, because folding it in would misstate both.
  */
-export function classifyPRLane(pr = {}, releaseBranches = []) {
+export function classifyPRLane(pr = {}, { release = [], integration = null, epoch = null } = {}) {
   const base = pr.base?.ref ?? pr.baseRefName ?? ''
-  return releaseBranches.includes(base) ? 'release-candidate' : 'standard'
+  if (release.includes(base)) {
+    const created = pr.created_at ?? pr.createdAt ?? ''
+    if (!epoch || (created && created.slice(0, 10) >= epoch) || RC_TITLE.test(pr.title ?? '')) {
+      return 'release-candidate'
+    }
+    return 'standard'
+  }
+  if (!integration || base === integration) return 'standard'
+  return 'stacked'
 }
 
-/** items → {1: n, 3: n, 7: n, 30: n, 365: n}, counting dateOf(item) within each window. */
-export function windowCounts(items = [], now = new Date(), dateOf = (i) => i.createdAt) {
+/**
+ * items → {1: n, 3: n, 7: n, 30: n, 365: n}, counting dateOf(item) within each
+ * window. GitHub events are instants and use rolling windows; decision dates are
+ * calendar days with no time, so they use whole-day windows (`grain: 'day'`) —
+ * mixing the two silently is the trap the page must not fall into, and the page
+ * says which rows count days.
+ */
+export function windowCounts(items = [], now = new Date(), dateOf = (i) => i.createdAt, { grain = 'instant' } = {}) {
   const counts = Object.fromEntries(WINDOWS.map((w) => [w, 0]))
+  const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
   for (const item of items) {
-    const t = Date.parse(dateOf(item))
+    const raw = String(dateOf(item) ?? '')
+    let days
+    if (grain === 'day') {
+      const t = Date.parse(raw.slice(0, 10))
+      if (Number.isNaN(t)) continue
+      days = (todayUTC - t) / 86400000
+      if (days < 0) continue
+      for (const w of WINDOWS) if (days < w) counts[w] += 1
+      continue
+    }
+    const t = Date.parse(raw)
     if (Number.isNaN(t)) continue
-    const days = (now.getTime() - t) / 86400000
+    days = (now.getTime() - t) / 86400000
     if (days < 0) continue
     for (const w of WINDOWS) if (days <= w) counts[w] += 1
   }
@@ -141,17 +198,18 @@ export function collectMetrics({ repos, hub, now = new Date(), exec = gh }) {
     decisions: { filed: [], decided: [] },
     bounds: [], errors: [], failedRepos: [],
   }
-  for (const { repo, release } of repos) {
+  for (const { repo, release, integration } of repos) {
     try {
       const iss = listSince(repo, 'issues?filter=all', cutoff, { exec })
       for (const i of iss.items) {
         if (i.pull_request) continue // the issues endpoint lists PRs too; they are counted from /pulls, where base survives
-        out.issues.push({ repo, number: i.number, createdAt: i.created_at, cls: classifyIssue(i), state: i.state })
+        out.issues.push({ repo, number: i.number, createdAt: i.created_at, cls: classifyIssue(i, repo), state: i.state })
       }
       if (iss.truncated) out.bounds.push({ repo, kind: 'issues', ...iss.truncated })
       const prs = listSince(repo, 'pulls', cutoff, { exec })
+      const laneCtx = { release, integration, epoch: BRANCH_MODEL_EPOCH[repo] ?? null }
       for (const p of prs.items) {
-        out.prs.push({ repo, number: p.number, createdAt: p.created_at, lane: classifyPRLane(p, release), state: p.merged_at ? 'merged' : p.state })
+        out.prs.push({ repo, number: p.number, createdAt: p.created_at, lane: classifyPRLane(p, laneCtx), state: p.merged_at ? 'merged' : p.state })
       }
       if (prs.truncated) out.bounds.push({ repo, kind: 'prs', ...prs.truncated })
       const rels = JSON.parse(exec(['api', `repos/${repo}/releases?per_page=100`]))
