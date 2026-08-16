@@ -17,7 +17,7 @@ import {
   markApplied, resolveDecision, answersSection, OVERDUE_MIN,
 } from '../lib/answers.mjs';
 import { artifactPath, parseArgs, serve } from '../ops-dashboard.mjs';
-import { render, sessionShell, navigatorShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
+import { render, sessionShell, navigatorShell, navigatorRecordShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
 import { parseNavigatorState } from '../lib/navigator.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'opsdash-'));
@@ -596,7 +596,13 @@ test('one site, one port: the dashboard is / and the session hub is /live.html',
       'swept: 2020-01-01 00:00 · cadence 5m · ok\n\n## RC queue\n\n- **repo#1** something https://example.test/1 [verified gh 00:00]\n');
     const swept = await get('/navigator');
     assert.ok(swept.body.includes('observer is dead'), 'a 2020 sweep is not current data');
-    assert.ok(swept.body.includes('repo#1'));
+    // The tab is metrics + what changed now; with no cache written it says so
+    // rather than rendering zeros that read as a quiet year.
+    assert.ok(swept.body.includes('No numbers yet'));
+    // The full record keeps the queue rows, whole, one click behind.
+    const record = await get('/navigator/record');
+    assert.ok(record.body.includes('observer is dead'), 'the record view carries the same honesty banner');
+    assert.ok(record.body.includes('repo#1'));
 
     // The marker is how the status line finds the merged site.
     const marker = JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'session-hub', 'serve.json'), 'utf8'));
@@ -660,10 +666,11 @@ test('the navigator state parses into its swept stamp and its sections', () => {
 
 test('a section the sweep has not invented yet still renders — the ledger seam', () => {
   // Per-agent attribution is a different sibling's problem; when its writer adds a
-  // section this tab must render it without being touched.
+  // section the record view must render it without being touched. The seam lives on
+  // /navigator/record now — the tab itself is metrics + what changed.
   const s = parseNavigatorState(`${NAV_STATE}\n## By agent\n\n- 22:10 👯🤖 opsdb2 — opened obot.agent#118 https://github.com/jwildfire/obot.agent/issues/118\n`, new Date('2026-08-15T22:33:00'));
   assert.deepEqual(s.sections.map((x) => x.title), ['RC queue', 'Recent events', 'By agent']);
-  const html = navigatorShell({ state: s });
+  const html = navigatorRecordShell({ state: s });
   assert.ok(html.includes('By agent'), 'an unknown section renders as itself, no code change needed');
   assert.ok(html.includes('opsdb2'));
 });

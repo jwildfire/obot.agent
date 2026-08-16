@@ -17,6 +17,7 @@
 import { wakeText, DISMISS_MEANS } from './triage.mjs';
 import { CRITICAL_BUDGET } from './rank.mjs';
 import { parseNavigatorState } from './navigator.mjs';
+import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
 import { rosterHtml, ROSTER_CSS } from './roster-view.mjs';
@@ -492,6 +493,10 @@ const NAV_CSS = `
   /* A reference, a URL or a long agent name must wrap rather than push the page
      sideways — 390px is a gate here, not a nicety. */
   .nav-list li, .nav-sub li, .nav-list summary { overflow-wrap:anywhere; }
+
+  .reclink { font-size:0.74rem; margin:0 0 0.5rem; }
+  .reclink a { text-decoration:none; }
+  .reclink-why { color:var(--faint); font-size:0.68rem; }
 `;
 
 /**
@@ -524,21 +529,33 @@ ${s.items.length
       : `<li>${navItem(it)}</li>`)).join('')}</ul>`
     : '<p class="nav-empty">Nothing.</p>'}`).join('\n');
 
-export function navigatorShell({ state = null, missing = null } = {}) {
-  const body = missing || !state
-    ? `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code>.</p>`
-    : `${state.stale
-      ? `<p class="dead"><strong>The observer is dead</strong> — last swept ${esc(state.sweptAt ?? 'never')}${state.ageMin === null ? '' : ` (${state.ageMin} min ago, cadence ${state.cadenceMin}m)`}. What follows is <strong>not current</strong>. Restart: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`
-      : `<p class="swept">swept ${esc(state.sweptAt)}${state.summary ? ` · ${esc(state.summary)}` : ''}</p>`}
-${sectionsHtml(state.sections)}`;
+/** The sweep's proof-of-life header, shared by both Navigator views: the dead-observer
+ * banner when stale, the one-line swept stamp when alive. The stale rule is the one
+ * thing neither view may lose — this is the surface he would trust to say a review
+ * landed, and presenting a dead observer's content as current is the failure mode. */
+const sweepHead = (state, missing) => {
+  if (missing || !state) {
+    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code>.</p>`;
+  }
+  if (state.stale) {
+    return `<p class="dead"><strong>The observer is dead</strong> — last swept ${esc(state.sweptAt ?? 'never')}${state.ageMin === null ? '' : ` (${state.ageMin} min ago, cadence ${state.cadenceMin}m)`}. What follows is <strong>not current</strong>. Restart: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`;
+  }
+  // A sweep can fail and still be recent: the writer puts FAILED in the head line
+  // and keeps serving the last good queue. Age alone misses that, and small grey
+  // print is where the one sentence that matters goes to die.
+  if (/FAILED/.test(state.summary ?? '')) {
+    return `<p class="dead"><strong>The sweep is failing</strong> — ${esc(state.summary)}. Last attempt ${esc(state.sweptAt ?? 'unknown')}.</p>`;
+  }
+  return `<p class="swept">swept ${esc(state.sweptAt)}${state.summary ? ` · ${esc(state.summary)}` : ''}</p>`;
+};
 
-  return `<!doctype html>
+const navigatorPage = (body) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Navigator · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}
+<style>${SHELL_CSS}${NAV_CSS}${METRICS_CSS}
 </style>
 </head>
 <body>
@@ -553,6 +570,36 @@ ${body}
 </div>
 </body>
 </html>`;
+
+/**
+ * The Navigator tab, for a reader who was not present: release metrics first
+ * (jwildfire/obot.roadmap#218 — "Show me key release metrics … in the last
+ * 1/3/7/30/365 days"), then the sweep's typed events as a what-changed feed.
+ *
+ * Nothing the old view carried is deleted: the full record — RC queue, delivery
+ * verdicts, discipline findings, ledger audits — lives whole at /navigator/record
+ * for its dense readers, and the link here is how he reaches it when a number
+ * needs its receipts.
+ */
+export function navigatorShell({ state = null, missing = null, metrics = null, feed = [] } = {}) {
+  const body = `${sweepHead(state, missing)}
+<p class="reclink"><a href="/navigator/record">Full sweep record →</a> <span class="reclink-why">the RC queue, delivery verdicts and discipline findings, whole — what these numbers are built beside</span></p>
+${metricsHtml(metrics)}
+${feedHtml(feed)}`;
+  return navigatorPage(body);
+}
+
+/**
+ * The full sweep record — the pre-2026-08-16 Navigator tab, kept whole. Its
+ * readers are the agents that read the state file densely, and him when a metric
+ * needs its receipts; every `##` section in the state file still renders as
+ * itself, including ones this code has never heard of.
+ */
+export function navigatorRecordShell({ state = null, missing = null } = {}) {
+  const body = `${sweepHead(state, missing)}
+<p class="reclink"><a href="/navigator">← Metrics and what changed</a></p>
+${state && !missing ? sectionsHtml(state.sections) : ''}`;
+  return navigatorPage(body);
 }
 
 /**

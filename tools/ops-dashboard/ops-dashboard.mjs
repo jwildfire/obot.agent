@@ -40,8 +40,9 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { collectQueue, refreshRCs } from './lib/collect.mjs';
-import { render, sessionShell, navigatorShell, NOT_LISTENING } from './lib/render.mjs';
+import { render, sessionShell, navigatorShell, navigatorRecordShell, NOT_LISTENING } from './lib/render.mjs';
 import { parseNavigatorState } from './lib/navigator.mjs';
+import { buildMetricsModel, buildFeedModel } from './lib/metrics-view.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
@@ -328,17 +329,31 @@ export function serve(args) {
         return send(200, 'text/html; charset=utf-8', fs.readFileSync(live));
       }
 
-      // The third tab: what the 🧭🤖 Navigator sweep has seen, read fresh on every
-      // request — the file is rewritten every five minutes and a cached copy of an
-      // observer's state is exactly the thing that must not go stale silently.
-      if (p === '/navigator' || p === '/navigator/') {
+      // The third tab: release metrics and what changed, for a reader who was not
+      // present (jwildfire/obot.roadmap#218) — with the sweep's full record kept
+      // whole at /navigator/record for its dense readers. All of it read fresh on
+      // every request: the state file is rewritten every five minutes and a cached
+      // copy of an observer's state is exactly the thing that must not go stale
+      // silently. The metrics and event caches are the sweep's own files; reading
+      // them here is the no-network-at-render rule, not a freshness compromise —
+      // each carries its age and the page shows it.
+      if (p === '/navigator' || p === '/navigator/' || p === '/navigator/record') {
         look();
         const file = path.join(args.workspace, ...SESSION_DIR, 'navigator-state.md');
         let md = null;
         try { md = fs.readFileSync(file, 'utf8'); } catch { /* no sweep yet */ }
-        return send(200, 'text/html; charset=utf-8', navigatorShell(
-          md ? { state: parseNavigatorState(md) } : { missing: file },
-        ));
+        const stateArg = md ? { state: parseNavigatorState(md) } : { missing: file };
+        if (p === '/navigator/record') {
+          return send(200, 'text/html; charset=utf-8', navigatorRecordShell(stateArg));
+        }
+        const readCache = (name) => {
+          try { return JSON.parse(fs.readFileSync(path.join(args.workspace, ...SESSION_DIR, 'cache', name), 'utf8')); } catch { return null; }
+        };
+        return send(200, 'text/html; charset=utf-8', navigatorShell({
+          ...stateArg,
+          metrics: buildMetricsModel(readCache('metrics.json')),
+          feed: buildFeedModel(readCache('navigator-rc.json')?.events ?? []),
+        }));
       }
 
       if (p === '/queue.json') {
