@@ -11,9 +11,11 @@
 // "which agent" is not a thing GitHub can answer — it needs a join against the
 // scratchpad's per-sibling lines, which is a separate piece of work.
 //
-// The seam for it is the parser below: **every** `## Heading` in the state file becomes
-// a section and renders as itself. When the sweep starts writing a `## By agent`
-// section, this tab shows it without a line changing here.
+// The seam for it is the parser below: every `## Heading` in the state file becomes
+// a section and renders as itself, and an indented bullet under a row becomes that
+// row's detail. Whatever assembles a section reaches the page with no rendering
+// code — which is how the agent roster (jwildfire/obot.roadmap#199) arrives on the
+// session tab: it is markdown, parsed here, rendered by the same list.
 //
 // The one rule this must not lose in translation is the state file's own: a sweep older
 // than three cadences means the observer is dead, and a dead observer's content must
@@ -30,8 +32,25 @@ function ageMinutes(stamp, now) {
 }
 
 /**
+ * One bullet, as a row reads: the URL is the row's link and the verification stamp
+ * is small print, so neither belongs in the middle of the text.
+ */
+function parseItem(text) {
+  return {
+    url: text.match(/https?:\/\/\S+/)?.[0] ?? null,
+    verified: text.match(/\[verified gh ([^\]]+)\]/)?.[1] ?? null,
+    text: text.replace(/https?:\/\/\S+/g, '').replace(/\[verified gh [^\]]+\]/g, '')
+      .replace(/[*`"]/g, '').replace(/\s+/g, ' ').replace(/\s*·\s*$/, '').trim(),
+  };
+}
+
+/**
  * The state file as data: the sweep stamp, whether the observer is alive, and every
  * `##` section with its bullets. Sections are generic by design — see the header.
+ *
+ * An indented bullet is the detail of the row above it rather than a row of its own.
+ * That is what lets one line carry a summary and the evidence behind it without a
+ * table: the row stays one line on a phone, and the detail opens when asked for.
  */
 export function parseNavigatorState(md = '', now = new Date()) {
   const swept = SWEPT_RE.exec(md);
@@ -55,16 +74,14 @@ export function parseNavigatorState(md = '', now = new Date()) {
     }
     if (!current) continue;
     const b = /^-\s+(.*)$/.exec(raw);
-    if (!b) continue;
-    const text = b[1];
-    current.items.push({
-      url: text.match(/https?:\/\/\S+/)?.[0] ?? null,
-      verified: text.match(/\[verified gh ([^\]]+)\]/)?.[1] ?? null,
-      // The row reads as a sentence: the URL is the row's link and the verification
-      // stamp is small print, so neither belongs in the middle of the text.
-      text: text.replace(/https?:\/\/\S+/g, '').replace(/\[verified gh [^\]]+\]/g, '')
-        .replace(/[*`"]/g, '').replace(/\s+/g, ' ').replace(/\s*·\s*$/, '').trim(),
-    });
+    if (b) {
+      current.items.push({ ...parseItem(b[1]), details: [] });
+      continue;
+    }
+    const sub = /^\s+-\s+(.*)$/.exec(raw);
+    // A detail with no row above it is dropped rather than promoted: it would read
+    // as a row, which is the one thing it is not.
+    if (sub && current.items.length) current.items.at(-1).details.push(parseItem(sub[1]));
   }
   return { sweptAt, summary, cadenceMin, ageMin, stale, sections };
 }
