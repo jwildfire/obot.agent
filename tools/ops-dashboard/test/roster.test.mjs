@@ -14,6 +14,11 @@ import path from 'node:path';
 import {
   buildRoster, collectRoster, currentLabels, impactOf, parseDelivery, parseWorkers,
   refUrl, rosterMarkdown, statusOf, timelineClose, usageIndex,
+} from '../lib/roster.mjs';
+import {
+  agentRow, groupRoster, kindOf, rosterHtml,
+} from '../lib/roster-view.mjs';
+import {
   DEAD_SHOWN, PRICE_NOTE, ID_NOTE,
 } from '../lib/roster.mjs';
 import { parseNavigatorState } from '../lib/navigator.mjs';
@@ -393,17 +398,26 @@ test('the roster is assembled from the four files and nothing else', () => {
   fs.writeFileSync(path.join(jd, 'timeline.jsonl'),
     '{"at":"2026-08-16T06:02:16.908Z","state":"done","detail":"shipped"}\n');
 
-  const md = collectRoster({ workspace: ws, hub, jobsDir: jobs, now: NOW });
-  assert.match(md, /W0001/);
-  assert.match(md, /finished/);
-  assert.match(md, /\$6\.20/);
-  assert.match(md, /hub#198/);
+  // collectRoster returns the MODEL now, not markdown — the page renders it
+  // (roster-view.mjs) and rosterMarkdown is the text form of the same model.
+  const model = collectRoster({ workspace: ws, hub, jobsDir: jobs, now: NOW });
+  const row = model.rows.find((r) => r.id === 'W0001');
+  assert.ok(row, 'the claimed worker earns a row');
+  assert.equal(row.status.status, 'finished');
+  assert.equal(row.cost.short, '$6.20');
+  assert.deepEqual(row.impact.moved.map((m) => m.ref), ['hub#198']);
+  // and the text form still renders the same facts
+  assert.match(rosterMarkdown(model), /W0001[\s\S]*finished[\s\S]*\$6\.20/);
 });
 
 test('a workspace with none of the four files degrades to a sentence', () => {
-  const md = collectRoster({ workspace: tmp(), hub: tmp(), jobsDir: tmp(), now: NOW });
-  assert.match(md, /## /);
-  assert.match(md, /unavailable/i);
+  const model = collectRoster({ workspace: tmp(), hub: tmp(), jobsDir: tmp(), now: NOW });
+  assert.deepEqual(model.rows, []);
+  assert.match(rosterMarkdown(model), /## /);
+  assert.match(rosterMarkdown(model), /unavailable/i);
+  // The page says so rather than rendering an empty roster, which would read as
+  // "no agents ran" when it means "nothing could be read".
+  assert.match(rosterHtml(model), /No agent has run/i);
 });
 
 // ---- what the live data caught -------------------------------------------
@@ -603,4 +617,98 @@ test('the list of old deaths is capped, and says how many it did not show', () =
   assert.equal(m.rows.filter((r) => r.label.includes('corpse')).length, DEAD_SHOWN);
   assert.equal(m.droppedDeaths, 3);
   assert.match(rosterMarkdown(m), /3 earlier agents that also ended badly, not shown/);
+});
+
+// ---- the page, not the list ----------------------------------------------
+//
+// These are the assertions that survive a redesign. @jwildfire has commissioned a
+// spike on how this page should read (feed, table, metrics), so the row layout is
+// deliberately not tested here — only the things that are wrong under any answer.
+
+const twoWorkers = () => buildRoster({
+  workers: { epoch: '2026-08-16T00:00:00Z', claims: [] },
+  jobs: [
+    { name: '\u{1F46F}\u{1F916} 2026-08-16 preid', state: 'done', detail: 'shipped',
+      startedAt: '2026-08-16T05:00:00Z', updatedAt: '2026-08-16T06:00:00Z',
+      timeline: { last: 'done', closed: true, at: '2026-08-16T06:00:00Z' } },
+    { name: '\u{1F3A9}\u{1F916} obot-prime', state: 'blocked', detail: 'waiting',
+      startedAt: '2026-08-16T01:00:00Z', updatedAt: '2026-08-16T06:00:00Z',
+      timeline: { last: 'blocked', closed: false, at: '2026-08-16T06:00:00Z' } },
+  ],
+  usage: usageIndex(null, { now: NOW }),
+  delivery: [],
+  now: NOW,
+});
+
+test('a worker that ran before the ledger is a worker, not an unidentified agent', () => {
+  // The id marks when the convention landed, not what kind of agent something is.
+  // Ten of the fourteen id-less rows on the live page were ordinary workers that had
+  // moved three requirements between them; grouping on the id would have buried them.
+  const model = twoWorkers();
+  const pre = model.rows.find((r) => r.label.includes('preid'));
+  const prime = model.rows.find((r) => r.label.includes('obot-prime'));
+  assert.equal(kindOf(pre), 'worker');
+  assert.equal(kindOf(prime), 'standing');
+  const v = groupRoster(model);
+  assert.equal(v.headline.workers, 1, 'the standing session is not counted as a worker');
+});
+
+test('a standing session is not reported as having produced nothing', () => {
+  // It has no deliverable to have moved, so the worker verdict is not its verdict —
+  // and printing one directly contradicts the heading it sits under.
+  const model = twoWorkers();
+  const prime = model.rows.find((r) => r.label.includes('obot-prime'));
+  assert.match(agentRow(prime, 'standing'), /not judged on delivery/);
+  assert.doesNotMatch(agentRow(prime, 'standing'), /nothing moved/);
+});
+
+test('every row is rendered with its own kind, not with its index', () => {
+  // `.map(agentRow)` passes (element, index, array), so the index landed in the
+  // `kind` argument and every row rendered as if kindOf had never run — the standing
+  // sessions were labelled "nothing moved" on the live page. Caught in a browser,
+  // not by a test, which is why this one exists.
+  const html = rosterHtml(twoWorkers());
+  assert.match(html, /not judged on delivery/);
+});
+
+test('the page carries one roster and no second set of totals under it', () => {
+  // It used to be the roster stacked on the whole older session view, each with its
+  // own agent count — 23 against 28 — so a reader could not tell which was true.
+  const html = sessionShell({ roster: twoWorkers() });
+  assert.match(html, /class="ag-wrap"/);
+  assert.match(html, /class="livewrap"/, 'the older view is kept');
+  // Kept, but collapsed and explained: one live answer on screen at a time.
+  assert.match(html, /<details class="livewrap">[\s\S]*?<summary>/);
+  assert.match(html, /different population/i);
+});
+
+test('an unassemblable roster says so instead of rendering an empty page', () => {
+  const html = sessionShell({ roster: 'the roster could not be assembled: EACCES' });
+  assert.match(html, /could not be assembled/);
+  assert.doesNotMatch(html, /class="hl-t"/, 'no headline built out of nothing');
+});
+
+test('a cost cell carries a short form as well as its sentence', () => {
+  // The sentence "not yet priced - it started after the last usage build" is true and
+  // belongs in the explanation; it was sitting in the cost column of most rows, so
+  // the column held prose and no figure could be compared with any other.
+  const model = buildRoster({
+    workers: { epoch: '2026-08-16T00:00:00Z', claims: [] },
+    jobs: [{ name: '\u{1F46F}\u{1F916} 2026-08-16 late', state: 'done',
+      startedAt: '2026-08-16T09:00:00Z', updatedAt: '2026-08-16T09:30:00Z',
+      timeline: { last: 'done', closed: true, at: '2026-08-16T09:30:00Z' } }],
+    usage: usageIndex({ cells: [], totals: { cost: 0 }, generatedAt: '2026-08-16T07:00:00Z' },
+      { epochDay: '2026-08-16', now: NOW }),
+    delivery: [], now: NOW,
+  });
+  const row = model.rows[0];
+  assert.equal(row.cost.code, 'unpriced');
+  assert.equal(row.cost.short, 'unpriced');
+  assert.match(row.cost.text, /after the last usage build/);
+  // The column shows the short form; the sentence survives as the cell's tooltip and
+  // in the row's evidence, and is spelled out once for the page in the legend.
+  const html = rosterHtml(model);
+  assert.match(html, /<span class="ag-cost cost-unpriced"[^>]*>unpriced<\/span>/);
+  assert.equal((html.match(/<ul class="ag-legend">/g) ?? []).length, 1);
+  assert.match(html, /<li><code>unpriced<\/code>[^<]*started after the last usage build/);
 });
