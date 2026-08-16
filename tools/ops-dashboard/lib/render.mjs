@@ -455,14 +455,18 @@ ${body}
 export function sessionShell({ roster = null, feed = [], lastLook = null } = {}) {
   const ok = roster && typeof roster === 'object' && Array.isArray(roster.rows);
   const parts = ok ? briefParts(roster) : null;
-  const body = parts
-    ? (parts.empty ?? `${parts.headline}
+  // The feed and the record link are the page's frame and render in every state:
+  // an empty or unassemblable roster costs the roster's sections, never the way
+  // to the record. CI proved the point — with no job records on the runner, the
+  // populated branch never ran and the brief was one sentence with no exits.
+  const body = parts && !parts.empty
+    ? `${parts.headline}
 ${feedHtml(feed)}
 ${parts.live}
 ${parts.bad}
 ${parts.countsLine}
-${parts.foot}`)
-    : `<p class="ag-empty">${esc(String(roster ?? 'The roster could not be assembled.'))}</p>
+${parts.foot}`
+    : `<p class="ag-empty">${esc(String(parts?.empty ? 'No agent has run since the worker ledger was adopted.' : (typeof roster === 'string' ? roster : 'The roster could not be assembled.')))}</p>
 ${feedHtml(feed)}
 <p class="ag-more"><a href="/session/log">The full record →</a></p>`;
   return agentsPage(body, { lastLook });
