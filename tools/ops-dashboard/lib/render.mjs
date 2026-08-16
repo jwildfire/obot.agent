@@ -90,6 +90,57 @@ const group = (title, items, empty, moved = 0) => `<h2 class="q-h">${esc(title)}
   moved ? `<span class="q-moved">${moved} pinned above</span>` : ''}</h2>
 ${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="q-empty">${esc(empty)}</p>`}`;
 
+const ageWords = (min) => {
+  if (min === null || min === undefined || !Number.isFinite(min)) return null;
+  if (min < 60) return `${Math.max(0, Math.round(min))}m old`;
+  const h = min / 60;
+  return h < 48 ? `${Math.round(h)}h old` : `${Math.round(h / 24)}d old`;
+};
+
+/**
+ * What this page is made of: the commit it is running, and the commit its decisions
+ * came from — printed whether or not either is stale.
+ *
+ * Printed on the healthy path deliberately. Twice on 2026-08-16 the running dashboard
+ * was many merges behind `main` — eleven, the second time — with nothing on the page
+ * saying so, and the hub clone it read decisions from was four commits behind
+ * `origin/main`, which is why a decision @jwildfire made that morning was still listed
+ * as awaiting him. A threshold would have caught neither: both were inside any sane
+ * one, and what was missing was a sentence naming the snapshot next to the numbers.
+ * Same reasoning as the audit-freshness line in tools/navigator/checks.mjs.
+ *
+ * The code half can only be reported — a process cannot reload its own modules, so a
+ * stale build says "restart me" and names the command. The data half is already fixed
+ * by the time this renders: the freshest committed hub state was read, and this says
+ * which one that was.
+ */
+export const provenanceLine = ({ code = null, hub = null } = {}) => {
+  const bits = [];
+  let tone = 'ok';
+  if (code?.unknown) { bits.push('code: which commit is running could not be read'); tone = 'warn'; }
+  else if (code?.short) {
+    const age = ageWords(code.ageMin);
+    bits.push(code.behind
+      ? `code: <code>${esc(code.short)}</code>${age ? `, ${esc(age)}` : ''} — ${code.behind} commit${code.behind === 1 ? '' : 's'} behind this checkout, restart to pick ${code.behind === 1 ? 'it' : 'them'} up`
+      : `code: <code>${esc(code.short)}</code>${age ? `, ${esc(age)}` : ''}, current with this checkout`);
+    if (code.behind) tone = 'warn';
+  }
+  if (hub?.warn) { bits.push(`decisions: ${esc(hub.warn)}`); tone = 'warn'; }
+  else if (hub?.head) {
+    bits.push(hub.source === 'clone'
+      ? `decisions: <code>${esc(hub.head)}</code> from your hub clone${hub.dirty ? ', with uncommitted edits' : ''}`
+      : `decisions: <code>${esc(hub.head)}</code> from <code>${esc(hub.source)}</code> — your clone is ${hub.behind} commit${hub.behind === 1 ? '' : 's'} behind it, so this page is ahead of it`);
+  }
+  if (!bits.length) return '';
+  // Kill then relaunch, in that order and never overlapping: a second instance takes
+  // the port after this one and steals the serve marker the status line reads,
+  // deleting it when it exits (obot.agent#142).
+  return `<p class="prov ${tone}">${bits.join(' &middot; ')}${
+    code?.behind ? ` <span class="prov-fix"><code>${esc(RESTART_CMD)}</code>, then <code>/session-dashboard</code></span>` : ''}</p>`;
+};
+
+export const RESTART_CMD = "pkill -f 'ops-dashboard.mjs --serve'";
+
 /**
  * The open pull requests that are ready but are *not* his — standard-lane work,
  * excluded from the release-candidate panel by the lane classifier.
@@ -233,6 +284,13 @@ const DASHBOARD_CSS = `
   /* Wraps rather than ellipsizes: it is one short line naming one or two PRs, and
      the point of it is that the refs stay readable at 390px. */
   .q-aside { font-size:0.7rem; color:var(--faint); margin:0.1rem 0 0.4rem; line-height:1.35; }
+  /* What the page is made of. Above the queue, never hidden at any width: a
+     staleness notice that disappears on a phone is the failure it warns about. */
+  .prov { font-size:0.66rem; line-height:1.4; margin:0 0 0.6rem; color:var(--faint);
+          border-left:2px solid var(--line); padding:0.15rem 0 0.15rem 0.45rem; }
+  .prov.warn { color:var(--muted); border-left-color:var(--crit); }
+  .prov code { font-family:var(--mono); font-size:0.95em; }
+  .prov-fix { display:block; margin-top:0.15rem; }
   .q-aside a { color:var(--muted); }
   .q-aside code { font-family:var(--mono); font-size:0.92em; }
   .q-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
@@ -539,7 +597,7 @@ const answersPanel = (answers, deliverer, now) => {
     </div>`;
 };
 
-export function render({ queue, answers = [], deliverer = null, lastLook = null, workspace, hub, generated = new Date() }) {
+export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, workspace, hub, generated = new Date() }) {
   const critical = queue.critical ?? [];
   const snoozed = queue.snoozed ?? [];
   const cleared = queue.cleared ?? [];
@@ -594,6 +652,7 @@ export function render({ queue, answers = [], deliverer = null, lastLook = null,
 <div class="cols">
 
   <nav class="rail" aria-label="Your queue">
+    ${provenanceLine(provenance ?? {})}
     ${total === 0 ? '<p class="q-empty">Nothing is waiting on you.</p>' : ''}
     ${critical.length ? group('Critical', critical, '') : ''}
     ${queue.overBudget ? `<p class="overbudget">${queue.overBudget} more item${queue.overBudget === 1 ? '' : 's'} claim${queue.overBudget === 1 ? 's' : ''} critical. The tag is capped at ${CRITICAL_BUDGET} so it keeps meaning something — the rest are at the top of their own sections.</p>` : ''}
