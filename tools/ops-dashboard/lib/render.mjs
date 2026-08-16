@@ -497,6 +497,14 @@ const NAV_CSS = `
   .reclink { font-size:0.74rem; margin:0 0 0.5rem; }
   .reclink a { text-decoration:none; }
   .reclink-why { color:var(--faint); font-size:0.68rem; }
+
+  /* The ledger verdicts: quiet when clean, unmissable when not. */
+  .lstat { font-size:0.68rem; color:var(--faint); font-family:var(--mono); margin:0 0 0.35rem; overflow-wrap:anywhere; }
+  .lstat-d { display:block; color:var(--faint); opacity:0.8; padding-left:0.8rem; }
+  .nav-list li.nav-h3 { border-left:0; padding:0.5rem 0 0.1rem; font-size:0.64rem; letter-spacing:0.1em;
+                        text-transform:uppercase; color:var(--muted); font-weight:600; }
+  .nav-list li.nav-note { border-left-color:transparent; color:var(--muted); font-size:0.74rem; }
+  .nav-list li.nav-alarm { border-left-color:var(--accent); background:var(--accent-soft); }
 `;
 
 /**
@@ -523,11 +531,30 @@ const navItem = (it) => `${it.url
  */
 export const sectionsHtml = (sections = []) => sections.map((s) => `<h2 class="nav-h">${esc(s.title)}</h2>
 ${s.items.length
-    ? `<ul class="nav-list">${s.items.map((it) => ((it.details ?? []).length
-      ? `<li><details><summary>${navItem(it)}</summary><ul class="nav-sub">${
-        it.details.map((d) => `<li>${navItem(d)}</li>`).join('')}</ul></details></li>`
-      : `<li>${navItem(it)}</li>`)).join('')}</ul>`
+    ? `<ul class="nav-list">${s.items.map((it) => {
+      if (it.heading) return `<li class="nav-h3">${esc(it.text)}</li>`;
+      const cls = [it.alarm ? 'nav-alarm' : '', it.note && !it.alarm ? 'nav-note' : ''].filter(Boolean).join(' ');
+      const attr = cls ? ` class="${cls}"` : '';
+      return (it.details ?? []).length
+        ? `<li${attr}><details><summary>${navItem(it)}</summary><ul class="nav-sub">${
+          it.details.map((d) => `<li>${navItem(d)}</li>`).join('')}</ul></details></li>`
+        : `<li${attr}>${navItem(it)}</li>`;
+    }).join('')}</ul>`
     : '<p class="nav-empty">Nothing.</p>'}`).join('\n');
+
+/**
+ * The sweep's preamble notes — the config-ledger and worker-ledger verdicts.
+ * Wired since 2026-08-16 morning, renderable since 2026-08-16 night: the old
+ * parser dropped everything above the first heading, so a ledger gap could fire
+ * every five minutes and never reach a page. An alarm gets the banner; a clean
+ * verdict gets one line of small print, because a detector that only ever speaks
+ * on failure is indistinguishable from a dead one (the sweep's own rule).
+ */
+export const ledgerNotes = (state, { full = false } = {}) => (state?.notes ?? []).map((n) => (n.alarm
+  ? `<p class="dead">${esc(n.text)}${n.details.length ? ` — ${esc(n.details.map((d) => d.text).join(' · '))}` : ''}</p>`
+  : `<p class="lstat">${esc(n.text)}${full && n.details.length
+    ? n.details.map((d) => `<span class="lstat-d">${esc(d.text)}</span>`).join('')
+    : ''}</p>`)).join('\n');
 
 /** The sweep's proof-of-life header, shared by both Navigator views: the dead-observer
  * banner when stale, the one-line swept stamp when alive. The stale rule is the one
@@ -583,6 +610,7 @@ ${body}
  */
 export function navigatorShell({ state = null, missing = null, metrics = null, feed = [] } = {}) {
   const body = `${sweepHead(state, missing)}
+${ledgerNotes(state)}
 <p class="reclink"><a href="/navigator/record">Full sweep record →</a> <span class="reclink-why">the RC queue, delivery verdicts and discipline findings, whole — what these numbers are built beside</span></p>
 ${metricsHtml(metrics)}
 ${feedHtml(feed)}`;
@@ -597,6 +625,7 @@ ${feedHtml(feed)}`;
  */
 export function navigatorRecordShell({ state = null, missing = null } = {}) {
   const body = `${sweepHead(state, missing)}
+${ledgerNotes(state, { full: true })}
 <p class="reclink"><a href="/navigator">← Metrics and what changed</a></p>
 ${state && !missing ? sectionsHtml(state.sections) : ''}`;
   return navigatorPage(body);

@@ -986,3 +986,67 @@ test('an answer written before the join still gets its id from the registry', ()
   deliverAnswers(ws, { hub });
   assert.equal(JSON.parse(fs.readFileSync(path.join(ws, '.claude', 'ops', 'answers', 'legacy.json'), 'utf8')).decisionId, 'D0003');
 });
+
+// ---------------------------------------------------------------------------
+// The four dead alarm paths (jwildfire/obot.roadmap#218 recon; obot.agent#129
+// inverted): the sweep writes ledger verdicts in the preamble and the discipline
+// headline as a plain line, and the old parser could never render any of them.
+
+const NAV_STATE_ALARMS = `# navigator-state — 🧭🤖 Navigator RC-review sweep
+
+Sole writer: \`sweep.mjs\`. **Stale rule: 3× cadence.**
+
+swept: 2026-08-15 22:30 · cadence 5m · ok — 7 repos, 2 RCs
+
+config ledger: ledger clean - 11 id(s) allocated, 11 present
+  note - blockers.md changed outside this tool since it was last written
+
+**WORKER LEDGER FINDING** — 1 id(s) claimed but never launched: W0005
+
+## Roadmap discipline
+
+roadmap discipline: **94 findings** across the project repos, last 14 days
+  nightly audit: last run 13h ago — anything filed since then is invisible to it
+  bounded: 104 older than 14 days not shown
+
+### Work that shipped with no requirement above it (59)
+
+- safety.viz#120 closed with no requirement above it
+`;
+
+test('the preamble ledger verdicts parse as notes, alarms flagged, details attached', () => {
+  const s = parseNavigatorState(NAV_STATE_ALARMS, new Date('2026-08-15T22:33:00'));
+  assert.equal(s.notes.length, 2);
+  assert.match(s.notes[0].text, /config ledger: ledger clean/);
+  assert.equal(s.notes[0].alarm, false);
+  assert.match(s.notes[0].details[0].text, /changed outside this tool/);
+  assert.match(s.notes[1].text, /WORKER LEDGER FINDING/);
+  assert.equal(s.notes[1].alarm, true);
+})
+
+test('a section keeps its verdict headline, its indented context, and its ### groups, in order', () => {
+  const s = parseNavigatorState(NAV_STATE_ALARMS, new Date('2026-08-15T22:33:00'));
+  const disc = s.sections.find((x) => x.title === 'Roadmap discipline');
+  assert.equal(disc.items[0].note, true);
+  assert.match(disc.items[0].text, /94 findings across the project repos/);
+  // "94 findings" is a count, not an alarm — the alarm regex is case-sensitive.
+  assert.equal(disc.items[0].alarm, false);
+  assert.match(disc.items[0].details[0].text, /nightly audit/);
+  assert.match(disc.items[0].details[1].text, /104 older than 14 days not shown/);
+  assert.equal(disc.items[1].heading, true);
+  assert.match(disc.items[1].text, /Work that shipped with no requirement/);
+  assert.match(disc.items[2].text, /safety\.viz#120/);
+})
+
+test('an alarm reaches both Navigator views; a clean verdict is quiet small print', () => {
+  const s = parseNavigatorState(NAV_STATE_ALARMS, new Date('2026-08-15T22:33:00'));
+  for (const html of [navigatorShell({ state: s }), navigatorRecordShell({ state: s })]) {
+    assert.match(html, /WORKER LEDGER FINDING/);
+    assert.match(html, /config ledger: ledger clean/);
+  }
+  // The record carries the clean note's dating detail; the metrics view stays terse.
+  assert.match(navigatorRecordShell({ state: s }), /changed outside this tool/);
+  assert.doesNotMatch(navigatorShell({ state: s }), /changed outside this tool/);
+  // And the discipline verdict now renders above its findings on the record.
+  assert.match(navigatorRecordShell({ state: s }), /94 findings/);
+})
