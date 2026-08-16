@@ -248,6 +248,11 @@ files anything.
 
 Output is bulleted lists, not prose paragraphs, everywhere but the lead.
 
+Bold only where it is structural — the `- **Name** — description` list lead, and the
+standalone bold line used as a section sub-heading. Never inside a sentence
+(@jwildfire, 2026-08-16; the rule is in
+[`docs/session-framework.md`](../../docs/session-framework.md#no-inline-bold)).
+
 ### 2. Persist the draft to disk — before rendering
 
 Write the composed entry to
