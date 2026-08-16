@@ -264,3 +264,12 @@ test('init arms the ledger and is idempotent', () => {
   // Armed and unused is clean: the epoch means nothing before it is judged.
   assert.equal(run(ws, ['--audit']).status, 0);
 });
+
+test('the autonomous lead gets the same shape under its own tag', () => {
+  const ws = tmp();
+  const w = id(claim(ws, 'charts'));
+  // obot-auto runs unattended overnight and writes as obotclaw[bot] exactly like a
+  // sibling does, so it is a worker and carries an id. Only its tag differs.
+  const name = run(ws, ['name', w, 'charts', '--tag', '🦾🤖']).stdout.trim();
+  assert.match(name, /^🦾🤖 W0001 \d{4}-\d{2}-\d{2} charts$/);
+});

@@ -29,9 +29,15 @@ Who a session *is*, in the terminal and in the `claude agents` view. This is
 
 - **Names and colours**:
   - lead / main session — `😺🤖 {YYYY-MM-DD} {session # (only if > 1 that day)}`, **orange**
-  - spawned siblings — `👯🤖 {date} {slug}`, **green** (@jwildfire, 2026-07-11)
+  - spawned siblings — `👯🤖 {W-id} {date} {slug}` (e.g. `👯🤖 W0042 2026-08-16 workerids`),
+    **green** (@jwildfire, 2026-07-11; the W-id added 2026-08-16). The id is claimed by
+    `tools/worker-id` before the spawn and is permanent — never reused, not even after the
+    worker dies. It goes first because it must survive truncation in a narrow `claude agents`
+    row, and because the counter is monotonic, sorting by id sorts chronologically anyway.
   - ultracode / Workflow jobs — `⚡️🤖 {description}`, description-based, no date (2026-07-12)
-  - `--auto` autonomous sessions — `🦾🤖 {YYYY-MM-DD} {slug}`, **purple**
+  - `--auto` autonomous sessions — `🦾🤖 {W-id} {YYYY-MM-DD} {slug}`, **purple** (the
+    autonomous lead writes as obotclaw[bot] like any other agent, so it is a worker and
+    carries an id too)
   - obot-prime concierge — `🎩🤖 obot-prime`, no date (standing singleton, launched by
     `scripts/obot-prime`; contract in
     [`session-prime`](../session-prime/SKILL.md)), **blue**

@@ -120,7 +120,32 @@ echo "obot-auto: pre-flight OK (level=$LEVEL, goal=$GOAL → hub#$GOAL_ISSUE${IN
 
 SLUG="${INCREMENT:-$GOAL}"
 SLUG="${SLUG//\//-}"; SLUG="${SLUG//#/-}"
-NAME="🦾🤖 $(date +%F) $SLUG"
+ARGS_DESC="goal $GOAL${INCREMENT:+, increment $INCREMENT}"
+
+# The autonomous lead is a worker: it opens PRs, files issues and merges, all as
+# obotclaw[bot] like every other agent. So it claims a permanent W-id before it
+# launches and carries it in its name, exactly as a sibling does (#130). The id is
+# what makes "which agent did this" answerable at all - GitHub has no field that
+# separates one agent from another, and nothing recovers the attribution later.
+#
+# Not fatal if the tool is missing: an unnamed autonomous run is worse than an
+# unattributed one, so a failure here degrades to the old name and the ledger's
+# audit reports the gap on the next Navigator sweep rather than blocking a launch
+# @jwildfire scheduled.
+# --preflight prints the command and launches nothing, so it must not claim: an
+# id burned by a rehearsal is harmless but it makes the ledger read as though a
+# worker ran that never did, and the roster is meant to be the record of what
+# actually happened.
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  WID=""
+  NAME="🦾🤖 {W-id claimed at launch} $(date +%F) $SLUG"
+elif WID="$("$SCRIPT_DIR/../tools/worker-id" claim --slug "$SLUG" --task "autonomous increment: $ARGS_DESC" 2>/dev/null)" && [ -n "$WID" ]; then
+  NAME="$("$SCRIPT_DIR/../tools/worker-id" name "$WID" "$SLUG" --tag "🦾🤖")"
+  export OBOT_WORKER_ID="$WID"
+else
+  echo "obot-auto: could not claim a worker id - launching unstamped; the Navigator sweep will report it" >&2
+  NAME="🦾🤖 $(date +%F) $SLUG"
+fi
 ARGS="--goal $GOAL"
 [ -n "$INCREMENT" ] && ARGS="$ARGS --increment $INCREMENT"
 [ "$DRY_RUN" -eq 1 ] && ARGS="$ARGS --dry-run"
