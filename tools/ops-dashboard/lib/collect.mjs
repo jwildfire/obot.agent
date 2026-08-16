@@ -39,6 +39,12 @@ export async function collectDecisions(hub) {
     const log = await collectDecisionLog();
     return {
       log,
+      // Answered inside a successor rather than on their own page, so out of the
+      // queue — and named under it, because a reader who remembers D0015 has to be
+      // able to find out where it went. A silent drop and a fixed queue look the same.
+      folded: (log.folded ?? []).map((a) => ({
+        id: a.id, key: a.slug, title: a.title, into: a.foldedInto?.id ?? null,
+      })),
       items: log.open.map((a) => ({
         kind: 'decision',
         id: a.id,

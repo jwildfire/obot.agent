@@ -17,7 +17,7 @@ import {
   markApplied, resolveDecision, answersSection, OVERDUE_MIN,
 } from '../lib/answers.mjs';
 import { artifactPath, parseArgs, serve } from '../ops-dashboard.mjs';
-import { render, sessionShell, navigatorShell, TABS, esc } from '../lib/render.mjs';
+import { render, sessionShell, navigatorShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
 import { parseNavigatorState } from '../lib/navigator.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'opsdash-'));
@@ -119,6 +119,23 @@ test('he can still be pulled in by name, and a repo off the policy degrades to t
   assert.equal(isReleaseCandidate(row({ base: 'dev', reviewDecision: 'APPROVED' }), RELEASES), true);
   assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/not-in-policy', base: 'main' }), RELEASES), false);
   assert.equal(isReleaseCandidate(row({ repo: 'jwildfire/not-in-policy', base: 'main', reviewRequests: ['jwildfire'] }), RELEASES), true);
+});
+
+test('what the queue drops is named, never silently removed', () => {
+  // Both fixes leave something out of a panel. A queue that quietly loses a row and a
+  // queue that is right look identical, so each removal says where the row went.
+  const folded = foldedLane([{ id: 'D0015', into: 'D0017' }, { id: 'D0016', into: 'D0017' }]);
+  assert.match(folded, /2 decisions were folded/);
+  assert.match(folded, /D0015 &rarr; D0017/);
+  assert.match(folded, /D0016 &rarr; D0017/);
+
+  const std = standardLane([{ key: 'jwildfire/gsm.safety#51', base: 'dev', url: 'https://x/51' }]);
+  assert.match(std, /One other open PR is on the standard lane/);
+  assert.match(std, /gsm\.safety#51/);
+  assert.match(std, /<code>dev<\/code>/);
+
+  assert.equal(foldedLane([]), '');
+  assert.equal(standardLane([]), '');
 });
 
 test('the lane cache is its own file, so a running older server cannot choke on it', () => {

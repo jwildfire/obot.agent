@@ -150,6 +150,11 @@ export const RESTART_CMD = "pkill -f 'ops-dashboard.mjs --serve'";
  * ordinary feature PR into `dev`; removing them is the fix, and saying where they went
  * is what stops the fix from looking like a queue that lost something.
  */
+export const foldedLane = (folded = []) => (folded.length
+  ? `<p class="q-aside">${folded.length === 1 ? 'One decision was' : `${folded.length} decisions were`} folded into a later one and answered there: ${
+    folded.map((f) => `${esc(f.id ?? f.key)} &rarr; ${esc(f.into ?? 'its successor')}`).join(', ')}.</p>`
+  : '');
+
 export const standardLane = (standard = []) => (standard.length
   ? `<p class="q-aside">${standard.length === 1 ? 'One other open PR is' : `${standard.length} other open PRs are`} on the standard lane, not yours to review: ${
     standard.map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(String(s.key).replace(/^jwildfire\//, ''))}</a> &rarr; <code>${esc(s.base ?? '')}</code>`).join(', ')}.</p>`
@@ -659,6 +664,7 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
     ${group('Release candidates', queue.rcs.items, queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.', queue.rcs.moved)}
     ${standardLane(queue.rcs.standard)}
     ${group('Decisions', queue.decisions.items, 'All answered.', queue.decisions.moved)}
+    ${foldedLane(queue.decisions.folded)}
     ${group('Config', queue.config.items, 'Nothing needs your keyboard.', queue.config.moved)}
     ${queue.decisions.error ? `<p class="q-empty">Decisions unavailable: ${esc(queue.decisions.error)}</p>` : ''}
     ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
