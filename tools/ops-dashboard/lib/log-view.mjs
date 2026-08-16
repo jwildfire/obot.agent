@@ -94,7 +94,7 @@ export const LOG_CSS = `
   table.lg .lg-p { color:var(--muted); min-width:14rem; }
   table.lg .lg-r { color:var(--muted); min-width:8rem; }
   table.lg .lg-note { color:var(--faint); font-size:0.68rem; margin-top:0.15rem; }
-  table.lg .lg-v { font-size:0.64rem; letter-spacing:0.05em; text-transform:uppercase; }
+  table.lg .lg-v { font-size:0.64rem; letter-spacing:0.05em; text-transform:uppercase; white-space:nowrap; }
   table.lg .lg-v-confirmed { color:var(--good, #15803d); }
   table.lg .lg-v-drift { color:#c9a227; }
   table.lg .lg-v-none { color:var(--faint); }
