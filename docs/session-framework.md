@@ -138,6 +138,28 @@ line. The Overview rewrite is **re-read-then-replace, and only the lead does it*
   2026-07-31).
 - A sibling that reports in prose forces the lead to re-render it, which costs a round trip.
 
+## No inline bold
+
+(@jwildfire, 2026-08-16: *"I really don't like the randomly bolded sentences in the middle
+of paragraphs. Call things out in modals if they're super important, but no more random
+inline bold."* Swept and codified in
+[hub#198](https://github.com/jwildfire/obot.roadmap/issues/198); the binding contract for
+published pages is the hub's
+[`reports/decisions/README.md`](https://github.com/jwildfire/obot.roadmap/blob/main/reports/decisions/README.md).)
+
+- Never bold a sentence or a clause inside a body paragraph — not as its opening sentence,
+  not mid-sentence, not on a number inside a table cell's prose. He triages fast, often on a
+  phone; bold spread across a quarter of the text emphasises nothing.
+- Something that genuinely has to be seen gets a callout — a bordered block on a page, its
+  own short line in chat — never inline emphasis in the middle of a paragraph.
+- Structural bold stays: list-item and definition-list leads, table headers, a label or
+  value at the start of a cell, key–value strips, run-in labels that name what follows
+  (`Recommendation:`, `Sources.`), and standalone bold lines used as diary sub-headings.
+  The test for a label is whether it names the material after it or makes a claim.
+- His own words keep whatever emphasis they came with; a quotation is his text, not ours.
+- This covers everything he reads — artifacts, the diary, issue and PR bodies, chat, and
+  sibling report-backs.
+
 ## Multi-writer safety
 
 - Siblings are **append-only** under the scratchpad `## Session log`, **inserted under the
