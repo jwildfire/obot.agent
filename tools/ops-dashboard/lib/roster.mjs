@@ -435,19 +435,31 @@ export function usageIndex(usage, { epochDay = null, now = new Date(), current =
  * One row's cost cell. Four honest outcomes and no fifth: a figure, a stale figure
  * that says so, an agent the artifact is too old to know about, and no artifact at
  * all. None of them is `$0.00`, which is what an unread file looks like.
+ *
+ * Each carries a `short` as well as its sentence. The sentence is the explanation
+ * and belongs where explanations go; the short is what sits in a column. Putting
+ * the sentence in the column is what @jwildfire saw on 2026-08-16 — "not yet priced
+ * — it started after the last usage build" occupying the cost position of most
+ * current rows, so the column he asked for held prose and no number could be
+ * compared with any other. `code` names the case, so the page can print one legend
+ * line for each short it actually used rather than repeating the sentence per row.
  */
 function costCell(usage, { id, label, startedAt }) {
-  if (!usage || usage.missing) return { value: null, text: 'cost unavailable — no usage artifact', sub: null };
+  if (!usage || usage.missing) {
+    return { value: null, code: 'unavailable', short: 'n/a', text: 'cost unavailable — no usage artifact', sub: null };
+  }
   const bucket = (id && usage.byId.get(id)) || (label && usage.byLabel.get(label)) || null;
   if (!bucket) {
     if (startedAt && usage.generatedAt && Date.parse(startedAt) > Date.parse(usage.generatedAt)) {
-      return { value: null, text: 'not yet priced — it started after the last usage build', sub: null };
+      return { value: null, code: 'unpriced', short: 'unpriced', text: 'not yet priced — it started after the last usage build', sub: null };
     }
-    return { value: null, text: 'no usage recorded', sub: null };
+    return { value: null, code: 'none', short: '—', text: 'no usage recorded', sub: null };
   }
   const days = [...bucket.days].sort();
   return {
     value: bucket.cost,
+    code: usage.stale ? 'stale' : 'priced',
+    short: money(bucket.cost),
     text: `${money(bucket.cost)}${usage.stale ? ' as of the last usage build' : ''}`,
     calls: bucket.calls,
     sub: bucket.subCost > 0 ? { cost: bucket.subCost, calls: bucket.subCalls } : null,
@@ -585,12 +597,12 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
 // ---- the section --------------------------------------------------------
 
 /**
- * The roster as a `## Heading` section.
+ * The roster as a `## Heading` section — the TEXT form, not the page.
  *
- * Markdown rather than markup because the dashboard already renders any heading and
- * bullet list a state file carries (lib/navigator.mjs) — so this reaches the page
- * with no table code, and the layout that already holds at 390px keeps holding.
- * Indented bullets are the row's detail and render as a disclosure.
+ * The page is `roster-view.mjs`. This stays because a flat, greppable dump of the
+ * same model is genuinely useful (a terminal, a paste into an issue) and because it
+ * renders through the generic section seam with no layout of its own. It is one
+ * rendering of one model, never a second source: both read `buildRoster`.
  */
 export function rosterMarkdown(model) {
   const out = ['## Agents', ''];
@@ -691,6 +703,14 @@ export function readJobs(jobsDir) {
 /**
  * The whole roster, assembled from the four files and nothing else.
  *
+ * Returns the MODEL. It used to return markdown, so that the dashboard's generic
+ * `## Heading` renderer could lay the roster out with no table code — which was the
+ * right call for shipping it and the wrong one for reading it. That renderer can
+ * only produce a flat list of identically-weighted bullets, so twenty-five agents
+ * arrived as a wall of prose with the cost buried mid-sentence and no way to tell a
+ * worker that moved a requirement from a probe that died. `rosterMarkdown` is still
+ * here as the text form; `roster-view.mjs` is what the page renders.
+ *
  * The usage artifact carries no build stamp of its own, so its file time is what
  * dates it — which is the right reading anyway: the question is when the pricing
  * last ran, not which day it counted.
@@ -711,5 +731,5 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
   const epochDay = workers.epoch ? workers.epoch.slice(0, 10) : null;
   const usage = usageIndex(stamped, { epochDay, now, current: currentLabels(jobs, epochDay, now) });
 
-  return rosterMarkdown(buildRoster({ workers, jobs, usage, delivery, now }));
+  return buildRoster({ workers, jobs, usage, delivery, now });
 }

@@ -18,6 +18,8 @@ import { wakeText, DISMISS_MEANS } from './triage.mjs';
 import { CRITICAL_BUDGET } from './rank.mjs';
 import { parseNavigatorState } from './navigator.mjs';
 import { phrase } from './last-seen.mjs';
+import { esc } from './esc.mjs';
+import { rosterHtml, ROSTER_CSS } from './roster-view.mjs';
 
 /**
  * The long form of the header's last-look phrase, for the tooltip.
@@ -34,9 +36,7 @@ export function lastLookTitle(v) {
   return `You last opened this page at ${new Date(v.at).toLocaleString()}. Recorded locally, never published.`;
 }
 
-export const esc = (s = '') => String(s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+export { esc };
 
 const KIND = {
   rc: { label: 'release candidate', tone: 'rc' },
@@ -58,7 +58,7 @@ const KIND = {
  */
 export const TABS = [
   { id: 'ops', href: '/', label: 'Operations' },
-  { id: 'session', href: '/live.html', label: 'Session' },
+  { id: 'session', href: '/live.html', label: 'Agents' },
   { id: 'navigator', href: '/navigator', label: 'Navigator' },
 ];
 
@@ -413,40 +413,57 @@ const DASHBOARD_CSS = `
  * different tool on its own watch loop — wrapping it means the merge costs neither
  * generator a line of layout, and nothing in it can be lost in translation.
  */
+/**
+ * The Agents tab: the roster IS the page.
+ *
+ * It used to be a roster stacked on top of the entire older session-hub view, each
+ * with its own stat cards and its own answer to "how many agents" — 23 on one, 28 on
+ * the other. @jwildfire's verdict on 2026-08-16 was "the sessions page is still a
+ * mess", and the duplication was the worst of it: one page answering the same
+ * question twice with different numbers leaves a reader unable to tell which is true.
+ *
+ * The older view is kept rather than deleted — its accomplishments feed is real and
+ * nothing else carries it — but it is collapsed, and its summary says why its count
+ * differs instead of leaving him to discover the contradiction. One live answer on
+ * screen at a time.
+ *
+ * `roster` is the MODEL now, not markdown. The generic section renderer that used to
+ * lay this out cannot express groups, columns or weight, which is what made the page
+ * a wall; see lib/roster-view.mjs.
+ */
 export function sessionShell({ frame = '/session/frame', missing = null, roster = null } = {}) {
-  const sections = roster ? parseNavigatorState(roster).sections : [];
+  const body = roster && typeof roster === 'object' && Array.isArray(roster.rows)
+    ? rosterHtml(roster)
+    // A roster that could not be assembled arrives as a string, and says so in
+    // place of the page rather than rendering an empty one that reads as "no agents".
+    : (roster ? `<p class="ag-empty">${esc(String(roster))}</p>` : '');
   const live = missing
-    ? `<p class="missing">No session view yet — start the watch loop:<br><code>${esc(missing)}</code></p>`
-    : `<iframe class="frame" title="Session hub" src="${esc(frame)}"></iframe>`;
+    ? `<p class="why">No session view yet — start the watch loop: <code>${esc(missing)}</code></p>`
+    : `<p class="why">The session-level view, kept for its accomplishments feed. Its AGENTS card counts sessions reporting into the session hub, which is a different population from the agents above — expect the two numbers to differ.</p>
+    <iframe title="Session hub" src="${esc(frame)}" loading="lazy"></iframe>`;
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Session · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}
-  body { display:flex; flex-direction:column; }
-  iframe.frame { flex:1; width:100%; border:0; min-height:22rem; }
-  .missing { padding:1.2rem; color:var(--muted); font-size:0.85rem; }
-  .missing code { font-family:var(--mono); font-size:0.78rem; }
-  /* With a roster above it the page scrolls, so the frame takes a share of the
-     viewport rather than the leftovers — on a phone "the leftovers" is nothing. */
-  body.has-roster { display:block; }
-  body.has-roster iframe.frame { height:70vh; border-top:1px solid var(--line); display:block; }
+<title>Agents · obot</title>
+<style>${SHELL_CSS}${NAV_CSS}${ROSTER_CSS}
 </style>
 </head>
-<body${sections.length ? ' class="has-roster"' : ''}>
+<body>
 <header class="top">
   <span class="brand">🍊😺 obot</span>
   ${tabs('session')}
   <span class="spacer"></span>
-  <span class="where">local only</span>
+  <span class="where"><span class="wide">local only</span></span>
 </header>
-${sections.length ? `<div class="nav-wrap">
-${sectionsHtml(sections)}
-<h2 class="nav-h">Live session view</h2>
-</div>` : ''}
-${live}
+<div class="ag-wrap">
+${body}
+<details class="livewrap">
+  <summary>Live session view</summary>
+  ${live}
+</details>
+</div>
 </body>
 </html>`;
 }

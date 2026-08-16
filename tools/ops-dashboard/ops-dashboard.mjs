@@ -315,7 +315,7 @@ export function serve(args) {
         try {
           roster = collectRoster({ workspace: args.workspace, hub: args.hub });
         } catch (e) {
-          roster = `## Agents\n\n- the roster could not be assembled: ${e.message}\n`;
+          roster = `The roster could not be assembled: ${e.message}`;
         }
         return send(200, 'text/html; charset=utf-8', sessionShell({
           missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
