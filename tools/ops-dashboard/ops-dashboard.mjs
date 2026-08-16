@@ -46,6 +46,7 @@ import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { ensureStore } from './lib/store.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
 import { triage } from './lib/triage.mjs';
+import { collectRoster } from './lib/roster.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 7326;
@@ -250,9 +251,22 @@ export function serve(args) {
       // The second tab. `/live.html` is the address the status line already builds;
       // `/session` is the readable alias, and `/session/frame` is the session hub's
       // own render, served byte-for-byte inside the shell.
+      //
+      // The roster is assembled per request from the four files it joins, never
+      // cached: the whole column set is about what is happening now, and a roster
+      // showing a finished agent as running is worse than no roster. If assembling
+      // it throws, the tab still serves the live view — the roster is an addition
+      // to this tab and must not be able to take it down.
       if (p === '/live.html' || p === '/session' || p === '/session/') {
+        let roster = null;
+        try {
+          roster = collectRoster({ workspace: args.workspace, hub: args.hub });
+        } catch (e) {
+          roster = `## Agents\n\n- the roster could not be assembled: ${e.message}\n`;
+        }
         return send(200, 'text/html; charset=utf-8', sessionShell({
           missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
+          roster,
         }));
       }
       if (p === '/session/frame') {
