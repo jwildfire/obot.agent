@@ -17,7 +17,7 @@ import {
   markApplied, resolveDecision, answersSection, OVERDUE_MIN,
 } from '../lib/answers.mjs';
 import { artifactPath, parseArgs, serve } from '../ops-dashboard.mjs';
-import { render, sessionShell, navigatorShell, navigatorRecordShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
+import { render, sessionShell, sessionLogShell, navigatorShell, navigatorRecordShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
 import { parseNavigatorState } from '../lib/navigator.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'opsdash-'));
@@ -313,10 +313,14 @@ test('both views are tabs on one site and the dashboard is the default', () => {
   assert.ok(/href="\/"[^>]*aria-current="page"/.test(ops), 'the Operations tab is current on /');
   assert.ok(ops.includes('href="/live.html"'), 'the session hub is reachable as the second tab');
 
-  const session = sessionShell({ frame: '/session/frame' });
+  const session = sessionShell({});
   assert.ok(session.includes('class="tabs"'), 'the same header carries across both tabs');
   assert.ok(/href="\/live\.html"[^>]*aria-current="page"/.test(session), 'the session tab is current on /live.html');
-  assert.ok(session.includes('src="/session/frame"'), 'the session view renders unchanged inside the shell');
+  // The old live view moved to the record page — the brief links it, one answer
+  // per page (jwildfire/obot.roadmap#218).
+  assert.ok(!session.includes('src="/session/frame"'), 'the brief carries no second dashboard');
+  const log = sessionLogShell({ roster: null });
+  assert.ok(log.includes('src="/session/frame"'), 'the session view renders unchanged inside the record shell');
 });
 
 test('an empty queue says so rather than rendering an empty frame', () => {
@@ -582,7 +586,11 @@ test('one site, one port: the dashboard is / and the session hub is /live.html',
     // on the session tab, not a 404.
     const session = await get('/live.html');
     assert.equal(session.status, 200);
-    assert.ok(session.body.includes('/session/frame'), 'the session tab wraps the session-hub view');
+    assert.ok(session.body.includes('/session/log'), 'the brief links the full record');
+    // The old live view lives on the record page now, not on the brief.
+    const log = await get('/session/log');
+    assert.equal(log.status, 200);
+    assert.ok(log.body.includes('/session/frame'), 'the record page wraps the session-hub view');
 
     const frame = await get('/session/frame');
     assert.ok(frame.body.includes('<p>live</p>'), 'the session-hub render is served unchanged');

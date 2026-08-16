@@ -40,9 +40,11 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { collectQueue, refreshRCs } from './lib/collect.mjs';
-import { render, sessionShell, navigatorShell, navigatorRecordShell, NOT_LISTENING } from './lib/render.mjs';
+import { render, sessionShell, sessionLogShell, navigatorShell, navigatorRecordShell, NOT_LISTENING } from './lib/render.mjs';
 import { parseNavigatorState } from './lib/navigator.mjs';
 import { buildMetricsModel, buildFeedModel } from './lib/metrics-view.mjs';
+import { buildSessionFeed } from './lib/feed.mjs';
+import { parseDeliveryJournal } from './lib/log-view.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
@@ -302,26 +304,38 @@ export function serve(args) {
       if (p === '/' || p === '/index.html') return send(200, 'text/html; charset=utf-8', await page(args, look().before));
 
       // The second tab. `/live.html` is the address the status line already builds;
-      // `/session` is the readable alias, and `/session/frame` is the session hub's
-      // own render, served byte-for-byte inside the shell.
+      // `/session` is the readable alias, `/session/log` is the full record, and
+      // `/session/frame` is the session hub's own render, served byte-for-byte
+      // inside the log's shell.
       //
       // The roster is assembled per request from the four files it joins, never
       // cached: the whole column set is about what is happening now, and a roster
       // showing a finished agent as running is worse than no roster. If assembling
-      // it throws, the tab still serves the live view — the roster is an addition
-      // to this tab and must not be able to take it down.
-      if (p === '/live.html' || p === '/session' || p === '/session/') {
-        look();
+      // it throws, the tab still serves the feed — neither the roster nor the feed
+      // may take the other down.
+      if (p === '/live.html' || p === '/session' || p === '/session/' || p === '/session/log') {
+        const before = look().before;
         let roster = null;
         try {
           roster = collectRoster({ workspace: args.workspace, hub: args.hub });
         } catch (e) {
           roster = `The roster could not be assembled: ${e.message}`;
         }
-        return send(200, 'text/html; charset=utf-8', sessionShell({
-          missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
-          roster,
-        }));
+        if (p === '/session/log') {
+          let delivery = { verdicts: [], calls: [] };
+          try {
+            delivery = parseDeliveryJournal(fs.readFileSync(path.join(args.workspace, ...SESSION_DIR, 'delivery.journal'), 'utf8'));
+          } catch { /* no journal yet — the tables say so */ }
+          return send(200, 'text/html; charset=utf-8', sessionLogShell({
+            roster, delivery, lastLook: before,
+            missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
+          }));
+        }
+        let feed = [];
+        try {
+          feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
+        } catch { /* a feed that cannot assemble costs the feed, never the page */ }
+        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, feed, lastLook: before }));
       }
       if (p === '/session/frame') {
         const live = sessionLivePath(args.workspace);

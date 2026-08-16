@@ -121,6 +121,18 @@ const BADGES = {
   'comments-new': ['COMMENTS', 'b-quiet'],
   'rc-gone': ['RC CLOSED', 'b-done'],
   'answer-new': ['HIS ANSWER', 'b-answer'],
+  // The session feed's kinds (lib/feed.mjs) — same renderer, same rules.
+  'verdict-confirmed': ['DELIVERED', 'b-answer'],
+  'verdict-drift': ['DRIFT', 'b-review'],
+  'verdict-none': ['NO DELIVERY', 'b-quiet'],
+  claim: ['CLAIMED', 'b-quiet'],
+  death: ['DIED', 'b-bad'],
+  done: ['FINISHED', 'b-done'],
+  call: ['NAVIGATOR', 'b-review'],
+  'gh-merged': ['MERGED', 'b-new'],
+  'gh-closed': ['CLOSED', 'b-done'],
+  'gh-requirement': ['REQUIREMENT', 'b-review'],
+  'gh-release': ['RELEASE', 'b-new'],
 };
 
 const cleanLine = (line = '') => line
@@ -209,4 +221,5 @@ export const METRICS_CSS = `
   .b-done { background:var(--line); color:var(--muted); }
   .b-quiet { background:transparent; color:var(--faint); border:1px solid var(--line); }
   .b-answer { background:var(--good-soft, #dcfce7); color:var(--good, #15803d); }
+  .b-bad { background:var(--accent-soft); color:var(--crit, #b91c1c); }
 `;

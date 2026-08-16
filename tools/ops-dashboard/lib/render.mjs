@@ -20,7 +20,8 @@ import { parseNavigatorState } from './navigator.mjs';
 import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
-import { rosterHtml, ROSTER_CSS } from './roster-view.mjs';
+import { rosterHtml, briefParts, ROSTER_CSS } from './roster-view.mjs';
+import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
 
 /**
  * The long form of the header's last-look phrase, for the tooltip.
@@ -414,41 +415,13 @@ const DASHBOARD_CSS = `
  * different tool on its own watch loop — wrapping it means the merge costs neither
  * generator a line of layout, and nothing in it can be lost in translation.
  */
-/**
- * The Agents tab: the roster IS the page.
- *
- * It used to be a roster stacked on top of the entire older session-hub view, each
- * with its own stat cards and its own answer to "how many agents" — 23 on one, 28 on
- * the other. @jwildfire's verdict on 2026-08-16 was "the sessions page is still a
- * mess", and the duplication was the worst of it: one page answering the same
- * question twice with different numbers leaves a reader unable to tell which is true.
- *
- * The older view is kept rather than deleted — its accomplishments feed is real and
- * nothing else carries it — but it is collapsed, and its summary says why its count
- * differs instead of leaving him to discover the contradiction. One live answer on
- * screen at a time.
- *
- * `roster` is the MODEL now, not markdown. The generic section renderer that used to
- * lay this out cannot express groups, columns or weight, which is what made the page
- * a wall; see lib/roster-view.mjs.
- */
-export function sessionShell({ frame = '/session/frame', missing = null, roster = null } = {}) {
-  const body = roster && typeof roster === 'object' && Array.isArray(roster.rows)
-    ? rosterHtml(roster)
-    // A roster that could not be assembled arrives as a string, and says so in
-    // place of the page rather than rendering an empty one that reads as "no agents".
-    : (roster ? `<p class="ag-empty">${esc(String(roster))}</p>` : '');
-  const live = missing
-    ? `<p class="why">No session view yet — start the watch loop: <code>${esc(missing)}</code></p>`
-    : `<p class="why">The session-level view, kept for its accomplishments feed. Its AGENTS card counts sessions reporting into the session hub, which is a different population from the agents above — expect the two numbers to differ.</p>
-    <iframe title="Session hub" src="${esc(frame)}" loading="lazy"></iframe>`;
-  return `<!doctype html>
+const agentsPage = (body, { lastLook = null } = {}) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agents · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}${ROSTER_CSS}
+<style>${SHELL_CSS}${NAV_CSS}${ROSTER_CSS}${METRICS_CSS}${LOG_CSS}
 </style>
 </head>
 <body>
@@ -456,17 +429,67 @@ export function sessionShell({ frame = '/session/frame', missing = null, roster 
   <span class="brand">🍊😺 obot</span>
   ${tabs('session')}
   <span class="spacer"></span>
-  <span class="where"><span class="wide">local only</span></span>
+  <span class="where" title="${esc(lastLookTitle(lastLook))}"><span class="wide">local only · </span>${esc(phrase(lastLook))}</span>
 </header>
 <div class="ag-wrap">
 ${body}
-<details class="livewrap">
-  <summary>Live session view</summary>
-  ${live}
-</details>
 </div>
 </body>
 </html>`;
+
+/**
+ * The Agents tab — the brief, for a reader who was not present
+ * (jwildfire/obot.roadmap#218).
+ *
+ * The headline first, then what changed as a feed, then only the groups that need
+ * him now: running, and ended badly. The delivered and produced-nothing rosters,
+ * the folds, the legend and the old live view live at /session/log — his page
+ * says "twelve delivered" and links the record rather than rendering it, because
+ * the record's register is for its dense readers and he said so: the pages read
+ * like audit logs for bots.
+ *
+ * `roster` is the MODEL; a roster that could not be assembled arrives as a string
+ * and says so in place of the page rather than rendering an empty one that reads
+ * as "no agents".
+ */
+export function sessionShell({ roster = null, feed = [], lastLook = null } = {}) {
+  const ok = roster && typeof roster === 'object' && Array.isArray(roster.rows);
+  const parts = ok ? briefParts(roster) : null;
+  const body = parts
+    ? (parts.empty ?? `${parts.headline}
+${feedHtml(feed)}
+${parts.live}
+${parts.bad}
+${parts.countsLine}
+${parts.foot}`)
+    : `<p class="ag-empty">${esc(String(roster ?? 'The roster could not be assembled.'))}</p>
+${feedHtml(feed)}
+<p class="ag-more"><a href="/session/log">The full record →</a></p>`;
+  return agentsPage(body, { lastLook });
+}
+
+/**
+ * The full record — /session/log, the log as an actual table, written for the
+ * readers who come to check one thing against another: every agent grouped by
+ * outcome, every delivery verdict and every Navigator call from the typed
+ * journal, the pre-ledger fold, and the old session-level live view.
+ */
+export function sessionLogShell({ roster = null, delivery = { verdicts: [], calls: [] }, frame = '/session/frame', missing = null, lastLook = null } = {}) {
+  const rosterBody = roster && typeof roster === 'object' && Array.isArray(roster.rows)
+    ? rosterHtml(roster)
+    : `<p class="ag-empty">${esc(String(roster ?? 'The roster could not be assembled.'))}</p>`;
+  const live = missing
+    ? `<p class="why">No session view yet — start the watch loop: <code>${esc(missing)}</code></p>`
+    : `<p class="why">The session-level view, kept for its history. Its AGENTS card counts sessions reporting into the session hub, which is a different population from the agents above — expect the two numbers to differ.</p>
+    <iframe title="Session hub" src="${esc(frame)}" loading="lazy"></iframe>`;
+  const body = `<p class="reclink"><a href="/session">← The brief</a></p>
+${rosterBody}
+${deliveryTablesHtml(delivery)}
+<details class="livewrap">
+  <summary>Live session view</summary>
+  ${live}
+</details>`;
+  return agentsPage(body, { lastLook });
 }
 
 const NAV_CSS = `
