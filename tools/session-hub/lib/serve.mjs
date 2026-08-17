@@ -19,6 +19,10 @@ import path from 'node:path';
 // dashboard owns this seam — both servers hand him pages and both record here.
 import { seenAndNote } from '../../ops-dashboard/lib/last-seen.mjs';
 
+// The marker rules live beside that one, for the same reason: both servers write it,
+// so it belongs to neither of them (jwildfire/obot.agent#142).
+import { holdServeMarker } from '../../ops-dashboard/lib/serve-marker.mjs';
+
 export const DEFAULT_PORT = 7325;
 const HOST = '127.0.0.1';
 
@@ -117,27 +121,18 @@ export function listen({ dir, port = DEFAULT_PORT, tries = 10, workspace }) {
 
 /**
  * Serve `dir` and advertise the endpoint in `serve.json` beside the live view, so
- * the status line (and anything else) can find the port without guessing. The file
- * is removed on exit; a reader should still check that `pid` is alive, since a
- * killed process leaves it behind.
+ * the status line (and anything else) can find the port without guessing.
+ *
+ * Claiming the marker is conditional and declining is normal for a second instance —
+ * the rules are in `ops-dashboard/lib/serve-marker.mjs`. `claim: false` (what an
+ * explicit non-default `--port` produces) declines outright; the returned `cleanup`
+ * is then a no-op, so a server that never wrote the marker can never remove it.
  */
-export async function serveHub({ dir, port = DEFAULT_PORT, workspace }) {
+export async function serveHub({ dir, port = DEFAULT_PORT, workspace, claim = true }) {
   const started = await listen({ dir, port, workspace });
   const marker = path.join(dir, 'serve.json');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(marker, `${JSON.stringify({
-    port: started.port, pid: process.pid, url: started.url, startedAt: new Date().toISOString(),
-  }, null, 2)}\n`);
-
-  const cleanup = () => {
-    try {
-      const current = JSON.parse(fs.readFileSync(marker, 'utf8'));
-      if (current.pid === process.pid) fs.unlinkSync(marker);
-    } catch { /* already gone, or another server's marker — leave it */ }
-  };
-  process.on('exit', cleanup);
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    process.on(sig, () => { cleanup(); process.exit(0); });
-  }
-  return { ...started, marker, cleanup };
+  const held = holdServeMarker(marker, {
+    port: started.port, url: started.url, site: 'session-hub', requestedPort: port, claim,
+  });
+  return { ...started, marker, claim: held, cleanup: held.release };
 }

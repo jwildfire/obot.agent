@@ -18,7 +18,10 @@
 //   --slug <slug>       report slug override (default: derived from the session marker)
 //   --interval <sec>    watch interval (default 60)
 //   --serve             also serve the live view on http://127.0.0.1:7325/live.html
-//   --port <n>          serve port (default 7325; the next free port is used if taken)
+//   --port <n>          serve port (default 7325; the next free port is used if taken).
+//                       Naming a port other than the default marks this as a test
+//                       server: it serves normally but never claims the serve marker
+//                       the status line reads (jwildfire/obot.agent#142)
 //   --open              print the live view's URL after the first render
 //   --emit-state <file> also write a small session-state JSON (see sessionState below)
 
@@ -33,8 +36,10 @@ import { buildModel } from './lib/model.mjs';
 import { render } from './lib/render.mjs';
 import { serveHub, DEFAULT_PORT } from './lib/serve.mjs';
 
-function parseArgs(argv) {
-  const args = { watch: false, report: false, open: false, serve: false, interval: 60, port: DEFAULT_PORT };
+export function parseArgs(argv) {
+  // `claimMarker`: an explicit non-default port means a test server, and a test
+  // server never takes the marker off the machine's real dashboard (#142).
+  const args = { watch: false, report: false, open: false, serve: false, interval: 60, port: DEFAULT_PORT, claimMarker: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--watch') args.watch = true;
@@ -46,7 +51,7 @@ function parseArgs(argv) {
     else if (a === '--slug') args.slug = argv[++i];
     else if (a === '--interval') args.interval = Number(argv[++i]) || 60;
     else if (a === '--serve') args.serve = true;
-    else if (a === '--port') args.port = Number(argv[++i]) || DEFAULT_PORT;
+    else if (a === '--port') { args.port = Number(argv[++i]) || DEFAULT_PORT; args.claimMarker = args.port === DEFAULT_PORT; }
     else if (a === '--emit-state') args.emitState = argv[++i];
     else if (a === '--help' || a === '-h') { args.help = true; }
     else { console.error(`unknown option: ${a}`); process.exit(2); }
@@ -141,7 +146,11 @@ async function main() {
     // A port collision must not take the watch loop down with it: the live view is
     // still on disk, and file:// still opens it.
     try {
-      ({ url: servedUrl } = await serveHub({ dir: path.dirname(out), port: args.port, workspace }));
+      let claim;
+      ({ url: servedUrl, claim } = await serveHub({
+        dir: path.dirname(out), port: args.port, workspace, claim: args.claimMarker !== false,
+      }));
+      if (!claim.claimed) console.log(`[session-hub] not claiming the serve marker — ${claim.reason}`);
       console.log(`[session-hub] serving ${servedUrl}`);
     } catch (err) {
       console.error(`[session-hub] serve failed (${err.message}) — the file:// view still works`);
