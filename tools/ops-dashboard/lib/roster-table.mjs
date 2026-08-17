@@ -32,19 +32,21 @@
 // column pinned so a row never loses its name.
 import { esc } from './esc.mjs';
 import { PRICE_NOTE, ID_NOTE, DEAD_SHOWN } from './roster.mjs';
-import { kindOf } from './roster-view.mjs';
+import { STANDING_ROLES, kindOf } from './roster-view.mjs';
+import { emptyPins, pinState, pinnedRoles } from './pins.mjs';
 
 const money = (n) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // Statuses that mean no session ever ran under this row, so it has nothing to have
 // produced. Kept in step with roster-view.mjs, where the same set decides grouping.
-const NO_SESSION = new Set(['not launched', 'no job record', 'subagent']);
+// `not running` is this view's own: a pinned role with no session at all.
+const NO_SESSION = new Set(['not launched', 'no job record', 'subagent', 'not running']);
 
 // The order statuses appear in the sidebar when they appear at all. Anything the
 // roster invents that is not on this list sorts after it rather than vanishing —
 // a filter that silently omits a status hides exactly the rows worth seeing.
-const STATUS_ORDER = ['running', 'stale', 'died', 'waiting', 'finished', 'not launched', 'no job record', 'subagent'];
+const STATUS_ORDER = ['running', 'stale', 'died', 'waiting', 'finished', 'not launched', 'no job record', 'subagent', 'not running'];
 
 const KIND_LABEL = {
   worker: 'Worker',
@@ -258,6 +260,47 @@ export function unattributedRow(u) {
 }
 
 /**
+ * A row for a pinned role that has no session on this machine at all.
+ *
+ * The fleet manager is short-lived by design (obot.agent#167): it launches when a
+ * condition fires, acts, and exits, so ABSENT is its ordinary state. A pinned role
+ * with no row leaves a gap, and a gap cannot say whether the role is resting or
+ * broken — which is the same failure as a pin that drops its subject on death, one
+ * step earlier. So the row exists and says which it is.
+ *
+ * `cost.value` is null, never 0: a role that has not run has no cost, and $0.00
+ * would be a figure this page did not measure.
+ */
+export function restingRow(role) {
+  return {
+    id: null,
+    idText: 'no session',
+    label: role.name,
+    slug: role.role,
+    kind: 'standing',
+    task: '',
+    claimedAt: null,
+    startedAt: null,
+    lastAt: null,
+    days: [],
+    sessions: 0,
+    tokens: 0,
+    resting: true,
+    role,
+    status: { status: 'not running', note: role.resting },
+    cost: { value: null, code: 'none', short: '—', text: 'no session, so nothing to price', calls: 0, sub: null, span: null, days: [] },
+    impact: { moved: [], closed: [], mentioned: [], verdicts: [], empty: true, summary: 'no session' },
+    subs: [],
+  };
+}
+
+/** One resting row per pinned role the roster has no row for. */
+export function restingRows(rows = [], pins = emptyPins()) {
+  const present = (role) => rows.some((r) => String(r.label ?? '').startsWith(role.tag));
+  return pinnedRoles(pins).filter((role) => !present(role)).map(restingRow);
+}
+
+/**
  * The rows the table renders, and the facet of each — the roster in the order it is
  * first painted, which is newest created first.
  *
@@ -349,6 +392,10 @@ const refLink = (r) => (r.url
  */
 function impactCell(row, f) {
   const i = row.impact;
+  // A pinned role with no session. It has moved nothing, and saying "nothing moved"
+  // about a role that has not run would read as a failed agent — the same lie the
+  // three silences below were separated to stop telling.
+  if (row.resting) return `<span class="im-none">${esc(row.status.note)}</span>`;
   if (row.synthetic) return '<span class="im-none">not attributable — no id, so nothing they wrote can be traced to them</span>';
   if (row.status.status === 'not launched') return '<span class="im-none">no session ever ran under this id</span>';
   if (i.empty) {
@@ -437,20 +484,42 @@ const STATUS_TONE = {
 
 const COLS = 8;
 
+/**
+ * The pin control. Rendered on every row, not only on the pinned ones: a control
+ * that appears when you already have the thing cannot be used to get it, and there
+ * is no hover on the screen he reads this on.
+ *
+ * `title` says why the pin is on when he never clicked it — a default he cannot
+ * account for is indistinguishable from a bug.
+ */
+function pinButton(row, p) {
+  const name = row.id ?? row.label;
+  const why = p.pinned
+    ? (p.explicit
+      ? 'Pinned — click to unpin.'
+      : 'Pinned by default: it is a standing role rather than a piece of work. Click to unpin.')
+    : 'Not pinned — click to pin it to the top.';
+  return `<button type="button" class="at-pin" data-key="${esc(p.key)}" data-pinned="${p.pinned ? 'yes' : 'no'}"
+    aria-pressed="${p.pinned ? 'true' : 'false'}" title="${why}"
+    aria-label="${p.pinned ? 'Unpin' : 'Pin'} ${esc(String(name))}">📌</button>`;
+}
+
 /** One agent: the row, and the evidence row beneath it that opens on a tap. */
-export function tableRow({ row, f }, index) {
+export function tableRow({ row, f }, index, { pins = emptyPins() } = {}) {
   const tone = STATUS_TONE[f.status] ?? 'done';
   const name = row.id ?? row.label;
-  const sub = row.id ? (row.slug || '') : (row.synthetic ? row.slug : '');
+  const sub = row.id ? (row.slug || '') : ((row.synthetic || row.resting) ? row.slug : '');
   const evId = `ev-${index}`;
+  const p = pinState(row, pins);
   return `<tr class="ar" data-tone="${esc(tone)}" tabindex="0" role="button" aria-expanded="false" aria-controls="${evId}"
   data-status="${esc(f.status)}" data-kind="${esc(f.kind)}" data-produced="${esc(f.produced.join(' '))}"
   data-verdict="${esc(f.verdict.join(' '))}" data-repo="${esc(f.repo.join(' '))}"
   data-last="${esc(f.lastDay)}" data-cost="${f.cost === null ? '' : f.cost}"
   data-created="${f.createdTs === null ? '' : f.createdTs}" data-createdday="${esc(f.createdDay)}"
   data-model="${esc(f.models.join(' ') || 'unknown')}"
+  data-pinned="${p.pinned ? 'yes' : 'no'}"${row.resting ? ' data-resting="yes"' : ''}
   data-name="${esc(String(name).toLowerCase())}">
-  <td class="c-name"><span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span><span class="ag-born">${f.createdDay ? `created ${esc(f.createdDay)}` : 'created unknown'}</span></td>
+  <td class="c-name">${pinButton(row, p)}<span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span><span class="ag-born">${f.createdDay ? `created ${esc(f.createdDay)}` : 'created unknown'}</span></td>
   <td class="c-st"><span class="tone-${esc(tone)}">${esc(f.status)}</span></td>
   <td class="c-cost cost-${esc(row.cost.code ?? 'none')}" title="${esc(row.cost.text)}">${esc(row.cost.short ?? '—')}</td>
   <td class="c-model">${modelCell(row, f)}</td>
@@ -521,20 +590,46 @@ const foot = (model) => `<details class="ag-foot">
     <li>Status is the job record joined to its append-only timeline. Where the two disagree the timeline wins, because a state file can say done over a session that fell over.</li>
     <li>Impact is the Navigator delivery record, checked against GitHub — never the job records' own child list, which is empty for nearly half of measured jobs.</li>
     <li>Filter counts are over the whole roster, not over the current selection, so they say what ticking a box would give you.</li>
+    <li>Pinned rows sit at the top and are never dropped from this table — not when they end, and not when they die. The standing roles (${esc(STANDING_ROLES.map((r) => r.role).join(', '))}) are pinned by default because of what they are, not by name; unpinning one sticks. Pins are yours, kept on this machine, and never published.</li>
+    <li>A pinned role with no session at all still gets a row, reading <code>not running</code>. An absent row would read as health, and a quiet system must not look like a broken one.</li>
     ${model.droppedDeaths ? `<li>${plural(model.droppedDeaths, 'earlier agent')} that also ended badly are not shown; the list of deaths is capped at ${DEAD_SHOWN}.</li>` : ''}
     ${model.epochDay ? `<li>Scope: agents active since the ledger was adopted on ${esc(model.epochDay)}, plus every agent that ended badly whenever it ran.</li>` : ''}
   </ul>
 </details>`;
 
+const secRow = (label, note, extra = '') => `<tr class="at-sec"><td colspan="${COLS}"><span class="at-secl">${esc(label)}</span><span class="at-secn">${esc(note)}</span>${extra}</td></tr>`;
+
 /** The Agents table: sidebar, table, and the note about what the numbers are. */
-export function agentsTableHtml(model, { now = new Date() } = {}) {
+export function agentsTableHtml(model, { now = new Date(), pins = emptyPins() } = {}) {
   if (!model || typeof model !== 'object' || !Array.isArray(model.rows)) {
     return `<p class="ag-empty">${esc(String(model ?? 'The roster could not be assembled.'))}</p>`;
   }
-  const { rows, cutoffs } = tableRows(model, { now });
+  // A pinned role with no session gets its row here rather than in the model: the
+  // model reports what ran, and a role that has not run is a fact about his pins.
+  const resting = restingRows(model.rows, pins);
+  const { rows, cutoffs } = tableRows(
+    resting.length ? { ...model, rows: [...model.rows, ...resting] } : model, { now },
+  );
   if (!rows.length) return '<p class="ag-empty">No agent has run since the worker ledger was adopted.</p>';
   const filters = buildFilters(rows);
   const cost = rows.reduce((n, r) => n + (r.f.cost ?? 0), 0);
+
+  // Pinned first, and the order inside each block is the order the sort produced —
+  // pinning changes which block a row is in, never how a block is ranked.
+  const pinned = rows.filter((r) => pinState(r.row, pins).pinned);
+  const rest = rows.filter((r) => !pinState(r.row, pins).pinned);
+  const bodies = pinned.length
+    ? `<tbody class="at-b" data-sec="pinned">
+        ${secRow('Pinned', 'always here, whatever their status', '<span class="at-sechid" id="at-pinhid" hidden></span>')}
+${pinned.map((r, i) => tableRow(r, `p${i}`, { pins })).join('\n')}
+      </tbody>
+      <tbody class="at-b" data-sec="rest">
+        ${secRow('Everything else', 'newest first, until you sort a column')}
+${rest.map((r, i) => tableRow(r, i, { pins })).join('\n')}
+      </tbody>`
+    : `<tbody class="at-b" data-sec="rest">
+${rest.map((r, i) => tableRow(r, i, { pins })).join('\n')}
+      </tbody>`;
 
   return `<div class="at" id="agents">
 ${sidebar(filters, cutoffs, rows.length, cost)}
@@ -551,9 +646,7 @@ ${sidebar(filters, cutoffs, rows.length, cost)}
         ${th('created', 'Created', 'c-created', { sorted: 'descending', title: CREATED_TITLE })}
         ${th('last', 'Last active', 'c-last')}
       </tr></thead>
-      <tbody>
-${rows.map((r, i) => tableRow(r, i)).join('\n')}
-      </tbody>
+${bodies}
     </table>
   </div>
   <p class="at-none" id="at-none" hidden>No agent matches these filters. <button type="button" class="at-clear2">Clear them</button></p>
@@ -572,12 +665,13 @@ export const TABLE_JS = `
   var root = document.getElementById('agents');
   if (!root) return;
   var side = document.getElementById('at-side');
-  var body = root.querySelector('tbody');
+  var bodies = Array.prototype.slice.call(root.querySelectorAll('tbody.at-b'));
   var rows = Array.prototype.slice.call(root.querySelectorAll('tr.ar'));
   var inputs = Array.prototype.slice.call(root.querySelectorAll('.at-f input'));
   var shown = document.getElementById('at-shown');
   var clear = document.getElementById('at-clear');
   var none = document.getElementById('at-none');
+  var pinhid = document.getElementById('at-pinhid');
   var wide = window.matchMedia('(min-width: 60rem)');
 
   function evOf(tr) {
@@ -607,7 +701,7 @@ export const TABLE_JS = `
     var cutoff = period ? (period.dataset.cutoff || '') : '';
     var active = f.status.length + f.produced.length + f.repo.length + f.verdict.length
       + f.kind.length + f.model.length + (cutoff ? 1 : 0);
-    var n = 0, cost = 0, unpriced = 0;
+    var n = 0, cost = 0, unpriced = 0, pinHidden = 0;
     rows.forEach(function (tr) {
       var d = tr.dataset;
       var ok = hits(d.status, f.status) && hits(d.produced, f.produced) && hits(d.repo, f.repo)
@@ -616,7 +710,10 @@ export const TABLE_JS = `
       tr.hidden = !ok;
       var ev = evOf(tr);
       if (ev) ev.hidden = !ok || tr.getAttribute('aria-expanded') !== 'true';
-      if (ok) { n++; if (d.cost) cost += parseFloat(d.cost); else unpriced++; }
+      // A row for a role that has never run is not an agent whose cost is unknown.
+      // Counting it as unpriced would put "1 unpriced" on a page where nothing is.
+      if (ok) { n++; if (d.cost) cost += parseFloat(d.cost); else if (d.resting !== 'yes') unpriced++; }
+      if (!ok && d.pinned === 'yes') pinHidden++;
     });
     var text = n + ' of ' + rows.length + ' · ' + money(cost);
     if (unpriced) text += ' · ' + unpriced + ' unpriced';
@@ -624,6 +721,20 @@ export const TABLE_JS = `
     clear.hidden = active === 0;
     none.hidden = n !== 0;
     root.setAttribute('data-filtered', active ? 'yes' : 'no');
+    // A pin means "always tell me about this one", so when a filter he ticked hides
+    // one, the section says so. Silently obeying the filter would leave the pinned
+    // block looking complete while a pinned role is missing from it.
+    if (pinhid) {
+      pinhid.hidden = pinHidden === 0;
+      pinhid.textContent = pinHidden ? pinHidden + ' pinned hidden by a filter' : '';
+    }
+    // A section with nothing left in it says nothing at all.
+    bodies.forEach(function (tb) {
+      var head = tb.querySelector('tr.at-sec');
+      if (!head) return;
+      var live = Array.prototype.slice.call(tb.querySelectorAll('tr.ar')).some(function (tr) { return !tr.hidden; });
+      head.hidden = !(live || (tb.dataset.sec === 'pinned' && pinHidden > 0));
+    });
   }
 
   inputs.forEach(function (i) { i.addEventListener('change', apply); });
@@ -649,7 +760,13 @@ export const TABLE_JS = `
     // alphabet, not the bottom of it.
     if (key === 'name' || key === 'model') desc = dir[key] === 'asc' ? true : false;
     dir = {}; dir[key] = desc ? 'desc' : 'asc';
-    var pairs = rows.map(function (tr) { return [tr, evOf(tr)]; });
+    // Sorted inside each section, never across them: a sort is a question about
+    // ranking and pinning is a question about what he is watching, so a click on a
+    // column must not scatter the pinned rows back into the table.
+    bodies.forEach(function (tb) { sortRows(tb, key, desc); });
+  }
+  function sortRows(tb, key, desc) {
+    var pairs = Array.prototype.slice.call(tb.querySelectorAll('tr.ar')).map(function (tr) { return [tr, evOf(tr)]; });
     pairs.sort(function (a, b) {
       var x = a[0].dataset, y = b[0].dataset, r;
       if (key === 'cost') {
@@ -683,7 +800,7 @@ export const TABLE_JS = `
       if (r === 0) return String(x.name).localeCompare(String(y.name));
       return desc ? -r : r;
     });
-    pairs.forEach(function (p) { body.appendChild(p[0]); if (p[1]) body.appendChild(p[1]); });
+    pairs.forEach(function (p) { tb.appendChild(p[0]); if (p[1]) tb.appendChild(p[1]); });
     Array.prototype.slice.call(root.querySelectorAll('th[data-sort]')).forEach(function (h) {
       h.setAttribute('aria-sort', h.dataset.sort === key ? (desc ? 'descending' : 'ascending') : 'none');
     });
@@ -706,11 +823,38 @@ export const TABLE_JS = `
   }
   rows.forEach(function (tr) {
     tr.addEventListener('click', function (e) {
-      if (e.target.closest('a')) return;
+      // A control inside the row is not the row. Without the button in this guard a
+      // pin click also expands the evidence, and one click appears to do two things.
+      if (e.target.closest('a, button')) return;
       toggle(tr);
     });
     tr.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(tr); }
+    });
+  });
+
+  // Pin and unpin. The click persists to the local ops store and the page re-renders
+  // from it, so what he sees after the click is what the store now holds — an
+  // optimistic move that the write then failed to record is a pin that appears to
+  // stick until the next reload, which is the worst of the three outcomes.
+  Array.prototype.slice.call(root.querySelectorAll('.at-pin')).forEach(function (b) {
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (b.disabled) return;
+      var want = b.dataset.pinned !== 'yes';
+      b.disabled = true;
+      fetch('/pin', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: b.dataset.key, pinned: want })
+      }).then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.error || 'refused'); }); })
+        .then(function () { window.location.reload(); })
+        .catch(function (err) {
+          // Said out loud on the control itself. A pin that silently did nothing is
+          // the failure this whole feature exists to avoid, one level down.
+          b.disabled = false;
+          b.classList.add('at-pin-err');
+          b.title = 'Could not save that pin: ' + err.message + '. Nothing changed.';
+        });
     });
   });
 
@@ -776,6 +920,9 @@ export const TABLE_CSS = `
      through it, and a right edge so the seam is visible while swiping. */
   .at-table .c-name { position:sticky; left:0; z-index:2; background:var(--card);
                       border-right:1px solid var(--line); min-width:8.5rem; max-width:12rem; }
+  /* The pin control lives in this cell, so it needs back the width the control took
+     — otherwise a name as short as obot-prime wraps mid-word on a desktop screen. */
+  @media (min-width:44rem) { .at-table .c-name { max-width:14rem; } }
   .at-table thead .c-name { z-index:4; }
   .at-table tbody tr.ar:hover .c-name, .at-table tbody tr.ar[aria-expanded="true"] .c-name { background:var(--accent-soft); }
   .at-table tbody tr.ar { border-left:3px solid transparent; }
@@ -838,4 +985,25 @@ export const TABLE_CSS = `
      table already fits, both rules are inert. */
   .at-table .ag-ev { position:sticky; left:0; max-width:calc(100vw - 1.9rem); }
   .at-none { font-size:0.78rem; color:var(--muted); margin:0.7rem 0 0; }
+
+  /* The section bands. Pinned first, and the band is sticky under the header so a
+     long pinned block still says what it is while he scrolls. */
+  .at-table tr.at-sec td { background:var(--paper); border-bottom:1px solid var(--line);
+                           padding:0.25rem 0.5rem; position:sticky; left:0; }
+  .at-secl { font-size:0.6rem; letter-spacing:0.11em; text-transform:uppercase; font-weight:600; color:var(--ink); }
+  .at-secn { font-size:0.62rem; color:var(--faint); margin-left:0.4rem; }
+  .at-sechid { font-size:0.62rem; color:var(--accent); margin-left:0.4rem; }
+
+  /* The pin. Always rendered, because there is no hover on a phone and a control
+     that only appears once you have the thing cannot be used to get it. Filled when
+     pinned, faint when not — and the tap target stays finger-sized at 390px. */
+  .at-pin { float:left; margin:0 0.3rem 0 0; padding:0; width:1.5rem; height:1.5rem; line-height:1.5rem;
+            border:0; background:none; cursor:pointer; font-size:0.8rem; text-align:center;
+            border-radius:5px; color:inherit; }
+  .at-pin[aria-pressed="false"] { opacity:0.25; filter:grayscale(1); }
+  .at-pin:hover, .at-pin:focus-visible { opacity:1; filter:none; background:var(--accent-soft); }
+  .at-pin[disabled] { opacity:0.5; cursor:progress; }
+  .at-pin-err { outline:1px solid var(--crit); opacity:1; filter:none; }
+  .at-table tr.ar[data-pinned="yes"] .ag-id { font-weight:600; }
+  .at-table tr.ar[data-resting="yes"] .ag-id { font-weight:400; color:var(--muted); }
 `;

@@ -480,7 +480,7 @@ ${body}
  * and says so in place of the page rather than rendering an empty one that reads
  * as "no agents". The record link is the page's frame and survives every state.
  */
-export function sessionShell({ roster = null, feed = [], lastLook = null, now = new Date() } = {}) {
+export function sessionShell({ roster = null, feed = [], lastLook = null, now = new Date(), pins = undefined } = {}) {
   // A roster that could not be assembled arrives as a string and says so; an
   // assembled-but-empty one goes through `emptyRoster`, which reads the model's
   // own source flags and separates "the ledger is here and empty" from "there is
@@ -488,7 +488,7 @@ export function sessionShell({ roster = null, feed = [], lastLook = null, now = 
   // with no history that is a claim about a file nobody opened (hub#223).
   const ok = roster && typeof roster === 'object' && Array.isArray(roster.rows) && roster.rows.length;
   const body = ok
-    ? agentsTableHtml(roster, { now })
+    ? agentsTableHtml(roster, { now, ...(pins ? { pins } : {}) })
     : `<p class="ag-empty">${esc(String(typeof roster === 'string' ? roster : emptyRoster(roster)))}</p>
 <p class="ag-more"><a href="/session/log">The full record →</a></p>`;
   return agentsPage(body, { lastLook, wrap: 'at-wrap' });
