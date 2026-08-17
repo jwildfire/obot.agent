@@ -21,6 +21,7 @@ import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
 import { rosterHtml, briefParts, ROSTER_CSS } from './roster-view.mjs';
+import { UNMEASURED, nothingYet } from './absent.mjs';
 import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
 
 /**
@@ -88,9 +89,23 @@ const item = (it) => {
   return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${sub}${claim}</li>`;
 };
 
-const group = (title, items, empty, moved = 0) => `<h2 class="q-h">${esc(title)} <span class="q-n">${items.length}</span>${
+// `read: false` means the source behind this group could not be opened, so the
+// badge shows a dash rather than a count. A `0` beside "Sweeping GitHub…" is the
+// page asserting a number in the same breath as admitting it has none.
+const group = (title, items, empty, moved = 0, read = true) => `<h2 class="q-h">${esc(title)} <span class="q-n">${read ? items.length : UNMEASURED}</span>${
   moved ? `<span class="q-moved">${moved} pinned above</span>` : ''}</h2>
 ${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="q-empty">${esc(empty)}</p>`}`;
+
+/** "The GitHub sweep, the hub clone and the config list" — for the one-line why. */
+const unreadNames = (read) => {
+  const names = [
+    read.rc ? null : 'the GitHub sweep',
+    read.decision ? null : 'the hub clone',
+    read.config ? null : 'the config list',
+  ].filter(Boolean);
+  if (names.length <= 1) return names[0] ?? 'nothing';
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+};
 
 const ageWords = (min) => {
   if (min === null || min === undefined || !Number.isFinite(min)) return null;
@@ -261,6 +276,16 @@ const DASHBOARD_CSS = `
   .main .placeholder h2 { font-size:1rem; margin:0 0 0.4rem; color:var(--ink); }
   .main .placeholder p { margin:0 0 0.5rem; font-size:0.85rem; }
 
+  /* The sweep's age, printed only when a newer attempt has failed behind it. */
+  .q-stale { font-size:0.7rem; color:var(--warn); margin:0.15rem 0 0.4rem; }
+  /* The first morning on a new machine: what is absent, and what fills it. */
+  .firstday { border:1px solid var(--line); border-radius:8px; padding:0.7rem 0.8rem; margin:0 0 1rem;
+    background:var(--paper); }
+  .firstday h2 { font-size:0.95rem; margin:0 0 0.35rem; color:var(--ink); }
+  .firstday p { margin:0 0 0.5rem; font-size:0.85rem; }
+  .firstday ul { margin:0; padding-left:1.1rem; font-size:0.83rem; }
+  .firstday li { margin-bottom:0.25rem; }
+  .firstday code { font-family:var(--mono); font-size:0.78rem; }
   .q-h { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
          font-weight:500; margin:0.85rem 0 0.3rem; display:flex; align-items:center; gap:0.4rem; }
   .q-h:first-child { margin-top:0; }
@@ -466,7 +491,7 @@ ${parts.live}
 ${parts.bad}
 ${parts.countsLine}
 ${parts.foot}`
-    : `<p class="ag-empty">${esc(String(parts?.empty ? 'No agent has run since the worker ledger was adopted.' : (typeof roster === 'string' ? roster : 'The roster could not be assembled.')))}</p>
+    : `${parts?.empty ?? `<p class="ag-empty">${esc(typeof roster === 'string' ? roster : 'The roster could not be assembled.')}</p>`}
 ${feedHtml(feed)}
 <p class="ag-more"><a href="/session/log">The full record →</a></p>`;
   return agentsPage(body, { lastLook });
@@ -741,6 +766,44 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
   };
   const total = counts.rc + counts.config + counts.decision;
 
+  // Whether each collector actually opened its source. A count is a measurement,
+  // and a page may print one only where it made one: on a machine with no hub
+  // clone, no config list and no completed sweep, "0 · 0 · 0 — nothing is waiting
+  // on you" is three zeros and a verdict standing in for three files nobody read
+  // (jwildfire/obot.roadmap#223). Two of the three collectors already returned the
+  // reason; only the decisions one ever reached the page, four elements below a
+  // heading that contradicted it.
+  const read = {
+    rc: !queue.rcs?.error,
+    decision: !queue.decisions?.error,
+    config: !queue.config?.error,
+  };
+  const sourceWhy = {
+    rcs: queue.rcs?.error ?? '',
+    decisions: queue.decisions?.error ?? '',
+    config: queue.config?.error ?? '',
+  };
+  const allRead = read.rc && read.decision && read.config;
+
+  // What each group says when it is empty — and it depends on whether it is empty
+  // or merely unread. "All answered" about a decision log that was never opened is
+  // the same class of statement as "$0.00 spent" over an absent usage artifact.
+  const rcEmpty = queue.rcs?.error
+    ? nothingYet('No GitHub sweep has completed on this machine', `${queue.rcs.error}; release candidates cannot be listed until one does`)
+    : (queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.');
+  const decisionEmpty = queue.decisions?.error
+    ? nothingYet('Open decisions could not be read', `${queue.decisions.error}; clone jwildfire/obot.roadmap beside obot.agent and reload`)
+    : 'All answered.';
+  const configEmpty = queue.config?.error
+    ? nothingYet('No config list on this machine yet', `${queue.config.error} — every setup step this machine needs would be listed in .claude/blockers.md; capture the first with obot.agent/tools/blocker-log`)
+    : 'Nothing needs your keyboard.';
+  // The sweep's age, when it has one and a newer attempt has since failed. Computed
+  // and then discarded until now, so an offline machine read a six-hour-old queue
+  // as if it were now.
+  const rcAge = read.rc && queue.rcs.refreshing && queue.rcs.items.length && ageWords(queue.rcs.ageMin)
+    ? `<p class="q-stale">Swept ${esc(ageWords(queue.rcs.ageMin))}; the refresh since has not completed, so this list may be out of date.</p>`
+    : '';
+
   // Everything the page needs to show an item without another round trip: the
   // installation qualification for config rows, and how a check may be run.
   const iqs = Object.fromEntries([...critical, ...queue.config.items]
@@ -771,9 +834,9 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
   <span class="brand">🍊😺 Operations</span>
   ${tabs('ops')}
   <span class="counts">
-    <span class="pill rc">${counts.rc} release candidate${counts.rc === 1 ? '' : 's'}</span>
-    <span class="pill decision">${counts.decision} decision${counts.decision === 1 ? '' : 's'}</span>
-    <span class="pill config">${counts.config} config</span>
+    <span class="pill rc"${read.rc ? '' : ` title="${esc(sourceWhy.rcs)}"`}>${read.rc ? counts.rc : UNMEASURED} release candidate${read.rc && counts.rc === 1 ? '' : 's'}</span>
+    <span class="pill decision"${read.decision ? '' : ` title="${esc(sourceWhy.decisions)}"`}>${read.decision ? counts.decision : UNMEASURED} decision${read.decision && counts.decision === 1 ? '' : 's'}</span>
+    <span class="pill config"${read.config ? '' : ` title="${esc(sourceWhy.config)}"`}>${read.config ? counts.config : UNMEASURED} config</span>
   </span>
   <span class="spacer"></span>
   <span class="where" title="${esc(lastLookTitle(lastLook))}"><span class="wide">local only · ${esc(generated.toTimeString().slice(0, 5))} · </span>${esc(phrase(lastLook))}</span>
@@ -783,21 +846,32 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
 
   <nav class="rail" aria-label="Your queue">
     ${provenanceLine(provenance ?? {})}
-    ${total === 0 ? '<p class="q-empty">Nothing is waiting on you.</p>' : ''}
+    ${total === 0 ? `<p class="q-empty">${esc(allRead
+      ? 'Nothing is waiting on you.'
+      : nothingYet('Nothing has been read on this machine yet', `${unreadNames(read)} could not be collected, so this page is not saying the queue is empty — it is saying it has not been able to look`))}</p>` : ''}
     ${critical.length ? group('Critical', critical, '') : ''}
     ${queue.overBudget ? `<p class="overbudget">${queue.overBudget} more item${queue.overBudget === 1 ? '' : 's'} claim${queue.overBudget === 1 ? 's' : ''} critical. The tag is capped at ${CRITICAL_BUDGET} so it keeps meaning something — the rest are at the top of their own sections.</p>` : ''}
-    ${group('Release candidates', queue.rcs.items, queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.', queue.rcs.moved)}
+    ${group('Release candidates', queue.rcs.items, rcEmpty, queue.rcs.moved, read.rc)}
+    ${rcAge}
     ${standardLane(queue.rcs.standard)}
-    ${group('Decisions', queue.decisions.items, 'All answered.', queue.decisions.moved)}
+    ${group('Decisions', queue.decisions.items, decisionEmpty, queue.decisions.moved, read.decision)}
     ${foldedLane(queue.decisions.folded)}
-    ${group('Config', queue.config.items, 'Nothing needs your keyboard.', queue.config.moved)}
-    ${queue.decisions.error ? `<p class="q-empty">Decisions unavailable: ${esc(queue.decisions.error)}</p>` : ''}
+    ${group('Config', queue.config.items, configEmpty, queue.config.moved, read.config)}
     ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
     ${collapsed('Cleared', cleared, (it) => (it.triage?.action === 'done' ? 'marked done' : 'dismissed'))}
   </nav>
 
   <main class="main" id="main">
     <div class="placeholder" id="placeholder">
+      ${allRead ? '' : `<div class="firstday">
+        <h2>Nothing has been collected on this machine yet.</h2>
+        <p>The page is working; the record is not here. Each list fills itself once its source exists:</p>
+        <ul>
+          ${read.rc ? '' : '<li><strong>Release candidates</strong> — a GitHub sweep has to complete. Authenticate with <code>gh auth login</code>, then reload.</li>'}
+          ${read.decision ? '' : '<li><strong>Decisions</strong> — clone <code>jwildfire/obot.roadmap</code> beside <code>obot.agent</code>; the dashboard reads the clone, not the published site.</li>'}
+          ${read.config ? '' : '<li><strong>Config</strong> — <code>.claude/blockers.md</code> is local to a machine and does not travel. File this machine\'s first setup step with <code>obot.agent/tools/blocker-log</code>.</li>'}
+        </ul>
+      </div>`}
       <h2>Your todo list, and where you answer it.</h2>
       <p>Pick anything on the left: a <strong>decision</strong> opens here and you answer it in the sidebar, a <strong>release candidate</strong> opens here too — summary, release notes, what it closes, and its demo page running live, with approval still a deliberate click on GitHub — and a <strong>config</strong> item opens as an installation qualification: the exact step, what you should see, and a check that proves it. Local, never published.</p>
     </div>
