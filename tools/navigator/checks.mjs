@@ -56,6 +56,25 @@ const daysAgo = (at, now) => (at ? (now.getTime() - Date.parse(at)) / 86400000 :
 const inWindow = (at, now) => daysAgo(at, now) <= WINDOW_DAYS
 
 /**
+ * The label that settles an orphan.
+ *
+ * @jwildfire, 2026-08-17: "i'm fine if some orphans stay orphaned, but fix the ones
+ * we can. Let's tag true orphans with a label." The backfill (hub#233) attached the
+ * 51 items that could honestly be attached and labelled the 146 that could not — most
+ * of them because they predate the requirement they would have hung from, and a parent
+ * that is chronologically impossible is a fiction rather than a fix.
+ *
+ * A labelled item is a settled state, not a pending task, so it stops being a finding.
+ * It does not stop being counted: the section prints how many were excluded, for the
+ * same reason the window prints what it dropped. An exclusion nobody can see is
+ * indistinguishable from a check that found nothing.
+ */
+export const ACCEPTED_LABEL = 'orphan-accepted'
+
+const accepted = (i) => (i.labels ?? []).includes(ACCEPTED_LABEL)
+const shipped = (i) => (i.kind === 'pr' ? i.state === 'MERGED' : i.state === 'CLOSED')
+
+/**
  * Work that shipped with nothing in the plan above it.
  *
  * `items` are issues and pull requests already fetched, each carrying the structural
@@ -63,8 +82,9 @@ const inWindow = (at, now) => daysAgo(at, now) <= WINDOW_DAYS
  */
 export function orphanedWork(items = [], now = new Date()) {
   return items
-    .filter((i) => (i.kind === 'pr' ? i.state === 'MERGED' : i.state === 'CLOSED'))
+    .filter(shipped)
     .filter((i) => !i.parent)
+    .filter((i) => !accepted(i))
     .filter((i) => inWindow(i.closedAt, now))
     .map((i) => ({
       kind: 'orphan',
@@ -76,9 +96,15 @@ export function orphanedWork(items = [], now = new Date()) {
 
 /** How many the window dropped, so the count can be reported rather than hidden. */
 export function orphansOutsideWindow(items = [], now = new Date()) {
-  return items.filter((i) => (i.kind === 'pr' ? i.state === 'MERGED' : i.state === 'CLOSED'))
+  return items.filter(shipped)
     .filter((i) => !i.parent)
+    .filter((i) => !accepted(i))
     .filter((i) => !inWindow(i.closedAt, now)).length
+}
+
+/** How many the label settled, so the exclusion is reported rather than hidden. */
+export function orphansAccepted(items = []) {
+  return items.filter(shipped).filter((i) => !i.parent).filter(accepted).length
 }
 
 /**
@@ -159,6 +185,12 @@ export function checksSection(found = {}, now = new Date()) {
   if (found.site) lines.push(`  ${found.site.summary}`)
   if (found.orphansOutsideWindow) {
     lines.push(`  bounded: ${found.orphansOutsideWindow} older than ${WINDOW_DAYS} days not shown — widen the window to work through the backlog`)
+  }
+  // The exclusion is printed, not assumed. The label removes these from the findings
+  // by design (hub#233); a reader who cannot see how many were removed cannot tell a
+  // clean check from a muted one.
+  if (found.orphansAccepted) {
+    lines.push(`  accepted: ${found.orphansAccepted} labelled ${ACCEPTED_LABEL} and not counted — settled history, not pending work (hub#233)`)
   }
   if (found.errors?.length) {
     for (const e of found.errors) lines.push(`  unread: ${e}`)
@@ -314,10 +346,11 @@ query($owner:String!, $name:String!) {
       nodes { number milestone { title } labels(first:10) { nodes { name } } }
     }
     issues(states:CLOSED, first:50, orderBy:{field:UPDATED_AT, direction:DESC}) {
-      nodes { number title closedAt parent { number } }
+      nodes { number title closedAt parent { number } labels(first:20) { nodes { name } } }
     }
     pullRequests(states:MERGED, first:50, orderBy:{field:UPDATED_AT, direction:DESC}) {
-      nodes { number title mergedAt closingIssuesReferences(first:5) { nodes { number } } }
+      nodes { number title mergedAt closingIssuesReferences(first:5) { nodes { number } }
+              labels(first:20) { nodes { name } } }
     }
   }
 }`
@@ -333,14 +366,16 @@ query($owner:String!, $name:String!) {
 export function shapeRepo(repo, data) {
   const r = data?.repository
   if (!r) return []
+  const names = (n) => (n?.nodes ?? []).map((l) => l.name)
   const issues = (r.issues?.nodes ?? []).map((i) => ({
     repo, number: i.number, kind: 'issue', state: 'CLOSED',
     closedAt: i.closedAt, parent: i.parent ?? null, title: i.title,
+    labels: names(i.labels),
   }))
   const prs = (r.pullRequests?.nodes ?? []).map((p) => ({
     repo, number: p.number, kind: 'pr', state: 'MERGED', closedAt: p.mergedAt,
     parent: (p.closingIssuesReferences?.nodes ?? []).length ? { via: 'closes' } : null,
-    title: p.title,
+    title: p.title, labels: names(p.labels),
   }))
   return [...issues, ...prs]
 }
