@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-17 07:20 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/171 on 2026-08-17 07:24 EDT -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0, Labels: enhancement, Assignee: @me -->
 
 You can pin agents on the Agents tab, and the standing roles are pinned already — because of what they are, not because they are named in the code.
