@@ -93,10 +93,14 @@ test('prGoals: one PR closing two issues under the same goal counts that goal on
   assert.deepEqual(prGoals({ closes: [refKey(OA, 155), refKey(HUB, 227)] }, ix), [refKey(HUB, 73)])
 })
 
-test('goalMatch: unattributable is its own answer, never folded into no', () => {
+test('goalMatch: "not this goal" splits three ways, because they are three facts', () => {
   assert.equal(goalMatch(null, null), 'yes', 'no filter selected: everything passes')
   assert.equal(goalMatch(refKey(HUB, 73), [refKey(HUB, 73)]), 'yes')
-  assert.equal(goalMatch(refKey(HUB, 73), [refKey(HUB, 112)]), 'no')
-  assert.equal(goalMatch(refKey(HUB, 73), []), 'no', 'walked and found none is a real no')
+  // The only verdict that means the work is real and belongs to somebody else.
+  assert.equal(goalMatch(refKey(HUB, 73), [refKey(HUB, 112)]), 'other')
+  // Walked, and it is under no goal at all — the GOALLESS finding, about half the
+  // issues on record. Counting it as "somebody else's goal" would hide that.
+  assert.equal(goalMatch(refKey(HUB, 73), []), 'none')
+  // Nothing to walk: a PR closing no issue, a release, a decision artifact.
   assert.equal(goalMatch(refKey(HUB, 73), null), 'unattributable')
 })

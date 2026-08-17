@@ -127,13 +127,25 @@ export function prGoals(pr, index) {
 /**
  * Does this item pass the selected goal filter?
  *
- * Three answers, and the third is the one that matters: `unattributable` means the
- * item carries no route to the question at all, and a view that folds it into `false`
- * is reporting "not under this goal" when the truth is "we cannot tell". They are
- * counted apart and shown apart.
+ * Four answers, because "it did not pass" hides three different situations and a
+ * counter that cannot tell them apart will report the wrong one:
+ *
+ *   - `yes`             — this goal is among its ancestors.
+ *   - `other`           — it belongs to a goal, and to a different one. The only
+ *                         verdict that genuinely means "this is somebody else's work".
+ *   - `none`            — the walk finished and reached no goal at all. It belongs to
+ *                         no standing direction; on this record that is about half the
+ *                         issues, and it is the finding GOALLESS-REQUIREMENT reports.
+ *   - `unattributable`  — there was nothing to walk. A pull request closing no issue,
+ *                         a release, a decision artifact.
+ *
+ * The last two are counted together where the page speaks to him — both mean "in no
+ * goal's numbers" — and kept apart here, because one is a discipline finding somebody
+ * can fix and the other is a fact about what GitHub records.
  */
 export function goalMatch(goalKey, resolved) {
   if (!goalKey) return 'yes';
   if (resolved === null) return 'unattributable';
-  return resolved.includes(goalKey) ? 'yes' : 'no';
+  if (!resolved.length) return 'none';
+  return resolved.includes(goalKey) ? 'yes' : 'other';
 }

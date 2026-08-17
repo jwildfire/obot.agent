@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 import {
   classifyIssue, classifyPRLane, windowCounts, readDecisions, refreshMetrics, WINDOWS,
-  bucketPlan, trendSeries, repoEpochs, collectCloses, collectMetrics,
+  bucketPlan, trendSeries, repoEpochs, collectCloses, collectMetrics, goalSlug,
 } from '../metrics.mjs'
 
 const HUB = 'jwildfire/obot.roadmap'
@@ -277,7 +277,7 @@ test('collectMetrics: goals, parents and closing links ride along with the count
       }
       if (path.includes('/issues')) {
         return JSON.stringify([
-          { number: 73, created_at: '2026-07-24T00:00:00Z', labels: [{ name: 'goal' }], title: 'Goal: autonomy', state: 'open' },
+          { number: 73, created_at: '2026-07-24T00:00:00Z', labels: [{ name: 'goal' }], title: 'Goal: autonomy', state: 'open', body: 'prose\n<!-- goal-slug: autonomy -->\n' },
           { number: 227, created_at: '2026-08-17T05:00:00Z', labels: [{ name: 'requirement' }], state: 'open', parent_issue_url: 'https://api.github.com/repos/jwildfire/obot.roadmap/issues/73' },
         ])
       }
@@ -288,7 +288,10 @@ test('collectMetrics: goals, parents and closing links ride along with the count
       throw new Error(`unexpected call: ${args.join(' ')}`)
     },
   })
-  assert.deepEqual(cache.goals, [{ repo: 'jwildfire/obot.roadmap', number: 73, title: 'Goal: autonomy', createdAt: '2026-07-24T00:00:00Z', state: 'open' }])
+  assert.deepEqual(cache.goals, [{
+    repo: 'jwildfire/obot.roadmap', number: 73, title: 'Goal: autonomy',
+    createdAt: '2026-07-24T00:00:00Z', state: 'open', slug: 'autonomy',
+  }])
   assert.deepEqual(cache.issues.find((i) => i.number === 227).parent, { repo: 'jwildfire/obot.roadmap', number: 73 })
   assert.equal(cache.issues.find((i) => i.number === 73).parent, undefined)
   assert.deepEqual(cache.prs[0].closes, ['jwildfire/obot.roadmap#227'])
@@ -313,4 +316,13 @@ test('collectMetrics: PR links failing costs goal attribution for that repo, nev
   assert.equal(cache.prs[0].closes, undefined)
   assert.deepEqual(cache.noCloses, ['jwildfire/obot.agent'], 'and the gap is named rather than drawn as zero')
   assert.equal(cache.failedRepos.length, 0, 'a links failure is not a repo failure')
+})
+
+test('goalSlug: the short name comes from the goal body, the same bit the hub site reads', () => {
+  assert.equal(goalSlug('direction prose\n\n<!-- goal-slug: autonomy -->\n'), 'autonomy')
+  assert.equal(goalSlug('<!--goal-slug:open-csr-->'), 'open-csr')
+  // No comment, no slug — the filter falls back to the issue number rather than
+  // inventing a name from a title (#78's own title carries a double space).
+  assert.equal(goalSlug('Goal:  Keep adding charts (static + interactive)'), null)
+  assert.equal(goalSlug(null), null)
 })

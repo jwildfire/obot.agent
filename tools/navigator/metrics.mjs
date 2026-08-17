@@ -56,6 +56,20 @@ export const BRANCH_MODEL_EPOCH = {
 const RC_TITLE = /-RC\d|^Release candidate:|^Release v\d|v\d+\.\d+\.\d+ RC\d|promotion/i
 
 /**
+ * A goal's short name, from the one machine-readable bit its body carries.
+ *
+ * The hub's goal collector (obot.roadmap scripts/lib/collect/goals.mjs) reads the same
+ * `<!-- goal-slug: … -->` comment to name the goal's page, so a filter chip reading
+ * "autonomy" and the published page at /goals/autonomy are the same name from the same
+ * source. Deriving one from the title instead would drift the first time he renames a
+ * goal — and #78's title already carries a double space that no slugifier would keep.
+ */
+export function goalSlug(body = '') {
+  const m = /<!--\s*goal-slug:\s*([a-z0-9][a-z0-9._-]*)\s*-->/i.exec(String(body ?? ''))
+  return m ? m[1].toLowerCase() : null
+}
+
+/**
  * One issue → its class, from the labels the repos actually use. GitHub's issue
  * "type" field does not exist on these user-owned repos (verified over every hub
  * row), so class is derived and the page must say so.
@@ -363,7 +377,10 @@ export function collectMetrics({ repos, hub, now = new Date(), exec = gh }) {
         // that date is what stops a goal-filtered trend from drawing a flat run of
         // zeros over months when the goal was filed last week.
         if (cls === 'goal') {
-          out.goals.push({ repo, number: i.number, title: i.title, createdAt: i.created_at, state: i.state })
+          out.goals.push({
+            repo, number: i.number, title: i.title, createdAt: i.created_at, state: i.state,
+            slug: goalSlug(i.body),
+          })
         }
       }
       if (iss.truncated) out.bounds.push({ repo, kind: 'issues', ...iss.truncated })

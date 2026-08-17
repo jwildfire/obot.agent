@@ -42,7 +42,7 @@ import process from 'node:process';
 import { collectQueue, refreshRCs } from './lib/collect.mjs';
 import { render, sessionShell, sessionLogShell, navigatorShell, navigatorRecordShell, NOT_LISTENING } from './lib/render.mjs';
 import { parseNavigatorState } from './lib/navigator.mjs';
-import { buildMetricsModel, buildFeedModel } from './lib/metrics-view.mjs';
+import { buildMetricsModel, buildFeedModel, parseFilters } from './lib/metrics-view.mjs';
 import { buildSessionFeed } from './lib/feed.mjs';
 import { parseDeliveryJournal } from './lib/log-view.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
@@ -363,9 +363,15 @@ export function serve(args) {
         const readCache = (name) => {
           try { return JSON.parse(fs.readFileSync(path.join(args.workspace, ...SESSION_DIR, 'cache', name), 'utf8')); } catch { return null; }
         };
+        // The period and the two filters ride in the query string, so a filtered view
+        // is a URL — one he can keep, send to an agent, or open on a phone. They are
+        // resolved against the cache rather than trusted (jwildfire/obot.agent#155):
+        // a repo or goal that is not on record is reported and ignored, never allowed
+        // to silently filter every number to zero.
+        const metricsCache = readCache('metrics.json');
         return send(200, 'text/html; charset=utf-8', navigatorShell({
           ...stateArg,
-          metrics: buildMetricsModel(readCache('metrics.json')),
+          metrics: buildMetricsModel(metricsCache, new Date(), parseFilters(req.url.split('?')[1] ?? '', metricsCache)),
           feed: buildFeedModel(readCache('navigator-rc.json')?.events ?? []),
         }));
       }
