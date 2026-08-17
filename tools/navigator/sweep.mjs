@@ -48,7 +48,7 @@ import { fileURLToPath } from 'node:url'
 import { answersSection, deliverAnswers, pendingAnswers } from '../ops-dashboard/lib/answers.mjs'
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
          orphansOutsideWindow, parseIndexRows, readJson, registryDisagreement,
-         shapeRepo } from './checks.mjs'
+         shapeRepo, siteVersionFreshness } from './checks.mjs'
 // What counts as a release candidate now lives beside this file rather than in it,
 // because the Operations Dashboard has to answer the same question and used to answer
 // it differently. Re-exported so this module's callers and tests are unaffected.
@@ -248,6 +248,27 @@ function shellAudit(tool) {
 // The config list: is an id allocated with no entry behind it? (obot.agent#126)
 const auditLedger = () => shellAudit('blocker-log')
 
+// The deployed hub's build stamp (hub#224), read off the live site rather than
+// computed from the local clone — that clone is not the deployed tree and has been
+// measured five commits behind it, so a locally computed answer can contradict the
+// page @jwildfire is looking at.
+//
+// curl through spawnSync rather than fetch: main() is synchronous end to end, and
+// making it async for one small read would float an unawaited promise past every
+// existing try/catch. Two independent bounds, so a slow or unreachable network costs
+// freshness and never the five-minute cadence. The cache buster is not optional —
+// Pages serves with max-age=600, and ten minutes of staleness is exactly the window
+// in which this answer changes.
+const SITE_VERSION_URL = 'https://jwildfire.github.io/obot.roadmap/version.json'
+function readSiteVersion() {
+  try {
+    const r = spawnSync('curl', ['-fsS', '--max-time', '3', `${SITE_VERSION_URL}?t=${Date.now()}`],
+      { encoding: 'utf8', timeout: 5000 })
+    if (r.error || r.status !== 0 || !r.stdout) return null
+    return JSON.parse(r.stdout)
+  } catch { return null }
+}
+
 // The Navigator session's delivery record, rendered by the tool that owns it
 // (#134). Shelled for the same reason the audits are: one owner per record.
 function readDelivery() {
@@ -323,12 +344,17 @@ function runChecks(repos, jobs = []) {
   // ever made a reader look at it.
   const audit = auditFreshness(readJson(join(HUB, 'site/audit/findings.json')), new Date())
 
+  // And what the deployed site says about itself — the verdict the header is showing,
+  // quoted rather than recomputed here (hub#224).
+  const site = siteVersionFreshness(readSiteVersion(), new Date())
+
   const now = new Date()
   return {
     backlog,
     backlogCapped,
     section: checksSection({
       audit,
+      site,
       orphans: orphanedWork(items, now),
       orphansOutsideWindow: orphansOutsideWindow(items, now),
       registry,
