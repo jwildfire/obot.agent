@@ -267,3 +267,15 @@ test('an absent visit record is about the machine, not about him', () => {
   assert.match(html, /the Navigator writes one the first time/);
   assert.ok(fs.existsSync(ws));
 });
+
+test('an empty state that names a path still fits the phone he reads it on', () => {
+  // An honest notice names the file it could not read and the command that creates
+  // it, and both are longer than 390px. Measured in Chrome at a real 390px viewport
+  // on 2026-08-17: /navigator rendered 518px wide before this, pushing the sentence
+  // off the right edge — which is a new way of not saying it. The classes that carry
+  // a path or a command have to be able to break inside a word.
+  const has = (css, selector) => new RegExp(`\\${selector}\\b[^{}]*\\{[^}]*overflow-wrap:\\s*anywhere`).test(css);
+  assert.ok(has(routes['/navigator'].body, '.nav-empty'), '.nav-empty must wrap — it holds the sweep file path and the install command');
+  assert.ok(has(routes['/'].body, '.q-empty'), '.q-empty must wrap — it holds the missing collector path');
+  assert.ok(has(routes['/'].body, '.prov'), '.prov must wrap — it holds the hub clone path');
+});

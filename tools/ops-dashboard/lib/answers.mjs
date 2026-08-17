@@ -235,7 +235,8 @@ export function readAnswers(workspace, { hub = null } = {}) {
  * returned objects carry a `supersededBy` so a reader still sees which is which.
  */
 export function currentAnswers(workspace, { hub = null } = {}) {
-  const live = readAnswers(workspace, { hub }).filter((a) => a.status !== SUPERSEDED);
+  const all = readAnswers(workspace, { hub });
+  const live = all.filter((a) => a.status !== SUPERSEDED);
   const byArtifact = new Map();
   for (const a of live) {
     const key = a.artifact ?? a.id;
@@ -245,7 +246,11 @@ export function currentAnswers(workspace, { hub = null } = {}) {
       if (!a.supersedes.includes(current.id)) a.supersededBy = current.id; // legacy: newest already won
     }
   }
-  return [...byArtifact.values()];
+  const out = [...byArtifact.values()];
+  // `filter` and the Map rebuild both drop the marker, and this is the list the
+  // dashboard's answers panel counts — an absent store rendered as "Your answers 0"
+  // (jwildfire/obot.roadmap#223).
+  return all[STORELESS] ? Object.defineProperty(out, STORELESS, { value: true }) : out;
 }
 
 /** Has this machine ever had an answer store? Absent is not the same as empty. */
@@ -254,9 +259,6 @@ export const answersStoreExists = (workspace) => fs.existsSync(answersDir(worksp
 /** What he has decided that no agent has applied. The bounded read. */
 export function pendingAnswers(workspace, { hub = null } = {}) {
   const out = currentAnswers(workspace, { hub }).filter((a) => a.status !== APPLIED);
-  // `filter` drops the marker `readAnswers` sets, and this is the list the
-  // Navigator's section renders a verdict about, so it is re-read from disk here
-  // rather than carried through three array copies.
   return answersStoreExists(workspace) ? out : Object.defineProperty(out, STORELESS, { value: true });
 }
 

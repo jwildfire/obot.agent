@@ -22,6 +22,7 @@ import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
 import { rosterHtml, briefParts, ROSTER_CSS } from './roster-view.mjs';
 import { UNMEASURED, nothingYet } from './absent.mjs';
+import { STORELESS } from './answers.mjs';
 import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
 
 /**
@@ -289,7 +290,8 @@ const DASHBOARD_CSS = `
   .firstday p { margin:0 0 0.5rem; font-size:0.85rem; }
   .firstday ul { margin:0; padding-left:1.1rem; font-size:0.83rem; }
   .firstday li { margin-bottom:0.25rem; }
-  .firstday code { font-family:var(--mono); font-size:0.78rem; }
+  .firstday code { font-family:var(--mono); font-size:0.78rem; overflow-wrap:anywhere; }
+  .firstday li { overflow-wrap:anywhere; }
   .q-h { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
          font-weight:500; margin:0.85rem 0 0.3rem; display:flex; align-items:center; gap:0.4rem; }
   .q-h:first-child { margin-top:0; }
@@ -316,13 +318,13 @@ const DASHBOARD_CSS = `
      he reads this list on a 390px phone. */
   .q-sub { font-size:0.72rem; color:var(--muted); line-height:1.25; min-width:0;
            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; }
+  .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; overflow-wrap:anywhere; }
   /* Wraps rather than ellipsizes: it is one short line naming one or two PRs, and
      the point of it is that the refs stay readable at 390px. */
   .q-aside { font-size:0.7rem; color:var(--faint); margin:0.1rem 0 0.4rem; line-height:1.35; }
   /* What the page is made of. Above the queue, never hidden at any width: a
      staleness notice that disappears on a phone is the failure it warns about. */
-  .prov { font-size:0.66rem; line-height:1.4; margin:0 0 0.6rem; color:var(--faint);
+  .prov { font-size:0.66rem; line-height:1.4; margin:0 0 0.6rem; color:var(--faint); overflow-wrap:anywhere;
           border-left:2px solid var(--line); padding:0.15rem 0 0.15rem 0.45rem; }
   .prov.warn { color:var(--muted); border-left-color:var(--crit); }
   .prov code { font-family:var(--mono); font-size:0.95em; }
@@ -534,7 +536,7 @@ const NAV_CSS = `
   .dead { border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink);
           border-radius:8px; padding:0.5rem 0.6rem; margin:0 0 0.7rem; font-size:0.82rem;
           overflow-wrap:anywhere; }
-  .dead code { font-family:var(--mono); font-size:0.74rem; }
+  .dead code { font-family:var(--mono); font-size:0.74rem; overflow-wrap:anywhere; }
   .swept { font-size:0.72rem; color:var(--faint); font-family:var(--mono); margin:0 0 0.7rem; }
   .nav-h { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
            font-weight:500; margin:0.9rem 0 0.3rem; }
@@ -542,7 +544,8 @@ const NAV_CSS = `
   .nav-list li { border-left:3px solid var(--line); padding:0.2rem 0.4rem; font-size:0.82rem; line-height:1.3; }
   .nav-list li a { text-decoration:none; }
   .nav-list .at { color:var(--faint); font-family:var(--mono); font-size:0.68rem; }
-  .nav-empty { font-size:0.76rem; color:var(--muted); margin:0; }
+  .nav-empty { font-size:0.76rem; color:var(--muted); margin:0; overflow-wrap:anywhere; }
+  .nav-empty code { font-family:var(--mono); font-size:0.74rem; overflow-wrap:anywhere; }
 
   /* A row that carries its own evidence. Closed it costs one line, which is the
      budget on a 390px screen; open it lists what the claim rests on. */
@@ -753,11 +756,13 @@ const answersPanel = (answers, deliverer, now) => {
       <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`
     : '';
   return `<div class="answers">
-      <h2>Your answers <span class="q-n">${answers.length}</span></h2>
+      <h2>Your answers <span class="q-n">${answers[STORELESS] ? UNMEASURED : answers.length}</span></h2>
       ${alarm}
       <ul class="ans-list">${answers.length
     ? answers.map((a) => answerRow(a, now)).join('')
-    : '<li class="q-empty">Nothing recorded yet. Answer a decision and it appears here with its state.</li>'}</ul>
+    : `<li class="q-empty">${answers[STORELESS]
+      ? 'No answer store on this machine yet — it appears the first time you answer a decision here.'
+      : 'Nothing recorded yet. Answer a decision and it appears here with its state.'}</li>`}</ul>
     </div>`;
 };
 
@@ -804,7 +809,10 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
     ? nothingYet('Open decisions could not be read', `${queue.decisions.error}; clone jwildfire/obot.roadmap beside obot.agent and reload`)
     : 'All answered.';
   const configEmpty = queue.config?.error
-    ? nothingYet('No config list on this machine yet', `${queue.config.error} — every setup step this machine needs would be listed in .claude/blockers.md; capture the first with obot.agent/tools/blocker-log`)
+    ? nothingYet(
+      queue.config.error === 'no config file' ? 'No config list on this machine yet' : `The config list could not be read: ${queue.config.error}`,
+      'every setup step this machine needs would be listed in .claude/blockers.md, which is local and does not travel between machines; capture the first with obot.agent/tools/blocker-log',
+    )
     : 'Nothing needs your keyboard.';
   // The sweep's age, when it has one and a newer attempt has since failed. Computed
   // and then discarded until now, so an offline machine read a six-hour-old queue
@@ -900,7 +908,9 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
       </div>
       <textarea id="words" placeholder="In your words — quoted verbatim in the artifact's Decisions section."></textarea>
       <button class="send" id="send" disabled>Record this decision</button>
-      <p class="note">Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.</p>
+      <p class="note">${deliverer?.alive === false
+    ? 'Nothing is listening yet — the Navigator sweep is not running on this machine, so an answer recorded here will sit unread until it is installed: <code>bash obot.agent/tools/navigator/install-launchd</code>.'
+    : 'Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.'}</p>
       <p class="ok" id="ok" hidden></p>
     </div>
     <div class="triage" id="triage" hidden>
