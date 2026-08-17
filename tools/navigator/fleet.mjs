@@ -53,6 +53,19 @@ export const MANAGER_NAME = `${MANAGER_TAG} obot-fleet`
 
 export const isManager = (job) => String(job?.name ?? '').startsWith(MANAGER_TAG)
 
+/**
+ * The harness's terminal states, all three of them.
+ *
+ * Copied from wake.mjs's `classify`, which had them right. The first draft of the
+ * singleton tested `state !== 'done'` alone, and the very first real launch caught
+ * it: a manager stopped an hour earlier still read as live, so the singleton was
+ * held permanently and no manager could ever launch again. The launcher went on
+ * reporting "held — a manager is already running", which is the worst shape a
+ * failure can take here, because it looks exactly like the guard working.
+ */
+export const TERMINAL = ['done', 'stopped', 'failed']
+export const isLive = (job) => !TERMINAL.includes(job?.state)
+
 const num = (v, dflt) => {
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? n : dflt
@@ -392,7 +405,7 @@ export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
   if (away) return { launch: false, why: 'host was away — a gap in the sweep is not a stalled fleet' }
   if (!trigger?.fired) return { launch: false, why: 'no condition holds — a quiet fleet is not a trigger' }
 
-  const live = jobs.filter((j) => isManager(j) && j.state !== 'done')
+  const live = jobs.filter((j) => isManager(j) && isLive(j))
   if (live.length) {
     return { launch: false, why: `a manager is already running (job ${live[0].id}, ${live[0].state})` }
   }
@@ -431,7 +444,7 @@ export function overrun(jobs = [], { now = new Date(), ttlMin = MANAGER_TTL_MIN,
                                      hardMin = MANAGER_HARD_MIN, startedAt = {} } = {}) {
   const out = []
   for (const job of jobs) {
-    if (!isManager(job) || job.state === 'done') continue
+    if (!isManager(job) || !isLive(job)) continue
     const started = startedAt[job.id] ?? job.createdAt ?? job.updatedAt
     const mins = minsSince(started, now)
     if (mins === null || mins < ttlMin) continue

@@ -180,9 +180,24 @@ test('singleton: a live manager blocks a second one and names the job holding it
   assert.match(d.why, /already running \(job mgr1/)
 })
 
-test('singleton: a finished manager does not block a new one', () => {
-  const dead = [{ ...worker(), id: 'mgr0', name: MANAGER_NAME, state: 'done' }]
-  assert.equal(shouldLaunch({ trigger: firedTrigger(), jobs: dead, log: [], now: NOW }).launch, true)
+test('singleton: a finished manager does not block a new one — in ANY terminal state', () => {
+  // The bug the first real launch caught. `stopped` is a terminal state the harness
+  // uses constantly, and testing only for `done` held the singleton permanently: one
+  // manager stops, and no manager ever launches again while the launcher goes on
+  // reporting "held — a manager is already running". A failure that looks exactly
+  // like the guard working is the worst shape available.
+  for (const state of ['done', 'stopped', 'failed']) {
+    const dead = [{ ...worker(), id: 'mgr0', name: MANAGER_NAME, state }]
+    assert.equal(shouldLaunch({ trigger: firedTrigger(), jobs: dead, log: [], now: NOW }).launch, true,
+      `a manager in state '${state}' must not hold the singleton`)
+  }
+})
+
+test('overrun ignores a manager in any terminal state, not just done', () => {
+  for (const state of ['done', 'stopped', 'failed']) {
+    const jobs = [{ ...worker(), id: 'm', name: MANAGER_NAME, state, createdAt: agoMin(900) }]
+    assert.equal(overrun(jobs, { now: NOW }).length, 0, `state '${state}' is finished, not overrunning`)
+  }
 })
 
 test('the relaunch floor holds a second launch inside the hour', () => {
