@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+// serve-marker — what the machine's dashboard marker actually says
+// (jwildfire/obot.agent#142).
+//
+// Anything that wants the dashboard URL should ask here rather than reading
+// `.claude/session-hub/serve.json` itself, because the file alone cannot tell you
+// whether the server it names is still running. A marker left behind by a killed
+// process looks exactly like a healthy one, and handing that URL to Chrome is how
+// a tool ends up confidently reporting the wrong port.
+//
+// Usage:
+//   node obot.agent/tools/serve-marker            # human-readable state
+//   node obot.agent/tools/serve-marker --url      # the URL, only if live (exit 1 otherwise)
+//   node obot.agent/tools/serve-marker --json     # the whole state as JSON
+//
+//   --workspace <dir>   workspace root (default: $OBOT_WORKSPACE, else cwd)
+//
+// States: none (nothing advertising), unreadable (a file that is not a marker),
+// stale (the owner is gone), live (the owner is running — the only state whose URL
+// is worth opening).
+
+import path from 'node:path';
+import process from 'node:process';
+
+import { markerPath, readMarker } from './ops-dashboard/lib/serve-marker.mjs';
+
+const argv = process.argv.slice(2);
+let workspace = process.env.OBOT_WORKSPACE || process.cwd();
+let mode = 'text';
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--workspace') workspace = argv[++i];
+  else if (a === '--url') mode = 'url';
+  else if (a === '--json') mode = 'json';
+  else if (a === '--help' || a === '-h') mode = 'help';
+  else { console.error(`unknown option: ${a}`); process.exit(2); }
+}
+
+if (mode === 'help') {
+  console.log('serve-marker — the dashboard marker as a state, not a URL. See the header of this file.');
+  process.exit(0);
+}
+
+const state = readMarker(markerPath(path.resolve(workspace)));
+
+if (mode === 'json') {
+  console.log(JSON.stringify(state, null, 2));
+  process.exit(state.state === 'live' ? 0 : 1);
+}
+
+if (mode === 'url') {
+  // Silence on anything but `live`: a caller doing `open "$(serve-marker --url)"`
+  // must get nothing rather than a URL that no longer answers.
+  if (state.state === 'live' && state.url) {
+    console.log(state.url);
+    process.exit(0);
+  }
+  console.error(`serve-marker: ${state.state} — ${state.reason ?? 'no live dashboard'}`);
+  process.exit(1);
+}
+
+const lines = [`state: ${state.state}`];
+if (state.reason) lines.push(`why:   ${state.reason}`);
+if (state.pid !== undefined) lines.push(`pid:   ${state.pid}`);
+if (state.port !== undefined) lines.push(`port:  ${state.port}`);
+if (state.url) lines.push(`url:   ${state.url}`);
+if (state.site) lines.push(`site:  ${state.site}`);
+if (state.startedAt) lines.push(`since: ${state.startedAt}`);
+lines.push(`file:  ${state.file}`);
+console.log(lines.join('\n'));
+process.exit(state.state === 'live' ? 0 : 1);
