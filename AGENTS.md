@@ -159,6 +159,36 @@ grouped none of them: no `v1.6.0` milestone existed, three of the issues still c
 `v1.2.0` from the wave that scoped them, and the RC PR body carried no `Closes` lines. The
 release's own record had to be reconstructed from the diff the same night.
 
+## Running the merge command
+
+Once a merge is approved, type it as **one command, undecorated**:
+
+```bash
+obot.agent/scripts/obot-merge <pr#> -R jwildfire/<repo> --squash --delete-branch
+```
+
+The obot2 workspace allowlist permits three spellings of the wrapper — `scripts/…`,
+`obot.agent/scripts/…`, and the absolute path — and a `Bash(prefix *)` rule matches a
+command only when **every** sub-command matches, splitting on `|`, `&&`, `||`, and `;`.
+So a `bash` prefix, a `./`, a `cd … &&`, a trailing `; echo "exit=$?"`, or the reflexive
+`| tail -20` each cost the match, and the call falls through to the auto-mode classifier
+instead. The classifier is not a gate that can be satisfied — it is nondeterministic, and
+refuses roughly one call in thirty. Shell redirection (`2>&1`) is not a separator and is
+safe; the wrapper prints ten lines, so there is nothing worth piping to `tail` anyway.
+
+A classifier refusal is not a permission decision and not a policy refusal — the merge
+policy in [`scripts/policy.json`](scripts/policy.json) is the only thing that decides
+whether a merge is allowed. If a merge is refused, re-type the bare command; do not go
+looking for a different route.
+
+**Why this exists.** Of 497 `obot-merge` invocations across the session transcripts to
+2026-08-17, only 7 were written in a form the allowlist could match — and all 7 were
+allowed. Every one of the 17 refusals in that history sits among the 490 that matched
+nothing. obot.agent#150 and #158 sat finished, green and unmerged overnight on that coin
+flip, and obot.roadmap#217 was refused and then allowed on the byte-identical string three
+minutes later. Guarded by
+[`scripts/test/merge-invocation.test.mjs`](scripts/test/merge-invocation.test.mjs).
+
 ## Branching and release model (safety.viz only)
 
 This model applies to **safety.viz and nothing else** — it is not an ecosystem default.

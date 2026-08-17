@@ -53,7 +53,7 @@ issues "appear".
 |---|---|---|
 | Base | integration branch (`dev`, or `main` where there is no `dev`) | release branch (`main`; obot.agent's `stable`; demo-301's `site`) |
 | Reviewer | none — never assign or request @jwildfire | @jwildfire, always |
-| Merge lane | standard — `obot-merge <pr> -R <repo>` | attested — `obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'` |
+| Merge lane | standard — `obot.agent/scripts/obot-merge <pr> -R <repo>` | attested — `obot.agent/scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'` |
 | Body | short: what changed, why, evidence link | the full five sections below |
 | Demo | not required | **required** |
 

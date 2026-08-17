@@ -104,6 +104,18 @@ PY
   without @jwildfire's explicit approval. `obot-policy explain <owner/repo>` is the
   authority. Raw `gh pr merge` / REST / GraphQL are hook-denied — a denial means *use
   obot-merge*, not *find another route*.
+- **Run that command undecorated, as a single command.** The allowlist matches
+  `obot.agent/scripts/obot-merge …` whole:
+
+```bash
+obot.agent/scripts/obot-merge {pr#} -R jwildfire/{repo} --squash --delete-branch
+```
+
+  A `bash` prefix, a `./`, a `cd … &&`, a trailing `; echo "exit=$?"`, or the reflexive
+  `| tail -20` each break the match and drop the call through to the auto-mode classifier,
+  which refuses about one call in thirty at random. That coin flip is what left
+  obot.agent#150 and #158 finished and unmerged overnight on 2026-08-17. The wrapper prints
+  ten lines — there is nothing to trim, so do not pipe it.
 - **No writes outside the `jwildfire` org.**
 - **Nothing deleted** without approval.
 - **Attribution line at the bottom** of drafted artifacts, after a `---` rule.
