@@ -302,9 +302,17 @@ export function readJson(path) {
 // `parent` field is only reachable through the repository connection, and a search
 // result would have to be re-fetched item by item to get it — seven calls instead of
 // dozens. At the five-minute cadence that is ~84 calls an hour against a 5000 limit.
+// `openIssues` rides on this query rather than earning a call of its own: the idle
+// detection (hub#212) needs a count of ready work, this query already runs once per
+// repo every five minutes, and a second listing would be 2000 calls a day for a
+// number that moves a few times an hour.
 export const ORPHAN_QUERY = `
 query($owner:String!, $name:String!) {
   repository(owner:$owner, name:$name) {
+    openIssues: issues(states:OPEN, first:100) {
+      pageInfo { hasNextPage }
+      nodes { number milestone { title } labels(first:10) { nodes { name } } }
+    }
     issues(states:CLOSED, first:50, orderBy:{field:UPDATED_AT, direction:DESC}) {
       nodes { number title closedAt parent { number } }
     }
