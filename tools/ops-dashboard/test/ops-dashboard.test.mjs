@@ -432,7 +432,8 @@ test('the RC second line renders under the title, and is escaped like everything
   assert.ok(nasty.includes('&lt;img src=x'));
 });
 
-const RC_BODY = `## \u26d4 Release candidate — merges only on @jwildfire's approval, via the attested lane
+const RC_BODY = `<!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
+     attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
 
 Adds the participant-level metrics phase: six widgets and their workflows.
 
@@ -466,6 +467,38 @@ test('the RC body parses into the panel the dashboard renders instead of an ifra
   assert.equal(rc.links.length, 3);
   assert.equal(rc.links[0].label, 'annotated demo');
   assert.equal(rc.ask, 'approve and I tag v1.1.0.');
+});
+
+test('the agent-facing HTML comment never becomes the row he reads', () => {
+  // The attested-lane rule moved out of a `## ⛔ …` heading and into an HTML comment on
+  // 2026-08-17 — invisible to him, present for an agent reading the PR. Invisible on
+  // GitHub is not invisible here: the parser reads raw markdown, and `<!--` is not a
+  // heading or a bullet, so without an explicit skip the comment's first line becomes
+  // his queue-row summary. The comment spans lines, so skipping only `<!--` leaks the
+  // continuation instead.
+  const rc = parseRCBody(RC_BODY);
+  assert.equal(rc.summary, 'Adds the participant-level metrics phase: six widgets and their workflows.');
+  assert.ok(!JSON.stringify(rc).includes('jeremy-approved'), 'comment text must not reach the panel');
+
+  // A comment anywhere else in the body is skipped the same way, including one that
+  // opens and closes on one line and one whose closer trails other text.
+  const inline = parseRCBody([
+    '<!-- one-liner: not the summary -->',
+    '<!-- multi',
+    '     line -->',
+    'The release sentence.',
+    '<!-- trailing --> also not the summary',
+  ].join('\n'));
+  assert.equal(inline.summary, 'The release sentence.');
+
+  // Legacy bodies still open with the retired banner and must keep parsing — the rule
+  // changed, the record on already-open PRs did not.
+  const legacy = parseRCBody([
+    "## ⛔ Release candidate — merges only on @jwildfire's approval, via the attested lane",
+    '',
+    'The legacy release sentence.',
+  ].join('\n'));
+  assert.equal(legacy.summary, 'The legacy release sentence.');
 });
 
 test('a body that ignores the contract degrades instead of throwing', () => {
