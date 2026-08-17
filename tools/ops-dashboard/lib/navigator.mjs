@@ -46,9 +46,14 @@ function parseItem(text) {
 
 // The alarm forms the sweep writes, exactly as it writes them (uppercase, bold):
 // **CONFIG LEDGER GAP**, **WORKER LEDGER FINDING**, **DELIVERY RECORD GAP**,
-// **FAILED**. Case-sensitive on purpose — "94 findings" in a discipline headline
-// is a count, not an alarm.
-const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED)[A-Z0-9 ]*\*\*/;
+// **FAILED**, **WAKE CHANNEL DOWN**, **WAKE CHECK BROKEN**. Case-sensitive on
+// purpose — "94 findings" in a discipline headline is a count, not an alarm.
+//
+// DOWN and BROKEN were added with the wake channel (hub#212). Leaving them out
+// would have made the one alarm that says the alarms are not being delivered the
+// only one rendering as ordinary text — a fourth instance of the pattern this
+// vocabulary exists to prevent.
+const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED|DOWN|BROKEN)[A-Z0-9 ]*\*\*/;
 
 // Lines before the first `##` that are structure, not content: the file's own
 // title and the sole-writer/stale-rule paragraph.

@@ -498,8 +498,13 @@ ${deliveryTablesHtml(delivery)}
 
 const NAV_CSS = `
   .nav-wrap { padding:0.7rem 0.8rem; max-width:60rem; }
+  /* overflow-wrap: an alarm carries the path or command that produced it, and a
+     filesystem path is one unbreakable token. Without this the alarm box pushes the
+     whole page sideways at 390px — measured in an iframe probe, 452px of scroll in a
+     386px viewport — and he reads this on a phone. */
   .dead { border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink);
-          border-radius:8px; padding:0.5rem 0.6rem; margin:0 0 0.7rem; font-size:0.82rem; }
+          border-radius:8px; padding:0.5rem 0.6rem; margin:0 0 0.7rem; font-size:0.82rem;
+          overflow-wrap:anywhere; }
   .dead code { font-family:var(--mono); font-size:0.74rem; }
   .swept { font-size:0.72rem; color:var(--faint); font-family:var(--mono); margin:0 0 0.7rem; }
   .nav-h { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
