@@ -172,7 +172,11 @@ test('one row per agent, each carrying its facets as data the sidebar filters on
     unattributed: null,
   };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.equal((html.match(/<tr class="ar"/g) ?? []).length, 1);
+  // One row per agent IN THE MODEL. A pinned standing role with no session of its own
+  // also gets a row (obot.agent#169) — an absent pinned role would read as health —
+  // but it is not an agent the model reported, so it is excluded from this count
+  // rather than inflating it.
+  assert.equal((html.match(/<tr class="ar"(?![^>]*data-resting)/g) ?? []).length, 1);
   assert.match(html, /data-status="died"/);
   assert.match(html, /data-produced="moved landed"/);
   assert.match(html, /data-verdict="confirmed"/);
@@ -250,6 +254,14 @@ const td = (html, cls) => {
   return m ? m[1] : null;
 };
 const text = (s) => String(s).replace(/<[^>]*>/g, '').trim();
+// The rows of the model, without the pinned band above them (obot.agent#169): a
+// standing role with no session in the fixture now renders its own row at the top of
+// the table, and `td` takes the first cell it finds. Scoping here rather than
+// unpinning in each fixture keeps these tests about the column they are named for.
+const agents = (html) => {
+  const i = html.indexOf('data-sec="rest"');
+  return i === -1 ? html : html.slice(i);
+};
 
 test('a worker is created when its id was claimed, and the row says which record said so', () => {
   // The claim comes first and it is the act that creates the agent: the id is claimed
@@ -354,7 +366,7 @@ test('the created cell carries the day, and the stamp it came from verbatim', ()
   // is the same defect as the column mixing clocks, one row at a time.
   const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00' })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.equal(text(td(html, 'c-created')), '2026-08-16');
+  assert.equal(text(td(agents(html), 'c-created')), '2026-08-16');
   assert.match(html, /data-created="\d{10,}"/);
   assert.match(html, /title="[^"]*claimed 2026-08-16T07:40:55\+01:00/);
 });
@@ -400,7 +412,7 @@ test('filtering never reorders the table, so the sort survives it', () => {
 test('the model column is the launch flag, and the row says where it came from', () => {
   const model = { rows: [row({ id: 'W0001', models: ['opus'] })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.equal(text(td(html, 'c-model')), 'opus');
+  assert.equal(text(td(agents(html), 'c-model')), 'opus');
   assert.match(html, /title="[^"]*--model opus, from the harness job record/);
   assert.match(html, /data-model="opus"/);
 });
@@ -410,15 +422,15 @@ test('an agent whose model nothing records reads unknown, never a default', () =
   // with no job record on this machine has nothing to read, and says so.
   const model = { rows: [row({ id: 'W0001', models: [] })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.equal(text(td(html, 'c-model')), 'unknown');
-  assert.doesNotMatch(text(td(html, 'c-model')), /opus|fable|sonnet|haiku/);
+  assert.equal(text(td(agents(html), 'c-model')), 'unknown');
+  assert.doesNotMatch(text(td(agents(html), 'c-model')), /opus|fable|sonnet|haiku/);
   assert.match(html, /data-model="unknown"/);
 });
 
 test('a resumed agent that ran under two models shows both', () => {
   const model = { rows: [row({ id: 'W0001', models: ['fable', 'opus'] })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.match(text(td(html, 'c-model')), /fable.*opus/);
+  assert.match(text(td(agents(html), 'c-model')), /fable.*opus/);
 });
 
 test('the pre-ledger fold claims no model, because the priced feed carries none', () => {
@@ -466,8 +478,8 @@ test('on a phone the sort key rides in the pinned column, and says the same date
   // sideways swipe. Sorting by a column he cannot see reads as no order at all.
   const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00' })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.match(td(html, 'c-name'), /class="ag-born">created 2026-08-16</);
-  assert.equal(text(td(html, 'c-created')), '2026-08-16');
+  assert.match(td(agents(html), 'c-name'), /class="ag-born">created 2026-08-16</);
+  assert.equal(text(td(agents(html), 'c-created')), '2026-08-16');
   // Hidden on a desktop, where the column itself is on screen: the same date twice in
   // one row is noise, not redundancy.
   assert.match(TABLE_CSS, /\.ag-born \{ display:none; \}/);
@@ -475,5 +487,5 @@ test('on a phone the sort key rides in the pinned column, and says the same date
 
 test('an undated row says so in the pinned column too, rather than going blank', () => {
   const model = { rows: [row({ id: 'W0001' })], unattributed: null };
-  assert.match(td(agentsTableHtml(model, { now: NOW }), 'c-name'), /ag-born">created unknown</);
+  assert.match(td(agents(agentsTableHtml(model, { now: NOW })), 'c-name'), /ag-born">created unknown</);
 });

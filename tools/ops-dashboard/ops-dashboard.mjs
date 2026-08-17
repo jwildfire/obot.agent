@@ -53,6 +53,7 @@ import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
+import { labelIsPinned, readPins, writePin } from './lib/pins.mjs';
 import { captureCode, codeState, fetchHub, resolveHub } from './lib/provenance.mjs';
 import { markerPath, holdServeMarker } from './lib/serve-marker.mjs';
 
@@ -276,6 +277,20 @@ export function serve(args) {
         }
       }
 
+      // Which agents he wants at the top of the Agents tab (obot.agent#169). His
+      // preference state, so it lands in the local ops store and never publishes —
+      // the same rule as the config list. `pinned: null` clears the override rather
+      // than recording a "no", so a standing role can go back to following its role.
+      if (req.method === 'POST' && req.url.split('?')[0] === '/pin') {
+        const body = JSON.parse(await readBody(req));
+        try {
+          const pins = writePin(args.workspace, { key: body.key, pinned: body.pinned });
+          return send(200, 'application/json', JSON.stringify({ ok: true, at: pins.at }));
+        } catch (e) {
+          return send(400, 'application/json', JSON.stringify({ error: e.message }));
+        }
+      }
+
       // Run one installation qualification's proof and record the result. The
       // command is taken from the request, so it is re-checked against the
       // read-only allowlist here rather than trusted because the page sent it —
@@ -318,9 +333,15 @@ export function serve(args) {
       // may take the other down.
       if (p === '/live.html' || p === '/session' || p === '/session/' || p === '/session/log') {
         const before = look().before;
+        // Read before the roster is assembled, because the pins decide scope: a
+        // pinned agent is never dropped for being out of the window or one corpse
+        // too many, and that judgement happens inside the join.
+        const pins = readPins(args.workspace);
         let roster = null;
         try {
-          roster = collectRoster({ workspace: args.workspace, hub: args.hub });
+          roster = collectRoster({
+            workspace: args.workspace, hub: args.hub, pinned: (name) => labelIsPinned(name, pins),
+          });
         } catch (e) {
           roster = `The roster could not be assembled: ${e.message}`;
         }
@@ -341,7 +362,7 @@ export function serve(args) {
             missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
           }));
         }
-        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, lastLook: before }));
+        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, lastLook: before, pins }));
       }
       if (p === '/session/frame') {
         const live = sessionLivePath(args.workspace);

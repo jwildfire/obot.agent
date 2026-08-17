@@ -542,7 +542,17 @@ function slugOfName(name) {
  * the night before left no machine-recoverable trace at all) and a partial one
  * rendered as clean rows would assert a completeness it does not have.
  */
-export function buildRoster({ workers, jobs = [], usage = null, delivery = [], sources = null, now = new Date() }) {
+export function buildRoster({
+  workers, jobs = [], usage = null, delivery = [], sources = null, now = new Date(),
+  // Which display names he has pinned (obot.agent#169). A pinned agent is exempt
+  // from every rule below that drops a row for being out of scope or for being one
+  // corpse too many: pinning means "always tell me about this one", and the moment
+  // that most matters is when the thing has died. A pin that drops its subject on
+  // death is worse than no pin, because the absence reads as health. A caller that
+  // says nothing pins nothing, so the scope rules are unchanged for everyone else.
+  pinned = () => false,
+} = {}) {
+  const isPinnedName = (name) => { try { return !!pinned(name); } catch { return false; } };
   const epoch = workers?.epoch ?? null;
   // Which of the four files were actually read. Absent means the whole record is
   // silent; empty means it was read and had nothing to say. By the time a renderer
@@ -639,9 +649,9 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], s
     // answering this morning is an agent that ran in the id era, and the whole
     // point of this row is that it is spending money right now. A death gets in
     // whatever its date — see isCurrent.
-    if (!isCurrent(j, epochDay, now)) continue;
+    if (!isCurrent(j, epochDay, now) && !isPinnedName(j.name)) continue;
     const d = day(j.updatedAt ?? j.startedAt);
-    if (epochDay && d && d < epochDay) deadEarlier.push(j.name);
+    if (epochDay && d && d < epochDay && !isPinnedName(j.name)) deadEarlier.push(j.name);
     if (!named.has(j.name)) named.set(j.name, []);
     named.get(j.name).push(j);
   }
@@ -830,7 +840,7 @@ export function readJobs(jobsDir) {
  * dates it — which is the right reading anyway: the question is when the pricing
  * last ran, not which day it counted.
  */
-export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
+export function collectRoster({ workspace, hub, jobsDir, now = new Date(), pinned = () => false }) {
   const jobsPath = jobsDir ?? path.join(os.homedir(), '.claude', 'jobs');
   const workersPath = path.join(workspace, '.claude', 'workers.journal');
   const deliveryPath = path.join(workspace, '.claude', 'session-hub', 'delivery.md');
@@ -869,5 +879,5 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
     },
   };
 
-  return buildRoster({ workers, jobs, usage, delivery, sources, now });
+  return buildRoster({ workers, jobs, usage, delivery, sources, now, pinned });
 }

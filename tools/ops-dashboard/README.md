@@ -369,7 +369,36 @@ mid-swipe.
 **Sorting** is on every column header. First click gives the end of the column he came
 for — biggest number, most recent day, top of the alphabet — and the pre-ledger bucket
 sorts last by default whatever it cost, because it is 147 agents added together rather
-than an agent.
+than an agent. A sort orders each band on its own: pinned rows never scatter back into
+the table because a column was clicked.
+
+**Pinning** (`lib/pins.mjs`, task
+[#169](https://github.com/jwildfire/obot.agent/issues/169)) puts a band at the top of
+the table — *"also let me pin agents. pin prime, nav and fleet manager (fleet for short)
+by default"* (@jwildfire, 2026-08-17). Every row carries the control, and four rules make
+it a pin rather than a decoration:
+
+- **The default is derived, not listed.** The pinned-by-default set is *every standing
+  role*, read off `STANDING_ROLES` in `lib/roster-view.mjs` — the same registry that
+  decides what a row's kind is. Nothing in `pins.mjs` names prime, the Navigator or the
+  fleet manager. Declaring a fourth standing role is one line in that registry and it
+  arrives pinned; a worker that has run for a month and spent the most money still
+  cannot drift into the band, because it is not a role.
+- **A pinned row is never dropped.** The scope rules and the cap on deaths both consult
+  the pins, so a pinned role that died is still in the table showing that it died. A pin
+  that drops its subject on death is worse than no pin, because the absence reads as
+  health. When a filter he ticked hides one, the band says so rather than looking
+  complete.
+- **A pinned role with no session still gets a row**, reading `not running` with the
+  reason. The fleet manager is short-lived by design ([#167](https://github.com/jwildfire/obot.agent/issues/167)):
+  absent is its ordinary state, and an empty slot cannot say whether it is resting or
+  broken.
+- **Pins are his preference state**, kept in `.claude/ops/pins.json` with the store's
+  sentinel and never published — the same rule as the config list. Only overrides are
+  stored, keyed by role for a standing session and by worker id for a worker, so a pin
+  survives a restart or a rename; unpinning a default sticks instead of reverting on the
+  next render, and clearing an override is a third state that goes back to following the
+  role.
 
 The model is `lib/roster.mjs`, unchanged and assembled fresh on every request, from four
 files and nothing else:
@@ -474,6 +503,9 @@ unapplied answer ages loudly rather than silently.
   and supersede pointers move. So "what did he say, and when" survives an agent that
   applies it badly.
 - `cache/` — GitHub sweeps.
+- `pins.json` — which agents he has pinned on the Agents tab, as overrides only: the
+  defaults follow the standing-role registry, so this file holds nothing but the places
+  he has disagreed with them.
 - `last-seen.json` — when he last opened each page. See below.
 - Every file opens with the same local-only sentinel the hub's deploy greps for, so
   if one ever reaches an assembled site the build fails instead of publishing it.
