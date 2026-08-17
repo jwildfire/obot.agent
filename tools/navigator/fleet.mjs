@@ -70,6 +70,13 @@ const num = (v, dflt) => {
  * recorded here, with 70 minutes of headroom, and below every observed failure.
  * It is also what @jwildfire asked for in words: "more than a few hours".
  *
+ * These bars sit ON TOP of wake.mjs's own grace periods rather than replacing them:
+ * classify() emits nothing for a waiting worker until WAITING_GRACE_MIN (10m) or a
+ * stalled one until STALL_MIN (30m), so those are hard floors beneath anything set
+ * here. That is the right way round — this module raises the bar, it can never lower
+ * it — but it does mean a value below the floor has no effect, which is worth knowing
+ * before anyone tunes one of these down and concludes the detector is broken.
+ *
  * `dead` is shorter because a worker that died on an API error is not coming back,
  * so waiting on it cannot pay. 60 minutes still leaves the wake channel — whose own
  * re-wake floor for a dead worker is 60 minutes — a full cycle to reach the
