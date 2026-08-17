@@ -214,6 +214,7 @@ export function facetsOf(row) {
     createdSource: created.source,
     createdDay: created.at ? isoDay(created.at) : '',
     createdTs: created.at ? Date.parse(created.at) : null,
+    models: row.models ?? [],
   };
 }
 
@@ -241,6 +242,9 @@ export function unattributedRow(u) {
     days: u.days ?? [u.first, u.last].filter(Boolean),
     sessions: 0,
     tokens: 0,
+    // No model, and none to be had: the priced feed this row is built from carries no
+    // model per agent, and these sessions have no job record left to read a flag off.
+    models: [],
     synthetic: true,
     status: { status: 'before the ledger', note: `${u.first ?? '?'} to ${u.last ?? '?'}, before worker ids existed — nothing they wrote can be traced to them` },
     cost: {
@@ -300,6 +304,7 @@ export function buildFilters(rows) {
   const produced = tally((f) => f.produced);
   const verdict = tally((f) => f.verdict);
   const repo = tally((f) => f.repo);
+  const model = tally((f) => (f.models.length ? f.models : ['unknown']));
 
   const ordered = (m, order, label = (k) => k) => [
     ...order.filter((k) => m.has(k)),
@@ -322,6 +327,9 @@ export function buildFilters(rows) {
         .map(([k, n]) => ({ value: k, label: k, count: n })),
       empty: 'No agent in this list has a reference the delivery record could resolve to a repository.',
     },
+    // Filterable because the allocation question is a filter: "what did the expensive
+    // model get spent on" is one tick, and the answer is the rows it leaves.
+    { id: 'model', title: 'Model', type: 'checkbox', options: ordered(model, ['opus', 'fable', 'sonnet', 'haiku', 'unknown']) },
     { id: 'verdict', title: 'Closeout verdict', type: 'checkbox', options: ordered(verdict, ['confirmed', 'drift', 'none', 'unjudged'], (k) => VERDICT_LABEL[k] ?? k) },
     { id: 'kind', title: 'Kind', type: 'checkbox', options: ordered(kind, ['worker', 'standing', 'other', 'pre-ledger'], (k) => KIND_LABEL[k] ?? k) },
   ].filter((g) => g.options.length || g.empty);
@@ -362,6 +370,30 @@ function impactCell(row, f) {
  * its tooltip — the sentence there says what is actually known and why it is not a
  * creation time.
  */
+/**
+ * The model cell, beside the cost it should be read against.
+ *
+ * Why this column earns its width: the allocation grant says model choice is
+ * deliberate per task — the workhorse for leads and most spawns, the expensive one
+ * for judgement-heavy work, a light one for mechanical jobs — and until now nothing
+ * made it possible to see whether that is what happens. An expensive model on a
+ * mechanical task, or a cheap one on something that needed judgement, is visible at a
+ * glance once the model sits next to the money.
+ */
+function modelCell(row, f) {
+  if (!f.models.length) return `<span class="md-none" title="${esc(modelText(row))}">unknown</span>`;
+  return f.models.map((m) => `<span class="md md-${esc(m)}" title="${esc(modelText(row))}">${esc(m)}</span>`).join('<span class="im-sep"> · </span>');
+}
+
+/** What the model cell knows, and how — the sentence its tooltip and evidence carry. */
+export function modelText(row) {
+  const models = row.models ?? [];
+  if (models.length === 1) return `launched with --model ${models[0]}, from the harness job record`;
+  if (models.length > 1) return `ran under ${models.length} models across its sessions: ${models.map((m) => `--model ${m}`).join(', ')}`;
+  if (row.synthetic) return 'unknown — the priced feed records no model per agent, and these agents have no job record left to read one from';
+  return 'unknown — no job record on this machine carries a launch flag for this agent, and the priced feed records no model per agent';
+}
+
 function createdCell(row, f) {
   const why = createdText(row);
   if (!f.created) return `<span class="cr-none" title="${esc(why)}">unknown</span>`;
@@ -392,6 +424,7 @@ function evidence(row) {
   // Which record dated this agent, spelled out where a tooltip cannot reach: the
   // phone is where he reads this table, and a hover-only provenance is no provenance.
   li.push(`<li><span class="k">created</span> ${esc(createdText(row))}</li>`);
+  li.push(`<li><span class="k">model</span> ${esc(modelText(row))}</li>`);
   for (const s of row.subs) li.push(`<li><span class="k">subagent</span> ${esc(s.id)}${s.slug ? ` ${esc(s.slug)}` : ''} — rolled into this row</li>`);
   for (const t of (row.top ?? [])) li.push(`<li><span class="k">${esc(money(t.cost))}</span> ${esc(t.label)}</li>`);
   return `<ul class="ag-ev">${li.join('')}</ul>`;
@@ -402,7 +435,7 @@ const STATUS_TONE = {
   'not launched': 'null', 'no job record': 'null', subagent: 'null', 'before the ledger': 'null',
 };
 
-const COLS = 7;
+const COLS = 8;
 
 /** One agent: the row, and the evidence row beneath it that opens on a tap. */
 export function tableRow({ row, f }, index) {
@@ -415,10 +448,12 @@ export function tableRow({ row, f }, index) {
   data-verdict="${esc(f.verdict.join(' '))}" data-repo="${esc(f.repo.join(' '))}"
   data-last="${esc(f.lastDay)}" data-cost="${f.cost === null ? '' : f.cost}"
   data-created="${f.createdTs === null ? '' : f.createdTs}" data-createdday="${esc(f.createdDay)}"
+  data-model="${esc(f.models.join(' ') || 'unknown')}"
   data-name="${esc(String(name).toLowerCase())}">
   <td class="c-name"><span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span></td>
   <td class="c-st"><span class="tone-${esc(tone)}">${esc(f.status)}</span></td>
   <td class="c-cost cost-${esc(row.cost.code ?? 'none')}" title="${esc(row.cost.text)}">${esc(row.cost.short ?? '—')}</td>
+  <td class="c-model">${modelCell(row, f)}</td>
   <td class="c-vd">${verdictCell(f)}</td>
   <td class="c-im">${impactCell(row, f)}</td>
   <td class="c-created">${createdCell(row, f)}</td>
@@ -467,6 +502,8 @@ const th = (key, label, cls = '', { sorted = 'none', title = '' } = {}) => `<th$
 
 // Said on the header itself, not only in the note at the foot: whoever reads a date
 // here should be able to find out what it measures without scrolling past the table.
+const MODEL_TITLE = 'The model each of this agent’s sessions was launched with, as the harness job record has it — the `--model` flag, verbatim. It sits beside the cost because those two are read against each other: the allocation grant says model choice is deliberate per task, and this is the first column that makes it checkable. Subagent models are not in here, and an agent with no job record on this machine reads unknown.';
+
 const CREATED_TITLE = 'When the agent first appears in the record. Workers are dated by the moment their id was claimed in the ledger, which is before they were spawned; every other row — standing sessions, probes — never claimed an id, so it is dated by its first session start. Each cell names its own source; a row neither record dates reads unknown.';
 
 const foot = (model) => `<details class="ag-foot">
@@ -478,6 +515,7 @@ const foot = (model) => `<details class="ag-foot">
     <li>Cost comes from the same priced feed as the hub's analytics page — <code>obot.roadmap/scripts/build_usage_data.py</code>. This page never prices anything itself, so the two cannot disagree.</li>
     <li>${esc(PRICE_NOTE)}</li>
     <li>${esc(ID_NOTE)}</li>
+    <li>Model is the <code>--model</code> flag each of an agent's sessions was launched with, read verbatim off the harness job record. It is beside the cost on purpose: the allocation grant says model choice is deliberate per task, and these two columns together are the first way to check that — an expensive model on a mechanical job, or a light one on something that needed judgement, shows up at a glance. Two caveats it cannot cover: the flag is what the session was launched with rather than a receipt for every call it made, and subagent models are not in it. The priced feed carries no model per agent at all, so an agent with no job record on this machine reads unknown.</li>
     <li>Created is when the agent first appears in the record, and the table opens on it, newest first. A worker is dated by the moment its id was claimed in the ledger — the claim happens before the spawn, and it is the only record that dates an id that was claimed and never launched. Every other row never claimed an id, so it is dated by its first session start from the harness instead. Each cell says which in its tooltip and in the evidence under the row, and a row neither record dates reads unknown rather than borrowing the first day it was priced on.</li>
     <li>Days here are UTC days, as everywhere else on this page — the two records disagree about the clock (the ledger writes local time, the harness writes UTC), so both are read as instants and shown on one calendar. The exact stamp, offset and all, is in each cell's tooltip.</li>
     <li>Status is the job record joined to its append-only timeline. Where the two disagree the timeline wins, because a state file can say done over a session that fell over.</li>
@@ -507,6 +545,7 @@ ${sidebar(filters, cutoffs, rows.length, cost)}
         ${th('name', 'Agent', 'c-name')}
         ${th('status', 'Status', 'c-st')}
         ${th('cost', 'Cost', 'c-cost')}
+        ${th('model', 'Model', 'c-model', { title: MODEL_TITLE })}
         ${th('verdict', 'Verdict', 'c-vd')}
         ${th('impact', 'Roadmap impact', 'c-im')}
         ${th('created', 'Created', 'c-created', { sorted: 'descending', title: CREATED_TITLE })}
@@ -562,16 +601,17 @@ export const TABLE_JS = `
   function apply() {
     var f = {
       status: values('status'), produced: values('produced'), repo: values('repo'),
-      verdict: values('verdict'), kind: values('kind')
+      verdict: values('verdict'), kind: values('kind'), model: values('model')
     };
     var period = picked('active')[0];
     var cutoff = period ? (period.dataset.cutoff || '') : '';
-    var active = f.status.length + f.produced.length + f.repo.length + f.verdict.length + f.kind.length + (cutoff ? 1 : 0);
+    var active = f.status.length + f.produced.length + f.repo.length + f.verdict.length
+      + f.kind.length + f.model.length + (cutoff ? 1 : 0);
     var n = 0, cost = 0, unpriced = 0;
     rows.forEach(function (tr) {
       var d = tr.dataset;
       var ok = hits(d.status, f.status) && hits(d.produced, f.produced) && hits(d.repo, f.repo)
-        && hits(d.verdict, f.verdict) && hits(d.kind, f.kind)
+        && hits(d.verdict, f.verdict) && hits(d.kind, f.kind) && hits(d.model, f.model)
         && (!cutoff || (d.last && d.last >= cutoff));
       tr.hidden = !ok;
       var ev = evOf(tr);
@@ -605,7 +645,9 @@ export const TABLE_JS = `
     // First click on a column shows the end of it he came for: the biggest number,
     // the most recent day, and — for a name — the top of the alphabet.
     var desc = dir[key] === 'desc' ? false : true;
-    if (key === 'name') desc = dir[key] === 'asc' ? true : false;
+    // Words read forwards. A first click on a name or a model gives the top of the
+    // alphabet, not the bottom of it.
+    if (key === 'name' || key === 'model') desc = dir[key] === 'asc' ? true : false;
     dir = {}; dir[key] = desc ? 'desc' : 'asc';
     var pairs = rows.map(function (tr) { return [tr, evOf(tr)]; });
     pairs.sort(function (a, b) {
@@ -750,6 +792,15 @@ export const TABLE_CSS = `
      one the eye lands on when the table opens. */
   .at-table .c-created { color:var(--ink); }
   .cr-none { color:var(--faint); font-family:var(--sans, inherit); font-style:italic; }
+
+  /* Model, next to the money. Mono so a column of them lines up, and one tone per
+     model so a run of the expensive one is visible without reading any of them. */
+  .at-table .c-model { font-family:var(--mono); font-size:0.68rem; white-space:nowrap; }
+  .md { letter-spacing:0.01em; }
+  .md-fable { color:var(--warn); }
+  .md-opus { color:var(--accent); }
+  .md-sonnet, .md-haiku { color:var(--muted); }
+  .md-none { color:var(--faint); font-family:var(--sans, inherit); font-style:italic; }
   .vd { font-size:0.66rem; letter-spacing:0.04em; text-transform:uppercase; }
   .vd-confirmed { color:var(--good); }
   .vd-drift { color:var(--warn); }

@@ -11,8 +11,8 @@ import assert from 'node:assert/strict';
 
 import { buildRoster, usageIndex } from '../lib/roster.mjs';
 import {
-  TABLE_JS, agentsTableHtml, buildFilters, createdOf, facetsOf, periodCutoffs, reposOf,
-  tableRows, unattributedRow,
+  TABLE_JS, agentsTableHtml, buildFilters, createdOf, facetsOf, modelText, periodCutoffs,
+  reposOf, tableRows, unattributedRow,
 } from '../lib/roster-table.mjs';
 import { sessionShell } from '../lib/render.mjs';
 
@@ -389,4 +389,65 @@ test('filtering never reorders the table, so the sort survives it', () => {
   const apply = /function apply\(\)[\s\S]*?\n  }\n/.exec(TABLE_JS);
   assert.ok(apply, 'the filter function should be findable in the page script');
   assert.doesNotMatch(apply[0], /appendChild|insertBefore|\.sort\(/);
+});
+
+// ---- the model column (jwildfire/obot.agent#168) ----------------------------
+//
+// @jwildfire: "also show me the model in the table." It sits beside the cost because
+// those two are read against each other, which is also the reason it must never be
+// derived: a guessed model next to a real cost figure discredits the cost.
+
+test('the model column is the launch flag, and the row says where it came from', () => {
+  const model = { rows: [row({ id: 'W0001', models: ['opus'] })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  assert.equal(text(td(html, 'c-model')), 'opus');
+  assert.match(html, /title="[^"]*--model opus, from the harness job record/);
+  assert.match(html, /data-model="opus"/);
+});
+
+test('an agent whose model nothing records reads unknown, never a default', () => {
+  // The priced feed has no model per cell and its breakdown is portfolio-wide. A row
+  // with no job record on this machine has nothing to read, and says so.
+  const model = { rows: [row({ id: 'W0001', models: [] })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  assert.equal(text(td(html, 'c-model')), 'unknown');
+  assert.doesNotMatch(text(td(html, 'c-model')), /opus|fable|sonnet|haiku/);
+  assert.match(html, /data-model="unknown"/);
+});
+
+test('a resumed agent that ran under two models shows both', () => {
+  const model = { rows: [row({ id: 'W0001', models: ['fable', 'opus'] })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  assert.match(text(td(html, 'c-model')), /fable.*opus/);
+});
+
+test('the pre-ledger fold claims no model, because the priced feed carries none', () => {
+  const u = { agents: 147, cost: 4985.31, calls: 0, first: '2026-07-09', last: '2026-08-16', days: [], top: [] };
+  assert.deepEqual(unattributedRow(u).models, []);
+  assert.match(modelText(unattributedRow(u)), /^unknown/);
+});
+
+test('model is filterable, so "what did the expensive model get spent on" is one tick', () => {
+  const model = {
+    rows: [
+      row({ id: 'W0001', models: ['opus'] }),
+      row({ id: 'W0002', models: ['opus'] }),
+      row({ id: 'W0003', models: ['fable'] }),
+      row({ id: 'W0004', models: [] }),
+    ],
+    unattributed: null,
+  };
+  const { rows } = tableRows(model, { now: NOW });
+  const g = buildFilters(rows).find((f) => f.id === 'model');
+  assert.deepEqual(g.options.map((o) => [o.value, o.count]), [['opus', 2], ['fable', 1], ['unknown', 1]]);
+  // Every option must be reachable: an unknown row carries the word in its data or
+  // the box that says "unknown" matches nothing and the filter looks broken.
+  const html = agentsTableHtml(model, { now: NOW });
+  for (const o of g.options) assert.match(html, new RegExp(`data-model="[^"]*${o.value}`));
+});
+
+test('the model column is beside the cost, not at the far end of the table', () => {
+  const model = { rows: [row({ id: 'W0001', models: ['opus'] })], unattributed: null };
+  const heads = [...agentsTableHtml(model, { now: NOW }).matchAll(/data-sort="(\w+)"/g)].map((m) => m[1]);
+  assert.equal(heads[heads.indexOf('cost') + 1], 'model');
 });
