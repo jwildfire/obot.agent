@@ -125,13 +125,20 @@ its `Closes #N` keyword → details as needed. That is the five-section obot PR 
 reordered, not a second template, and the `Closes` keywords must stay in it or issues stop
 closing and `obot-merge` refuses the release merge.
 
-**The exec summary is the first visible line — no banner above it.** The attested-lane
-rule goes in an **HTML comment** at the top of the body, not a heading:
+**The exec summary is the first line of the body — no banner above it.** The
+attested-lane rule goes in an **HTML comment**, placed *below* the sentence, not a
+heading above it:
 
 ```markdown
+{One sentence: what this release lets someone do that they could not do before.}
+
 <!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
      attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
 ```
+
+Below, because GitHub hides the comment either way but parsers do not: the dashboard
+builds his queue row from the first line that is not a heading or a bullet, and `<!--`
+is neither. Sentence first means nothing downstream has to know comments exist.
 
 The `## ⛔ Release candidate — merges only on @jwildfire's approval, via the attested lane`
 heading is **retired** (@jwildfire, 2026-08-17: *"I really don't like this header …

@@ -432,10 +432,10 @@ test('the RC second line renders under the title, and is escaped like everything
   assert.ok(nasty.includes('&lt;img src=x'));
 });
 
-const RC_BODY = `<!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
-     attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
+const RC_BODY = `Adds the participant-level metrics phase: six widgets and their workflows.
 
-Adds the participant-level metrics phase: six widgets and their workflows.
+<!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
+     attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
 
 - **See it move:** [annotated demo](https://jwildfire.github.io/obot.roadmap/reports/gs-v1.1-demo/)
 - **Release notes:** [NEWS.md](https://github.com/jwildfire/gsm.safety/blob/dev/NEWS.md) — the v1.1.0 (Upcoming) section
@@ -479,6 +479,17 @@ test('the agent-facing HTML comment never becomes the row he reads', () => {
   const rc = parseRCBody(RC_BODY);
   assert.equal(rc.summary, 'Adds the participant-level metrics phase: six widgets and their workflows.');
   assert.ok(!JSON.stringify(rc).includes('jeremy-approved'), 'comment text must not reach the panel');
+
+  // The template puts the comment *below* the sentence precisely so a parser that knows
+  // nothing about comments still gets the summary right. This is the belt to that
+  // braces: a body that leads with one anyway must still not put `<!--` on his phone.
+  const leading = parseRCBody([
+    '<!-- Release candidate. Merges only on @jwildfire\'s explicit approval, via the',
+    "     attested lane: obot-merge 10 -R jwildfire/open.gismo --jeremy-approved 'chat'. -->",
+    '',
+    'The release sentence, written second.',
+  ].join('\n'));
+  assert.equal(leading.summary, 'The release sentence, written second.');
 
   // A comment anywhere else in the body is skipped the same way, including one that
   // opens and closes on one line and one whose closer trails other text.

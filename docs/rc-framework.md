@@ -183,12 +183,13 @@ release at its last step over a string.
    live in the requirements list:
 
    ```markdown
+   {One sentence: what this release lets someone do that they could not do before.}
+
    <!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
         attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'.
         Agent-facing note — it is a comment because he does not need to be told a
         rule about himself. See obot.agent docs/rc-framework.md. -->
 
-   {One sentence: what this release lets someone do that they could not do before.}
 
    - **See it move:** [annotated demo]({deployed hub URL})
    - **Release notes:** [NEWS.md]({repo}/blob/{head branch}/NEWS.md) — the `vX.Y.Z
@@ -213,8 +214,19 @@ release at its last step over a string.
      maybe an invisible markdown comment."* It told him a rule about himself, it spent
      the position the exec summary was given, and it announced a guard that is already
      enforced in code — `obot-merge` refuses a release-role merge without
-     `--jeremy-approved`, and raw `gh pr merge` is hook-denied. The rule lives here and
+     `--jeremy-approved`, and raw merges are hook-denied. The rule lives here and
      in the HTML comment; see [Written for him, or written for us](#written-for-him-or-written-for-us).
+   - **The comment goes *below* the sentence, not above it.** GitHub hides it either way,
+     so the placement is not about him — it is about everything that reads these bodies.
+     The Operations Dashboard builds his queue row from the first line that is not a
+     heading or a bullet, and `<!--` is neither, so a leading comment becomes the row on
+     his phone. Putting the sentence first means no reader has to know about comments at
+     all: a naive parser, a future consumer and a person skimming raw markdown all get the
+     release sentence. The dashboard strips comments wherever they appear as well — both,
+     because a parser fix only protects the readers we control, and it ships on its own
+     schedule. On 2026-08-17 the running dashboard held the old parser in memory with a
+     twenty-minute cache standing between a leading comment and his screen; the ordering
+     rule is what makes that race impossible rather than merely survived.
    - **The one sentence is the row on his phone.** The Operations Dashboard shows it
      under the title, truncated near 325px on a 390px screen — front-load it, and do not
      open with "This PR".
