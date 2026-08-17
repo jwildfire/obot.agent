@@ -78,6 +78,12 @@ def main(argv):
         try:
             line = write_verdict(WS, f["worker"], f["produced"], f["requirement"],
                                  f["verdict"], f.get("note"))
+        except PermissionError as e:
+            # The refusal is correct and is not a bug to work around. Exit 2 rather
+            # than 1 so a caller can tell "you may not do this" from "you got the
+            # arguments wrong" without parsing prose.
+            print("delivery-log: %s" % e, file=sys.stderr)
+            return 2
         except ValueError as e:
             print("delivery-log: %s (got %r)" % (e, f["verdict"]), file=sys.stderr)
             return 1

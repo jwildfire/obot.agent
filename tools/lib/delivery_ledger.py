@@ -38,6 +38,29 @@ SCHEME = Scheme("n", 4, "delivery-log")
 
 VERDICTS = ("confirmed", "drift", "none")
 
+# Actors that may record a CALL but never a VERDICT (obot.agent#167, under
+# jwildfire/obot.roadmap#236, correction 1).
+#
+# The fleet manager writes its own actions here so its work is judged by the same
+# standard as any worker's - an overseer whose actions are invisible is the failure
+# it exists to prevent. It does NOT judge delivery. Judging stays the Navigator's,
+# and a second writer of verdicts makes this record two-sourced, which is precisely
+# the defect this programme spent two days removing from the decisions registry, the
+# dashboard queue and the roadmap page.
+#
+# Enforced here rather than only in the fleet manager's skill file, because a rule
+# that lives only in prose is a rule an agent can talk itself out of at three in the
+# morning. Matched on the actor prefix so the sub-ids a manager might claim are
+# covered too.
+CALL_ONLY_ACTORS = ("fleet",)
+
+
+def is_call_only(who):
+    """Whether this actor is barred from writing verdicts."""
+    a = str(who or "").strip().lower()
+    return any(a == p or a.startswith(p + "-") or a.startswith(p + ":")
+               for p in CALL_ONLY_ACTORS)
+
 HEADER = [
     "# delivery - what the agents did to the roadmap",
     "",
@@ -89,11 +112,36 @@ def verdict_line(worker, produced, requirement, verdict, note=None):
     return " · ".join(bits)
 
 
-def call_line(cid, kind, summary):
-    return "- %s %s %s · call %s · %s · %s" % (_today(), _hhmm(), cid, cid, kind, summary)
+def named_actor(who):
+    """The actor to print on a call line, or None for the Navigator session itself.
+
+    A bare session id (`session:b510658b`) means nothing to a human reader and would
+    be noise on every line, so it stays in the journal where the joining is done. A
+    NAMED actor - `fleet`, or a worker id - is what a reader needs, because it
+    answers "who decided this on my behalf" in the case where the answer is not the
+    officer he expects. jwildfire/obot.roadmap#236: the manager's own actions go in
+    this record actor-stamped, judged by the same standard as any worker's, because
+    an overseer whose actions are invisible is the failure it exists to prevent.
+    """
+    a = str(who or "").strip()
+    if not a or a.startswith("session:") or a.startswith("host:"):
+        return None
+    return a
+
+
+def call_line(cid, kind, summary, who=None):
+    stamp = named_actor(who)
+    return "- %s %s %s · call %s · %s%s · %s" % (
+        _today(), _hhmm(), cid, cid, ("%s · " % stamp) if stamp else "", kind, summary)
 
 
 def write_verdict(ws, worker, produced, requirement, verdict, note=None):
+    who = actor()
+    if is_call_only(who):
+        raise PermissionError(
+            "%s may record calls but never verdicts - judging delivery is the "
+            "Navigator's, and a second writer makes this record two-sourced. "
+            "Report the closeout gap instead; do not route around this." % who)
     if verdict not in VERDICTS:
         raise ValueError("verdict must be one of %s" % ", ".join(VERDICTS))
     line = verdict_line(worker, produced, requirement, verdict, note)
@@ -113,8 +161,9 @@ def write_call(ws, kind, summary):
     with locked(jp):
         records = read_journal(jp)
         cid = next_id(SCHEME, records)
-        line = call_line(cid, kind, summary)
-        append_journal(jp, {"op": "call", "id": cid, "at": now(), "actor": actor(),
+        who = actor()
+        line = call_line(cid, kind, summary, who)
+        append_journal(jp, {"op": "call", "id": cid, "at": now(), "actor": who,
                             "kind": kind, "summary": summary, "digest": sha(line)})
         append_line(ws, line)
     return cid, line

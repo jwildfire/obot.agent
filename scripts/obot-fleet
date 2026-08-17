@@ -1,0 +1,292 @@
+#!/usr/bin/env node
+// obot-fleet — evaluate the fleet conditions and, when one holds, launch a
+// short-lived 🚦🤖 manager that acts and exits.
+//
+// Implements jwildfire/obot.agent#167 under jwildfire/obot.roadmap#236.
+//
+// THE SHAPE, and it is the whole design: the sweep DETECTS and this LAUNCHES; the
+// manager ACTS and EXITS. Nothing here is a standing session, because a standing
+// supervisor was measured and argued against in D0016 and that analysis still
+// stands — it was right about detection, which was never the problem. Finished work
+// stopped moving twice in two days and @jwildfire found it both times, with all of
+// it visible in `claude agents` and on GitHub the entire time. What was missing was
+// an actor, not a better view.
+//
+// WHY THE TRIGGER LIVES HERE AND NOT IN THE SWEEP. One place computes the
+// conditions, so what the state file shows and what actually launched can never
+// disagree. The sweep shells this and folds the section it prints — the same
+// pattern it already uses for the ledger audits.
+//
+// WHY THE MANAGER IS AN AGENT AND NOT MORE SCRIPT. Two of its three actions need
+// judgment that a script cannot supply: a summary must be built from what reached
+// GitHub rather than from the session's own record, and a pull request must be
+// measured against a bar with a stated reason when it fails. The third — closing a
+// session — needs the harness's TaskStop tool, which only an agent has.
+//
+// Usage:
+//   obot-fleet                 evaluate; launch if warranted; print the
+//                                      `## Fleet` section on stdout for the sweep
+//   obot-fleet --check         evaluate and report; never launch
+//   obot-fleet --json          the trigger as JSON, no launch
+//   obot-fleet --preflight-only  print the launch command only
+//   obot-fleet --model <m>     model override (default: opus)
+//
+// Exit codes: 0 always on a completed evaluation — this runs on the five-minute
+// sweep and a non-zero exit there is noise, not information. A broken evaluation
+// prints a FLEET TRIGGER BROKEN section, which is the reading that matters.
+//
+// Env: OBOT_WORKSPACE, OBOT_JOBS_DIR, and the OBOT_FLEET_* thresholds documented in
+// tools/navigator/fleet.mjs.
+//
+// THE HARD CEILING IS ARMED BY DEFAULT; OBOT_FLEET_KILL=0 disarms it. The Navigator
+// decided this on 2026-08-17 and the reasoning is worth keeping: a kill that ships
+// disarmed is documentation, and the failure it prevents is the one the requirement
+// names — a manager with no enforced limit is a standing session that has not
+// admitted it yet. The risk of an armed kill is interrupting a write, and that risk
+// is small here by construction, because everything fleet writes is append-only and
+// an interrupted append is a shorter record rather than a corrupted one.
+//
+// A ceiling that fires silently is indistinguishable from a manager that exited
+// cleanly, so the kill leaves a line in the fleet log AND an alarm headline in the
+// section that reaches the dashboard.
+import { execFileSync, spawn } from 'node:child_process'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { MANAGER_NAME, MANAGER_TTL_MIN, brief, fleetSection, holdLine, hostWasAway,
+         isManager, judgedWorkers, launchLine, operationalRepos, overrun,
+         parseFleetLog, readJobs, shouldLaunch, triggers } from '../tools/navigator/fleet.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = join(HERE, '..')
+const WS = process.env.OBOT_WORKSPACE || join(process.env.HOME, 'Documents/obot2')
+const JOBS_DIR = process.env.OBOT_JOBS_DIR || join(process.env.HOME, '.claude', 'jobs')
+// Overridable for the same reason OBOT_JOBS_DIR is: the branch where no lane is
+// readable is the one that must NOT report a quiet fleet, and a branch that cannot
+// be reached from a test is a branch nobody has ever seen run.
+const POLICY = process.env.OBOT_FLEET_POLICY || join(REPO_ROOT, 'scripts', 'policy.json')
+const HUB_DIR = join(WS, '.claude/session-hub')
+const FLEET_LOG = join(HUB_DIR, 'fleet.log')
+const BRIEF = join(HUB_DIR, 'cache', 'fleet-brief.json')
+const SNAPSHOT = join(HUB_DIR, 'cache', 'navigator-rc.json')
+const DELIVERY_JOURNAL = join(HUB_DIR, 'delivery.journal')
+
+let MODEL = 'opus'
+let MODE = 'run'
+for (let i = 2; i < process.argv.length; i++) {
+  const a = process.argv[i]
+  if (a === '--check') MODE = 'check'
+  else if (a === '--json') MODE = 'json'
+  else if (a === '--preflight-only') MODE = 'preflight'
+  else if (a === '--model') MODEL = process.argv[++i]
+  else if (a === '-h' || a === '--help') { MODE = 'help' }
+  else { console.error(`obot-fleet: unknown argument: ${a}`); process.exit(1) }
+}
+
+const say = (m) => console.error(`obot-fleet: ${m}`)
+const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
+
+/**
+ * The command that launches a manager.
+ *
+ * UNBRIDGED, deliberately. Remote Control is for the roles @jwildfire talks to from
+ * a phone — the Navigator and the concierge. The manager talks to nobody: it reads
+ * GitHub, acts, records and exits. Dropping the flag alone is a no-op because the
+ * flag is OR-ed with the global setting, so the setting is overridden explicitly
+ * (obot.agent#116/#117).
+ */
+const launchCommand = (briefPath) => [
+  'claude', '--bg', '--permission-mode', 'auto',
+  '--settings', '{"remoteControlAtStartup":false}',
+  '-n', MANAGER_NAME, '--model', MODEL,
+  `/s-fleet ${briefPath}`,
+]
+
+const printCommand = (cmd) => {
+  // %s rather than %q: %q escapes every non-ASCII byte, which turns the session
+  // name into mojibake and makes the one line a reader checks unreadable.
+  process.stdout.write('obot-fleet: would run (from ' + WS + '):')
+  for (const arg of cmd) process.stdout.write(/[\s{]/.test(arg) ? ` '${arg}'` : ` ${arg}`)
+  process.stdout.write('\n')
+}
+
+if (MODE === 'help') {
+  process.stdout.write(safeRead(fileURLToPath(import.meta.url)).split('\n')
+    .slice(1, 40).map((l) => l.replace(/^\/\/ ?/, '')).join('\n') + '\n')
+  process.exit(0)
+}
+
+if (MODE === 'preflight') {
+  printCommand(launchCommand(BRIEF))
+  process.exit(0)
+}
+
+// ---- the readings -----------------------------------------------------------
+
+/**
+ * Open pull requests on the operational lanes, with the repo's integration branch
+ * carried alongside so the filter is per-repo rather than a hardcoded `main`.
+ *
+ * Only operational repos are ever listed. A clinical repo is not filtered out
+ * later — it is never fetched, so no code path exists down which one could reach a
+ * merge decision.
+ */
+function listPRs(repos) {
+  const out = []
+  const errors = []
+  for (const { repo, integration } of repos) {
+    try {
+      const raw = execFileSync('gh', ['pr', 'list', '-R', repo, '--state', 'open', '--json',
+        'number,title,url,baseRefName,isDraft,reviewRequests,reviewDecision,updatedAt'],
+        { encoding: 'utf8', timeout: 60000 })
+      for (const pr of JSON.parse(raw)) out.push({ ...pr, repo, integration })
+    } catch (e) {
+      errors.push(`${repo}: ${String(e.message).slice(0, 90)}`)
+    }
+  }
+  return { prs: out, errors }
+}
+
+function main() {
+  const now = new Date()
+  mkdirSync(join(HUB_DIR, 'cache'), { recursive: true })
+
+  const jobs = readJobs(JOBS_DIR)
+  const policy = JSON.parse(safeRead(POLICY) || '{}')
+  const repos = operationalRepos(policy)
+  if (!repos.length) {
+    // Not a quiet fleet — an unreadable policy. Said as a broken reading, because a
+    // trigger that cannot see any lane and reports "nothing to do" is the exact
+    // shape of silent success this house keeps rebuilding.
+    process.stdout.write(fleetSection({ error: `no operational repo readable from ${POLICY}` }))
+    return
+  }
+
+  // The host guard, borrowed from the wake and for the same reason: on 2026-08-16 a
+  // lid closed for thirteen hours and every worker on the machine read as stalled on
+  // the next sweep. A detector cannot run on a suspended host, and a manager that
+  // launched on that reading would have closed a fleet that was merely asleep.
+  let prevSweptIso = null
+  try { prevSweptIso = JSON.parse(safeRead(SNAPSHOT)).sweptIso ?? null } catch { /* first run */ }
+  const away = prevSweptIso ? hostWasAway(prevSweptIso, now) : false
+
+  const { prs, errors } = listPRs(repos)
+  // Readability is a separate fact from emptiness. `judgedWorkers('')` returns an
+  // empty set, which is indistinguishable from a journal in which nothing has been
+  // judged — and that difference decides whether every recent closeout is a gap.
+  // existsSync rather than a try/catch on the parse, because the journal is
+  // append-only JSONL and a torn last line is normal and must NOT read as unreadable.
+  const journal = safeRead(DELIVERY_JOURNAL)
+  const judgedReadable = existsSync(DELIVERY_JOURNAL) && journal.trim().length > 0
+  const judged = judgedWorkers(journal)
+  const trigger = triggers({ jobs, prs, policy, judged, judgedReadable, now, hostWasAway: away })
+  if (!judgedReadable) errors.push(`delivery journal not readable at ${DELIVERY_JOURNAL}`)
+  // A repo that failed to list contributes no candidates, and saying the queue is
+  // empty when it could not be read is the wrong direction to fail in. Named, so the
+  // section is never read as complete.
+  if (errors.length) trigger.unread = errors
+
+  const overruns = overrun(jobs, { now })
+  const log = parseFleetLog(safeRead(FLEET_LOG))
+
+  if (MODE === 'json') {
+    process.stdout.write(JSON.stringify({ trigger, overruns, away, unread: errors }, null, 2) + '\n')
+    return
+  }
+
+  const decision = shouldLaunch({ trigger, jobs, log, now, hostWasAway: away })
+  // The section renders the decision as "held: <why>". In a dry run that would read
+  // as a real refusal, so the reason says what it actually is — the section is the
+  // artefact a reader trusts, and it must never describe an action that did not
+  // happen or a refusal that was never made.
+  if (MODE === 'check') {
+    decision.why = `DRY RUN, nothing launched — would ${decision.launch ? 'LAUNCH' : 'hold'}: ${decision.why}`
+  }
+  let launched = null
+
+  // An overrunning manager is handled before anything else: it is also the thing
+  // holding the singleton, so a report that mentions it after the hold reads as if
+  // the hold were normal.
+  for (const o of overruns) {
+    say(o.line)
+    if (MODE === 'run' && o.hard && process.env.OBOT_FLEET_KILL !== '0') {
+      const killed = killManager(o.job, jobs)
+      appendFileSync(FLEET_LOG, `${now.toISOString()} HOLD - — killed overrunning manager ${o.job}: ${killed}\n`)
+      say(`killed overrunning manager ${o.job}: ${killed}`)
+      o.killed = killed
+    }
+  }
+
+  if (MODE === 'run' && decision.launch) {
+    const b = brief({ trigger, now })
+    writeFileSync(BRIEF, JSON.stringify(b, null, 2))
+    const cmd = launchCommand(BRIEF)
+    try {
+      // Detached: the sweep runs under launchd on a five-minute leash and must not
+      // wait on an agent. stdio ignored for the same reason — a child writing to a
+      // dead pipe would take the sweep down with it.
+      const child = spawn(cmd[0], cmd.slice(1), { cwd: WS, detached: true, stdio: 'ignore' })
+      child.unref()
+      launched = `pid ${child.pid}`
+      appendFileSync(FLEET_LOG, `${launchLine(now.toISOString(), trigger.signature, decision.why)}\n`)
+      say(`launched — ${decision.why}`)
+    } catch (e) {
+      launched = null
+      decision.why = `launch failed: ${String(e.message).slice(0, 120)}`
+      appendFileSync(FLEET_LOG, `${holdLine(now.toISOString(), trigger.signature, decision.why)}\n`)
+      say(decision.why)
+    }
+  } else {
+    // Held launches are logged too. A log that records only what happened cannot
+    // answer the question actually asked of it the morning after — "why did nothing
+    // run" — which is the question this whole requirement is about.
+    //
+    // A dry run writes NOTHING. `--check` exists so this can be exercised against
+    // the live fleet without touching the record, and a HOLD line saying the
+    // launcher declined when it was never asked to launch would be a false entry in
+    // the one file that answers why nothing ran.
+    if (MODE === 'run' && trigger.fired) {
+      appendFileSync(FLEET_LOG, `${holdLine(now.toISOString(), trigger.signature, decision.why)}\n`)
+    }
+    say(MODE === 'check' ? `dry run — would ${decision.launch ? 'LAUNCH' : 'hold'}: ${decision.why}`
+                         : trigger.fired ? `held — ${decision.why}` : 'no condition holds — nothing launched')
+  }
+
+  let section = fleetSection({ trigger, decision, overruns, launched })
+  if (errors.length) {
+    section = section.replace(/\n$/, '') + '\n' +
+      errors.map((e) => `  unread: ${e}`).join('\n') + '\n'
+  }
+  process.stdout.write(section)
+}
+
+/**
+ * Terminate an overrunning manager, armed only by OBOT_FLEET_KILL=1.
+ *
+ * The pid comes from `claude agents --json`, joined on the session id, because the
+ * job record does not carry one. SIGTERM rather than SIGKILL so the session gets to
+ * flush; a manager that ignores it is reported again on the next run, which is a
+ * finding rather than an escalation.
+ */
+function killManager(jobId, jobs) {
+  try {
+    const list = JSON.parse(execFileSync('claude', ['agents', '--json'], { encoding: 'utf8', timeout: 20000 }))
+    const job = jobs.find((j) => j.id === jobId)
+    const row = list.find((r) => String(r.sessionId).startsWith(jobId) ||
+                                 (job && String(r.name) === String(job.name)))
+    if (!row?.pid) return 'no pid found — reported only'
+    process.kill(row.pid, 'SIGTERM')
+    return `SIGTERM to pid ${row.pid}`
+  } catch (e) {
+    return `kill failed: ${String(e.message).slice(0, 80)}`
+  }
+}
+
+try {
+  main()
+} catch (e) {
+  process.stdout.write(fleetSection({ error: String(e.message) }))
+  say(`BROKEN: ${e.message}`)
+}
+process.exit(0)
