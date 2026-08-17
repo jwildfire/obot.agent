@@ -23,6 +23,8 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { parseParentUrl } from './goals.mjs'
+
 export const WINDOWS = [1, 3, 7, 30, 365]
 
 // Where measured history actually begins. The oldest issue in these repos is
@@ -52,6 +54,20 @@ export const BRANCH_MODEL_EPOCH = {
 }
 
 const RC_TITLE = /-RC\d|^Release candidate:|^Release v\d|v\d+\.\d+\.\d+ RC\d|promotion/i
+
+/**
+ * A goal's short name, from the one machine-readable bit its body carries.
+ *
+ * The hub's goal collector (obot.roadmap scripts/lib/collect/goals.mjs) reads the same
+ * `<!-- goal-slug: … -->` comment to name the goal's page, so a filter chip reading
+ * "autonomy" and the published page at /goals/autonomy are the same name from the same
+ * source. Deriving one from the title instead would drift the first time he renames a
+ * goal — and #78's title already carries a double space that no slugifier would keep.
+ */
+export function goalSlug(body = '') {
+  const m = /<!--\s*goal-slug:\s*([a-z0-9][a-z0-9._-]*)\s*-->/i.exec(String(body ?? ''))
+  return m ? m[1].toLowerCase() : null
+}
 
 /**
  * One issue → its class, from the labels the repos actually use. GitHub's issue
@@ -130,6 +146,127 @@ export function windowCounts(items = [], now = new Date(), dateOf = (i) => i.cre
 }
 
 /**
+ * How a period is cut into buckets for a trend line.
+ *
+ * @jwildfire, 2026-08-17: "a metric driven dashboard showing trends over a selectable
+ * time period". The counts already existed; a trend needs the period cut into pieces,
+ * and the piece size is chosen so the shape is readable rather than so the arithmetic
+ * is tidy — 30 hourly bars on a 390px phone is a texture, not a trend.
+ *
+ * Day-grain series (the decisions record, which records dates and no times) are
+ * floored at one bucket per day. Cutting a day-grain series into hours would draw
+ * every decision at midnight and invent a daily spike that is an artefact of the
+ * recording format, not of anything he did.
+ */
+export function bucketPlan(period, { grain = 'instant' } = {}) {
+  const HOUR = 3600000
+  const DAY = 86400000
+  const base = {
+    1: { size: HOUR, count: 24, unit: 'hour' },
+    3: { size: 6 * HOUR, count: 12, unit: '6 hours' },
+    7: { size: DAY, count: 7, unit: 'day' },
+    30: { size: DAY, count: 30, unit: 'day' },
+    365: { size: 7 * DAY, count: 53, unit: 'week' },
+  }[period] ?? { size: DAY, count: Math.max(1, Math.round(period)), unit: 'day' }
+  if (grain === 'day' && base.size < DAY) {
+    return { size: DAY, count: Math.max(1, Math.round(period)), unit: 'day' }
+  }
+  return base
+}
+
+/**
+ * One series over one period: the buckets to draw, the total, and the same-length
+ * period before it to compare against.
+ *
+ * Buckets end at `now` and run backwards, so the last bucket is the one in progress —
+ * always partial, and labelled as such by the view rather than left to read as a
+ * collapse. `prevTotal` covers `[now - 2*period, now - period)`, which is what a delta
+ * has to mean for it to be a comparison rather than a coincidence.
+ */
+export function trendSeries(items = [], {
+  period = 7, now = new Date(), dateOf = (i) => i.createdAt, grain = 'instant',
+} = {}) {
+  const plan = bucketPlan(period, { grain })
+  // Buckets sit on a fixed UTC grid rather than on wherever `now` happens to fall, so
+  // a daily bucket is a DAY — one he can name — instead of noon-to-noon. Two things
+  // depend on it: the bars can be labelled with real dates, and a date-only item
+  // filed today lands in today's bucket rather than in the future, where a
+  // now-anchored window silently drops it and the page reads "he decided nothing".
+  const end = Math.ceil(now.getTime() / plan.size) * plan.size
+  // The window is EXACTLY the period he selected. An earlier cut let the bucket size
+  // set the span, so "365d" drew 53 whole weeks and the tile said 371d underneath a
+  // chip saying 365d — a chart quietly measuring six days more than it was asked to.
+  // Only the year is not divisible by its bucket, so only the year gets a short first
+  // bucket, and the renderer sizes bars by their real duration so a one-day bucket is
+  // not drawn as wide as a week.
+  const span = period * 86400000
+  const start = end - span
+  const buckets = []
+  for (let b = end; b > start; b -= plan.size) {
+    buckets.unshift({ start: Math.max(start, b - plan.size), end: b, n: 0 })
+  }
+  // The last bucket is in progress, so the window is not finished. A comparison that
+  // sets a part-elapsed period against a whole one is not a comparison: at period=1 the
+  // decisions tiles read six hours of today against the whole of yesterday and printed
+  // "-6", a fall invented entirely by the clock. So the delta is computed over COMPLETE
+  // buckets only, on both sides — `completeTotal` against `prevComplete`, equal spans,
+  // both fully elapsed. `total` still counts everything including today, because the
+  // headline number is what has happened; it is only the comparison that has to be fair.
+  const completeEnd = now.getTime() < end
+    ? (buckets.find((b) => now.getTime() < b.end)?.start ?? start)
+    : end
+  const completeSpan = completeEnd - start
+  let total = 0
+  let prevTotal = 0
+  let completeTotal = 0
+  let prevComplete = 0
+  for (const item of items) {
+    const raw = String(dateOf(item) ?? '')
+    const t = Date.parse(grain === 'day' ? raw.slice(0, 10) : raw)
+    if (Number.isNaN(t)) continue
+    if (t >= start && t < end) {
+      total += 1
+      if (t < completeEnd) completeTotal += 1
+      const idx = buckets.findIndex((b) => t < b.end)
+      buckets[idx < 0 ? buckets.length - 1 : idx].n += 1
+    } else if (t >= start - span && t < start) {
+      prevTotal += 1
+      if (t >= start - completeSpan) prevComplete += 1
+    }
+  }
+  // No complete bucket at all — a one-day window on the day itself. There is nothing
+  // fair to compare, and the view says so rather than reaching for the whole of
+  // yesterday.
+  const comparableSpan = completeSpan > 0
+  return {
+    plan, start, end, buckets, total, prevTotal,
+    completeEnd, completeSpan, comparableSpan, completeTotal, prevComplete,
+  }
+}
+
+/**
+ * The earliest thing each repo has on record here, per kind.
+ *
+ * This is the honest floor for "when did measurement begin" on a per-repo basis: five
+ * of the seven repos only exist under this account from the 2026-07-02 consolidation,
+ * and anything earlier lives in another org under other issue numbers. Derived rather
+ * than declared, because a constant would go stale the day a repo is added.
+ */
+export function repoEpochs(cache = {}) {
+  const out = new Map()
+  const note = (repo, at) => {
+    const d = String(at ?? '').slice(0, 10)
+    if (!d) return
+    const prev = out.get(repo)
+    if (!prev || d < prev) out.set(repo, d)
+  }
+  for (const i of cache.issues ?? []) note(i.repo, i.createdAt)
+  for (const p of cache.prs ?? []) note(p.repo, p.createdAt)
+  for (const r of cache.releases ?? []) note(r.repo, r.publishedAt)
+  return out
+}
+
+/**
  * The decisions record, from its two real sources in the hub clone.
  *
  * Filed comes from the registry (`registry.json` — the id claim is the filing).
@@ -184,6 +321,73 @@ function listSince(repo, path, cutoff, { maxPages = 5, exec = gh } = {}) {
 }
 
 /**
+ * Which issues a pull request closes, from the one field that is a link rather than
+ * a sentence.
+ *
+ * REST `/pulls` does not carry it, so this is the collector's only GraphQL call. It
+ * is the same field tools/navigator/checks.mjs treats as a PR's ancestor evidence —
+ * deliberately, because the goal filter and the discipline checks must not disagree
+ * about what a PR is attached to.
+ */
+export const CLOSES_QUERY = `
+query($owner:String!, $name:String!, $cursor:String) {
+  repository(owner:$owner, name:$name) {
+    pullRequests(first:100, orderBy:{field:CREATED_AT, direction:DESC}, after:$cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number createdAt
+        closingIssuesReferences(first:10) { nodes { number repository { nameWithOwner } } }
+      }
+    }
+  }
+}`
+
+/**
+ * `Map<prNumber, ['owner/repo#n', …]>` for one repo, back to the cutoff.
+ *
+ * Same no-silent-caps rule as `listSince`: when the page cap is reached before the
+ * cutoff, the shortfall is returned so the view can say which PRs were never asked
+ * about, rather than showing them as attached to nothing.
+ */
+export function collectCloses(repo, cutoff, { maxPages = 4, exec = gh } = {}) {
+  const [owner, name] = repo.split('/')
+  const closes = new Map()
+  let cursor = null
+  for (let page = 1; page <= maxPages; page++) {
+    const args = ['api', 'graphql', '-f', `query=${CLOSES_QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`]
+    if (cursor) args.push('-f', `cursor=${cursor}`)
+    const body = JSON.parse(exec(args))
+    // A GraphQL response can carry `errors` ALONGSIDE partial `data`, and `gh` exits 0
+    // when it does — measured, not assumed. Reading that partial answer is how this
+    // silently under-reported 42 of 146 links across all seven repos while writing a
+    // cache whose errors, bounds and gaps were every one of them empty. A degraded
+    // answer is not an answer: it is thrown, so the caller records the repo as
+    // unattributed and the page says so.
+    if (body?.errors?.length) {
+      throw new Error(`graphql: ${String(body.errors[0]?.message ?? 'partial response').slice(0, 80)}`)
+    }
+    const conn = body?.data?.repository?.pullRequests
+    if (!conn) break
+    let oldest = Infinity
+    for (const n of conn.nodes ?? []) {
+      oldest = Math.min(oldest, Date.parse(n.createdAt))
+      // `null` here means GitHub declined to answer for this pull request; `{nodes:[]}`
+      // means it genuinely closes nothing. Only the second is an answer, and only the
+      // second may be recorded as one.
+      if (!n.closingIssuesReferences) {
+        throw new Error(`graphql: no closing-link answer for ${repo}#${n.number}`)
+      }
+      const refs = n.closingIssuesReferences.nodes
+        .map((r) => `${r.repository?.nameWithOwner ?? repo}#${r.number}`)
+      if (refs.length) closes.set(n.number, refs)
+    }
+    if (!conn.pageInfo?.hasNextPage || oldest < cutoff) return { closes, truncated: null }
+    cursor = conn.pageInfo.endCursor
+  }
+  return { closes, truncated: { kind: 'closes' } }
+}
+
+/**
  * One full collection: every policy repo's issues, PRs and releases inside the
  * 365-day window, plus the decisions record. Per-repo failures land in `errors`
  * and cost that repo's numbers, never the whole cache — and the renderer names
@@ -194,22 +398,58 @@ export function collectMetrics({ repos, hub, now = new Date(), exec = gh }) {
   const out = {
     fetchedAt: iso(now),
     repos: repos.map((r) => r.repo),
-    issues: [], prs: [], releases: [],
+    issues: [], prs: [], releases: [], goals: [],
     decisions: { filed: [], decided: [] },
-    bounds: [], errors: [], failedRepos: [],
+    bounds: [], errors: [], failedRepos: [], noCloses: [],
   }
   for (const { repo, release, integration } of repos) {
     try {
       const iss = listSince(repo, 'issues?filter=all', cutoff, { exec })
       for (const i of iss.items) {
         if (i.pull_request) continue // the issues endpoint lists PRs too; they are counted from /pulls, where base survives
-        out.issues.push({ repo, number: i.number, createdAt: i.created_at, cls: classifyIssue(i, repo), state: i.state })
+        const cls = classifyIssue(i, repo)
+        // The structural sub-issue link, and nothing else. `parent_issue_url` names
+        // the parent's repo as well as its number, so a cross-repo parent resolves
+        // without assuming parents live in the hub — they nearly always do, and
+        // "nearly always" is not a thing to hard-code into a filter.
+        const parent = parseParentUrl(i.parent_issue_url)
+        out.issues.push({
+          repo, number: i.number, createdAt: i.created_at, cls, state: i.state,
+          ...(parent ? { parent } : {}),
+        })
+        // Goals are the filter's vocabulary, so they carry their title and their
+        // creation date: nothing can belong to a goal before the goal existed, and
+        // that date is what stops a goal-filtered trend from drawing a flat run of
+        // zeros over months when the goal was filed last week.
+        if (cls === 'goal') {
+          out.goals.push({
+            repo, number: i.number, title: i.title, createdAt: i.created_at, state: i.state,
+            slug: goalSlug(i.body),
+          })
+        }
       }
       if (iss.truncated) out.bounds.push({ repo, kind: 'issues', ...iss.truncated })
       const prs = listSince(repo, 'pulls', cutoff, { exec })
       const laneCtx = { release, integration, epoch: BRANCH_MODEL_EPOCH[repo] ?? null }
+      // A PR's only structural route into the plan. If this call fails the repo keeps
+      // every other number it has; what it loses is goal attribution for its PRs, and
+      // the repo is named so the view can report the gap instead of drawing zeros.
+      let closes = new Map()
+      try {
+        const c = collectCloses(repo, cutoff, { exec })
+        closes = c.closes
+        if (c.truncated) out.bounds.push({ repo, kind: 'pr closing links', oldestFetched: null })
+      } catch (e) {
+        out.noCloses.push(repo)
+        out.errors.push(`${repo} pr links: ${String(e.message).slice(0, 80)}`)
+      }
       for (const p of prs.items) {
-        out.prs.push({ repo, number: p.number, createdAt: p.created_at, lane: classifyPRLane(p, laneCtx), state: p.merged_at ? 'merged' : p.state })
+        const refs = closes.get(p.number)
+        out.prs.push({
+          repo, number: p.number, createdAt: p.created_at,
+          lane: classifyPRLane(p, laneCtx), state: p.merged_at ? 'merged' : p.state,
+          ...(refs ? { closes: refs } : {}),
+        })
       }
       if (prs.truncated) out.bounds.push({ repo, kind: 'prs', ...prs.truncated })
       const rels = JSON.parse(exec(['api', `repos/${repo}/releases?per_page=100`]))

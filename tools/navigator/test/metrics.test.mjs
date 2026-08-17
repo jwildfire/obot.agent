@@ -9,6 +9,7 @@ import { join } from 'node:path'
 
 import {
   classifyIssue, classifyPRLane, windowCounts, readDecisions, refreshMetrics, WINDOWS,
+  bucketPlan, trendSeries, repoEpochs, collectCloses, collectMetrics, goalSlug,
 } from '../metrics.mjs'
 
 const HUB = 'jwildfire/obot.roadmap'
@@ -153,4 +154,258 @@ test('refreshMetrics: a successful refresh writes and returns the new cache', ()
   assert.equal(written.releases.length, 1)
   // The decisions read failed against /nowhere — that is an error line, not a crash.
   assert.ok(written.errors.some((e) => e.startsWith('decisions:')))
+})
+
+// ---- trends over a selectable period (jwildfire/obot.agent#155) --------------
+
+test('bucketPlan: the piece size fits the period, and a day-grain series never sub-divides a day', () => {
+  assert.deepEqual(bucketPlan(1), { size: 3600000, count: 24, unit: 'hour' })
+  assert.deepEqual(bucketPlan(7), { size: 86400000, count: 7, unit: 'day' })
+  assert.deepEqual(bucketPlan(30), { size: 86400000, count: 30, unit: 'day' })
+  assert.equal(bucketPlan(365).unit, 'week')
+  assert.equal(bucketPlan(365).count * bucketPlan(365).size >= 365 * 86400000, true, 'the weeks must cover the year')
+  // The decisions record holds dates and no times. Cutting it into hours would draw
+  // every decision at midnight and invent a spike that is a recording artefact.
+  assert.deepEqual(bucketPlan(1, { grain: 'day' }), { size: 86400000, count: 1, unit: 'day' })
+  assert.deepEqual(bucketPlan(3, { grain: 'day' }), { size: 86400000, count: 3, unit: 'day' })
+})
+
+test('trendSeries: buckets end at now, and the delta compares the period before it', () => {
+  const now = new Date('2026-08-17T12:00:00Z')
+  const at = (iso) => ({ createdAt: iso })
+  const items = [
+    at('2026-08-17T11:00:00Z'), // today — last bucket
+    at('2026-08-16T11:00:00Z'), // yesterday
+    at('2026-08-16T13:00:00Z'),
+    at('2026-08-12T11:00:00Z'), // inside 7d
+    at('2026-08-05T11:00:00Z'), // inside the PREVIOUS 7d, not this one
+    at('2026-07-01T11:00:00Z'), // outside both
+  ]
+  const t = trendSeries(items, { period: 7, now })
+  assert.equal(t.total, 4)
+  assert.equal(t.prevTotal, 1, 'the comparison period is the same length, immediately before')
+  assert.equal(t.buckets.length, 7)
+  assert.equal(t.buckets.reduce((s, b) => s + b.n, 0), t.total, 'every counted item lands in exactly one bucket')
+  // Buckets are calendar days on the UTC grid, so the newest one is TODAY — partial,
+  // and nameable. A now-anchored bucket would run noon to noon and name no day.
+  assert.equal(new Date(t.end).toISOString(), '2026-08-18T00:00:00.000Z')
+  assert.equal(new Date(t.buckets.at(-1).start).toISOString(), '2026-08-17T00:00:00.000Z')
+  assert.equal(t.buckets.at(-1).n, 1, 'today, in progress')
+  assert.equal(t.buckets.at(-2).n, 2, 'both of yesterday\'s, whatever the hour')
+})
+
+test('trendSeries: a day-grain series counts something filed today rather than dropping it', () => {
+  const now = new Date('2026-08-17T12:00:00Z')
+  const decided = [{ date: '2026-08-17' }, { date: '2026-08-16' }, { date: '2026-08-09' }]
+  const t = trendSeries(decided, { period: 7, now, dateOf: (d) => d.date, grain: 'day' })
+  // A window ending at noon would put a date-only item filed today in the future and
+  // silently drop it — the failure that reads as "he decided nothing today".
+  assert.equal(t.total, 2)
+  assert.equal(t.buckets.at(-1).n, 1)
+  assert.equal(t.prevTotal, 1)
+})
+
+test('trendSeries: an item exactly on a bucket edge is counted once, in the later bucket', () => {
+  const now = new Date('2026-08-17T09:00:00Z')
+  const t = trendSeries([{ createdAt: '2026-08-16T00:00:00Z' }], { period: 7, now })
+  assert.equal(t.total, 1)
+  assert.equal(t.buckets.filter((b) => b.n).length, 1)
+  assert.equal(new Date(t.buckets.find((b) => b.n).start).toISOString(), '2026-08-16T00:00:00.000Z')
+})
+
+test('trendSeries: hourly buckets sit on the hour, not on the minute now happens to be', () => {
+  const now = new Date('2026-08-17T12:34:00Z')
+  const t = trendSeries([{ createdAt: '2026-08-17T12:05:00Z' }], { period: 1, now })
+  assert.equal(t.buckets.length, 24)
+  assert.equal(new Date(t.end).toISOString(), '2026-08-17T13:00:00.000Z')
+  assert.equal(t.buckets.at(-1).n, 1)
+})
+
+test('repoEpochs: where each repo\'s record actually begins, derived not declared', () => {
+  const epochs = repoEpochs({
+    issues: [
+      { repo: 'jwildfire/obot.agent', createdAt: '2026-05-26T00:00:00Z' },
+      { repo: 'jwildfire/obot.agent', createdAt: '2026-08-01T00:00:00Z' },
+      { repo: 'jwildfire/demo-301', createdAt: '2026-07-29T00:00:00Z' },
+    ],
+    prs: [{ repo: 'jwildfire/obot.agent', createdAt: '2026-05-20T00:00:00Z' }],
+    releases: [{ repo: 'jwildfire/safety.viz', publishedAt: '2026-07-12T00:00:00Z' }],
+  })
+  assert.equal(epochs.get('jwildfire/obot.agent'), '2026-05-20', 'the earliest of anything the repo has')
+  assert.equal(epochs.get('jwildfire/demo-301'), '2026-07-29')
+  assert.equal(epochs.get('jwildfire/safety.viz'), '2026-07-12')
+  assert.equal(epochs.get('jwildfire/nothing'), undefined)
+})
+
+test('collectCloses: a PR\'s closing issues, with the repo that owns them', () => {
+  const calls = []
+  const exec = (args) => {
+    calls.push(args)
+    return JSON.stringify({
+      data: { repository: { pullRequests: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [
+          { number: 153, createdAt: '2026-08-17T00:00:00Z', closingIssuesReferences: { nodes: [{ number: 151, repository: { nameWithOwner: 'jwildfire/obot.agent' } }] } },
+          { number: 149, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: { nodes: [{ number: 219, repository: { nameWithOwner: 'jwildfire/obot.roadmap' } }] } },
+          { number: 129, createdAt: '2026-08-15T00:00:00Z', closingIssuesReferences: { nodes: [] } },
+        ],
+      } } },
+    })
+  }
+  const { closes, truncated } = collectCloses('jwildfire/obot.agent', 0, { exec })
+  assert.equal(truncated, null)
+  assert.deepEqual(closes.get(153), ['jwildfire/obot.agent#151'])
+  // A PR closing an issue in ANOTHER repo keeps that repo — the cross-repo link is
+  // exactly how spoke work reaches a hub requirement.
+  assert.deepEqual(closes.get(149), ['jwildfire/obot.roadmap#219'])
+  assert.equal(closes.has(129), false, 'a PR that closes nothing is absent, not empty')
+  assert.equal(calls[0][1], 'graphql')
+})
+
+test('collectMetrics: goals, parents and closing links ride along with the counts', () => {
+  const cache = collectMetrics({
+    repos: [{ repo: 'jwildfire/obot.roadmap', release: ['main'], integration: 'main' }],
+    hub: '/nowhere',
+    now: new Date('2026-08-17T12:00:00Z'),
+    exec: (args) => {
+      const path = args[1] ?? ''
+      if (path === 'graphql') {
+        return JSON.stringify({ data: { repository: { pullRequests: {
+          pageInfo: { hasNextPage: false },
+          nodes: [{ number: 9, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: { nodes: [{ number: 227, repository: { nameWithOwner: 'jwildfire/obot.roadmap' } }] } }],
+        } } } })
+      }
+      if (path.includes('/issues')) {
+        return JSON.stringify([
+          { number: 73, created_at: '2026-07-24T00:00:00Z', labels: [{ name: 'goal' }], title: 'Goal: autonomy', state: 'open', body: 'prose\n<!-- goal-slug: autonomy -->\n' },
+          { number: 227, created_at: '2026-08-17T05:00:00Z', labels: [{ name: 'requirement' }], state: 'open', parent_issue_url: 'https://api.github.com/repos/jwildfire/obot.roadmap/issues/73' },
+        ])
+      }
+      if (path.includes('/pulls')) {
+        return JSON.stringify([{ number: 9, created_at: '2026-08-16T00:00:00Z', base: { ref: 'main' } }])
+      }
+      if (path.includes('/releases')) return JSON.stringify([])
+      throw new Error(`unexpected call: ${args.join(' ')}`)
+    },
+  })
+  assert.deepEqual(cache.goals, [{
+    repo: 'jwildfire/obot.roadmap', number: 73, title: 'Goal: autonomy',
+    createdAt: '2026-07-24T00:00:00Z', state: 'open', slug: 'autonomy',
+  }])
+  assert.deepEqual(cache.issues.find((i) => i.number === 227).parent, { repo: 'jwildfire/obot.roadmap', number: 73 })
+  assert.equal(cache.issues.find((i) => i.number === 73).parent, undefined)
+  assert.deepEqual(cache.prs[0].closes, ['jwildfire/obot.roadmap#227'])
+  assert.deepEqual(cache.noCloses, [])
+})
+
+test('collectMetrics: PR links failing costs goal attribution for that repo, never its counts', () => {
+  const cache = collectMetrics({
+    repos: [{ repo: 'jwildfire/obot.agent', release: ['main'], integration: 'main' }],
+    hub: '/nowhere',
+    now: new Date('2026-08-17T12:00:00Z'),
+    exec: (args) => {
+      const path = args[1] ?? ''
+      if (path === 'graphql') throw new Error('GraphQL: rate limited')
+      if (path.includes('/issues')) return JSON.stringify([])
+      if (path.includes('/pulls')) return JSON.stringify([{ number: 9, created_at: '2026-08-16T00:00:00Z', base: { ref: 'main' } }])
+      if (path.includes('/releases')) return JSON.stringify([])
+      throw new Error(`unexpected call: ${args.join(' ')}`)
+    },
+  })
+  assert.equal(cache.prs.length, 1, 'the PR is still counted')
+  assert.equal(cache.prs[0].closes, undefined)
+  assert.deepEqual(cache.noCloses, ['jwildfire/obot.agent'], 'and the gap is named rather than drawn as zero')
+  assert.equal(cache.failedRepos.length, 0, 'a links failure is not a repo failure')
+})
+
+test('goalSlug: the short name comes from the goal body, the same bit the hub site reads', () => {
+  assert.equal(goalSlug('direction prose\n\n<!-- goal-slug: autonomy -->\n'), 'autonomy')
+  assert.equal(goalSlug('<!--goal-slug:open-csr-->'), 'open-csr')
+  // No comment, no slug — the filter falls back to the issue number rather than
+  // inventing a name from a title (#78's own title carries a double space).
+  assert.equal(goalSlug('Goal:  Keep adding charts (static + interactive)'), null)
+  assert.equal(goalSlug(null), null)
+})
+
+test('trendSeries: the window is exactly the period asked for, whatever the bucket size', () => {
+  const now = new Date('2026-08-17T09:30:00Z')
+  for (const period of [1, 3, 7, 30, 365]) {
+    const t = trendSeries([], { period, now })
+    assert.equal((t.end - t.start) / 86400000, period, `${period}d must span ${period} days`)
+    assert.equal(t.buckets[0].start, t.start, 'the first bucket starts at the window start')
+    assert.equal(t.buckets.at(-1).end, t.end, 'the last bucket ends at the window end')
+    for (let i = 1; i < t.buckets.length; i++) {
+      assert.equal(t.buckets[i].start, t.buckets[i - 1].end, `${period}d buckets must not gap or overlap`)
+    }
+  }
+})
+
+test('trendSeries: only the year has an uneven bucket, and it is the first one', () => {
+  const now = new Date('2026-08-17T09:30:00Z')
+  const y = trendSeries([], { period: 365, now })
+  // 52 whole weeks is 364 days; the odd day out is the earliest bucket, never the
+  // newest — a short bar at the right edge would read as a collapse in the present.
+  assert.equal(y.buckets.length, 53)
+  assert.equal((y.buckets[0].end - y.buckets[0].start) / 86400000, 1)
+  for (const b of y.buckets.slice(1)) assert.equal((b.end - b.start) / 86400000, 7)
+  for (const period of [1, 3, 7, 30]) {
+    const t = trendSeries([], { period, now })
+    const sizes = new Set(t.buckets.map((b) => b.end - b.start))
+    assert.equal(sizes.size, 1, `${period}d buckets are all the same width`)
+  }
+})
+
+test('trendSeries: an item on the very first instant of the year window is counted once', () => {
+  const now = new Date('2026-08-17T09:30:00Z')
+  const y = trendSeries([], { period: 365, now })
+  const t = trendSeries([{ createdAt: new Date(y.start).toISOString() }], { period: 365, now })
+  assert.equal(t.total, 1)
+  assert.equal(t.buckets[0].n, 1, 'it lands in the short leading bucket, not off the chart')
+  assert.equal(t.buckets.reduce((s, b) => s + b.n, 0), 1)
+})
+
+test('collectCloses: a partial GraphQL answer is refused, never read as "closes nothing"', () => {
+  // Measured on 2026-08-17: `gh api graphql` exits 0 when the response carries an
+  // `errors` array, and GitHub can return `errors` alongside partial `data`. Reading
+  // that cost 42 of 146 links across all seven repos and wrote a cache reporting no
+  // errors, no bounds and no gaps.
+  const withErrors = () => JSON.stringify({
+    errors: [{ message: 'Something went wrong while executing your query.' }],
+    data: { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [
+      { number: 1, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: { nodes: [] } },
+    ] } } },
+  })
+  assert.throws(() => collectCloses('jwildfire/a', 0, { exec: withErrors }), /graphql/)
+  // A pull request GitHub declined to answer for is not a pull request that closes
+  // nothing, and the difference is the whole goal filter.
+  const nullField = () => JSON.stringify({
+    data: { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [
+      { number: 1, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: null },
+    ] } } },
+  })
+  assert.throws(() => collectCloses('jwildfire/a', 0, { exec: nullField }), /no closing-link answer/)
+  // A genuine empty answer still means what it says.
+  const empty = () => JSON.stringify({
+    data: { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [
+      { number: 1, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: { nodes: [] } },
+    ] } } },
+  })
+  assert.equal(collectCloses('jwildfire/a', 0, { exec: empty }).closes.size, 0)
+})
+
+test('collectMetrics: a repo whose links are unread is NAMED, not drawn as goalless', () => {
+  const cache = collectMetrics({
+    repos: [{ repo: 'jwildfire/a', release: ['main'], integration: 'dev' }],
+    hub: '/nowhere',
+    now: new Date('2026-08-17T12:00:00Z'),
+    exec: (args) => {
+      if ((args[1] ?? '') === 'graphql') return JSON.stringify({ errors: [{ message: 'timeout' }], data: {} })
+      if (String(args[1]).includes('/issues')) return JSON.stringify([])
+      if (String(args[1]).includes('/pulls')) return JSON.stringify([{ number: 3, created_at: '2026-08-16T00:00:00Z', base: { ref: 'dev' } }])
+      return JSON.stringify([])
+    },
+  })
+  assert.deepEqual(cache.noCloses, ['jwildfire/a'])
+  assert.equal(cache.prs.length, 1)
+  assert.equal(cache.prs[0].closes, undefined)
 })
