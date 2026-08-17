@@ -20,8 +20,10 @@ import { parseNavigatorState } from './navigator.mjs';
 import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
-import { rosterHtml, ROSTER_CSS } from './roster-view.mjs';
+import { rosterHtml, ROSTER_CSS, emptyRoster } from './roster-view.mjs';
 import { agentsTableHtml, TABLE_CSS } from './roster-table.mjs';
+import { UNMEASURED, nothingYet } from './absent.mjs';
+import { STORELESS } from './answers.mjs';
 import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
 
 /**
@@ -35,7 +37,11 @@ export function lastLookTitle(v) {
   if (!v || v.state === 'unknown') {
     return `When you last opened this page is unknown${v?.why ? ` — ${v.why}` : ''}. Nothing is being guessed in its place.`;
   }
-  if (v.state === 'first') return 'No record of you opening this page before. This is the first look.';
+  if (v.state === 'first') {
+    return v.storeMissing
+      ? 'Nothing on this machine records you opening this page before — the visit record is local and does not travel between machines. The record starts with this visit.'
+      : 'No record of you opening this page before. This is the first look.';
+  }
   return `You last opened this page at ${new Date(v.at).toLocaleString()}. Recorded locally, never published.`;
 }
 
@@ -89,9 +95,23 @@ const item = (it) => {
   return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${sub}${claim}</li>`;
 };
 
-const group = (title, items, empty, moved = 0) => `<h2 class="q-h">${esc(title)} <span class="q-n">${items.length}</span>${
+// `read: false` means the source behind this group could not be opened, so the
+// badge shows a dash rather than a count. A `0` beside "Sweeping GitHub…" is the
+// page asserting a number in the same breath as admitting it has none.
+const group = (title, items, empty, moved = 0, read = true) => `<h2 class="q-h">${esc(title)} <span class="q-n">${read ? items.length : UNMEASURED}</span>${
   moved ? `<span class="q-moved">${moved} pinned above</span>` : ''}</h2>
 ${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="q-empty">${esc(empty)}</p>`}`;
+
+/** "The GitHub sweep, the hub clone and the config list" — for the one-line why. */
+const unreadNames = (read) => {
+  const names = [
+    read.rc ? null : 'the GitHub sweep',
+    read.decision ? null : 'the hub clone',
+    read.config ? null : 'the config list',
+  ].filter(Boolean);
+  if (names.length <= 1) return names[0] ?? 'nothing';
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+};
 
 const ageWords = (min) => {
   if (min === null || min === undefined || !Number.isFinite(min)) return null;
@@ -262,6 +282,17 @@ const DASHBOARD_CSS = `
   .main .placeholder h2 { font-size:1rem; margin:0 0 0.4rem; color:var(--ink); }
   .main .placeholder p { margin:0 0 0.5rem; font-size:0.85rem; }
 
+  /* The sweep's age, printed only when a newer attempt has failed behind it. */
+  .q-stale { font-size:0.7rem; color:var(--warn); margin:0.15rem 0 0.4rem; }
+  /* The first morning on a new machine: what is absent, and what fills it. */
+  .firstday { border:1px solid var(--line); border-radius:8px; padding:0.7rem 0.8rem; margin:0 0 1rem;
+    background:var(--paper); }
+  .firstday h2 { font-size:0.95rem; margin:0 0 0.35rem; color:var(--ink); }
+  .firstday p { margin:0 0 0.5rem; font-size:0.85rem; }
+  .firstday ul { margin:0; padding-left:1.1rem; font-size:0.83rem; }
+  .firstday li { margin-bottom:0.25rem; }
+  .firstday code { font-family:var(--mono); font-size:0.78rem; overflow-wrap:anywhere; }
+  .firstday li { overflow-wrap:anywhere; }
   .q-h { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
          font-weight:500; margin:0.85rem 0 0.3rem; display:flex; align-items:center; gap:0.4rem; }
   .q-h:first-child { margin-top:0; }
@@ -288,13 +319,13 @@ const DASHBOARD_CSS = `
      he reads this list on a 390px phone. */
   .q-sub { font-size:0.72rem; color:var(--muted); line-height:1.25; min-width:0;
            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; }
+  .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; overflow-wrap:anywhere; }
   /* Wraps rather than ellipsizes: it is one short line naming one or two PRs, and
      the point of it is that the refs stay readable at 390px. */
   .q-aside { font-size:0.7rem; color:var(--faint); margin:0.1rem 0 0.4rem; line-height:1.35; }
   /* What the page is made of. Above the queue, never hidden at any width: a
      staleness notice that disappears on a phone is the failure it warns about. */
-  .prov { font-size:0.66rem; line-height:1.4; margin:0 0 0.6rem; color:var(--faint);
+  .prov { font-size:0.66rem; line-height:1.4; margin:0 0 0.6rem; color:var(--faint); overflow-wrap:anywhere;
           border-left:2px solid var(--line); padding:0.15rem 0 0.15rem 0.45rem; }
   .prov.warn { color:var(--muted); border-left-color:var(--crit); }
   .prov code { font-family:var(--mono); font-size:0.95em; }
@@ -450,10 +481,15 @@ ${body}
  * as "no agents". The record link is the page's frame and survives every state.
  */
 export function sessionShell({ roster = null, feed = [], lastLook = null, now = new Date() } = {}) {
+  // A roster that could not be assembled arrives as a string and says so; an
+  // assembled-but-empty one goes through `emptyRoster`, which reads the model's
+  // own source flags and separates "the ledger is here and empty" from "there is
+  // no ledger to read". Both used to print the first sentence, and on a machine
+  // with no history that is a claim about a file nobody opened (hub#223).
   const ok = roster && typeof roster === 'object' && Array.isArray(roster.rows) && roster.rows.length;
   const body = ok
     ? agentsTableHtml(roster, { now })
-    : `<p class="ag-empty">${esc(String(typeof roster === 'string' ? roster : 'No agent has run since the worker ledger was adopted.'))}</p>
+    : `<p class="ag-empty">${esc(String(typeof roster === 'string' ? roster : emptyRoster(roster)))}</p>
 <p class="ag-more"><a href="/session/log">The full record →</a></p>`;
   return agentsPage(body, { lastLook, wrap: 'at-wrap' });
 }
@@ -496,7 +532,7 @@ const NAV_CSS = `
   .dead { border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink);
           border-radius:8px; padding:0.5rem 0.6rem; margin:0 0 0.7rem; font-size:0.82rem;
           overflow-wrap:anywhere; }
-  .dead code { font-family:var(--mono); font-size:0.74rem; }
+  .dead code { font-family:var(--mono); font-size:0.74rem; overflow-wrap:anywhere; }
   .swept { font-size:0.72rem; color:var(--faint); font-family:var(--mono); margin:0 0 0.7rem; }
   .nav-h { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
            font-weight:500; margin:0.9rem 0 0.3rem; }
@@ -504,7 +540,8 @@ const NAV_CSS = `
   .nav-list li { border-left:3px solid var(--line); padding:0.2rem 0.4rem; font-size:0.82rem; line-height:1.3; }
   .nav-list li a { text-decoration:none; }
   .nav-list .at { color:var(--faint); font-family:var(--mono); font-size:0.68rem; }
-  .nav-empty { font-size:0.76rem; color:var(--muted); margin:0; }
+  .nav-empty { font-size:0.76rem; color:var(--muted); margin:0; overflow-wrap:anywhere; }
+  .nav-empty code { font-family:var(--mono); font-size:0.74rem; overflow-wrap:anywhere; }
 
   /* A row that carries its own evidence. Closed it costs one line, which is the
      budget on a 390px screen; open it lists what the claim rests on. */
@@ -585,7 +622,12 @@ export const ledgerNotes = (state, { full = false } = {}) => (state?.notes ?? []
  * landed, and presenting a dead observer's content as current is the failure mode. */
 const sweepHead = (state, missing) => {
   if (missing || !state) {
-    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code>.</p>`;
+    // The remedy has to work on the machine that is reading it. On a new one the
+    // LaunchAgent has never been installed, so `launchctl kickstart` answers
+    // `Could not find service "com.obot.navigator-sweep"` — the absence was stated
+    // honestly and the half that says how to fill it was wrong, which is the half
+    // this requirement cares about most (jwildfire/obot.roadmap#223).
+    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes once installed: <code>bash obot.agent/tools/navigator/install-launchd</code>, then <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code> to nudge it.</p>`;
   }
   if (state.stale) {
     return `<p class="dead"><strong>The observer is dead</strong> — last swept ${esc(state.sweptAt ?? 'never')}${state.ageMin === null ? '' : ` (${state.ageMin} min ago, cadence ${state.cadenceMin}m)`}. What follows is <strong>not current</strong>. Restart: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`;
@@ -710,11 +752,13 @@ const answersPanel = (answers, deliverer, now) => {
       <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`
     : '';
   return `<div class="answers">
-      <h2>Your answers <span class="q-n">${answers.length}</span></h2>
+      <h2>Your answers <span class="q-n">${answers[STORELESS] ? UNMEASURED : answers.length}</span></h2>
       ${alarm}
       <ul class="ans-list">${answers.length
     ? answers.map((a) => answerRow(a, now)).join('')
-    : '<li class="q-empty">Nothing recorded yet. Answer a decision and it appears here with its state.</li>'}</ul>
+    : `<li class="q-empty">${answers[STORELESS]
+      ? 'No answer store on this machine yet — it appears the first time you answer a decision here.'
+      : 'Nothing recorded yet. Answer a decision and it appears here with its state.'}</li>`}</ul>
     </div>`;
 };
 
@@ -731,6 +775,47 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
     decision: queue.decisions.items.length + critical.filter((i) => i.kind === 'decision').length,
   };
   const total = counts.rc + counts.config + counts.decision;
+
+  // Whether each collector actually opened its source. A count is a measurement,
+  // and a page may print one only where it made one: on a machine with no hub
+  // clone, no config list and no completed sweep, "0 · 0 · 0 — nothing is waiting
+  // on you" is three zeros and a verdict standing in for three files nobody read
+  // (jwildfire/obot.roadmap#223). Two of the three collectors already returned the
+  // reason; only the decisions one ever reached the page, four elements below a
+  // heading that contradicted it.
+  const read = {
+    rc: !queue.rcs?.error,
+    decision: !queue.decisions?.error,
+    config: !queue.config?.error,
+  };
+  const sourceWhy = {
+    rcs: queue.rcs?.error ?? '',
+    decisions: queue.decisions?.error ?? '',
+    config: queue.config?.error ?? '',
+  };
+  const allRead = read.rc && read.decision && read.config;
+
+  // What each group says when it is empty — and it depends on whether it is empty
+  // or merely unread. "All answered" about a decision log that was never opened is
+  // the same class of statement as "$0.00 spent" over an absent usage artifact.
+  const rcEmpty = queue.rcs?.error
+    ? nothingYet('No GitHub sweep has completed on this machine', `${queue.rcs.error}; release candidates cannot be listed until one does`)
+    : (queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.');
+  const decisionEmpty = queue.decisions?.error
+    ? nothingYet('Open decisions could not be read', `${queue.decisions.error}; clone jwildfire/obot.roadmap beside obot.agent and reload`)
+    : 'All answered.';
+  const configEmpty = queue.config?.error
+    ? nothingYet(
+      queue.config.error === 'no config file' ? 'No config list on this machine yet' : `The config list could not be read: ${queue.config.error}`,
+      'every setup step this machine needs would be listed in .claude/blockers.md, which is local and does not travel between machines; capture the first with obot.agent/tools/blocker-log',
+    )
+    : 'Nothing needs your keyboard.';
+  // The sweep's age, when it has one and a newer attempt has since failed. Computed
+  // and then discarded until now, so an offline machine read a six-hour-old queue
+  // as if it were now.
+  const rcAge = read.rc && queue.rcs.refreshing && queue.rcs.items.length && ageWords(queue.rcs.ageMin)
+    ? `<p class="q-stale">Swept ${esc(ageWords(queue.rcs.ageMin))}; the refresh since has not completed, so this list may be out of date.</p>`
+    : '';
 
   // Everything the page needs to show an item without another round trip: the
   // installation qualification for config rows, and how a check may be run.
@@ -762,9 +847,9 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
   <span class="brand">🍊😺 Operations</span>
   ${tabs('ops')}
   <span class="counts">
-    <span class="pill rc">${counts.rc} release candidate${counts.rc === 1 ? '' : 's'}</span>
-    <span class="pill decision">${counts.decision} decision${counts.decision === 1 ? '' : 's'}</span>
-    <span class="pill config">${counts.config} config</span>
+    <span class="pill rc"${read.rc ? '' : ` title="${esc(sourceWhy.rcs)}"`}>${read.rc ? counts.rc : UNMEASURED} release candidate${read.rc && counts.rc === 1 ? '' : 's'}</span>
+    <span class="pill decision"${read.decision ? '' : ` title="${esc(sourceWhy.decisions)}"`}>${read.decision ? counts.decision : UNMEASURED} decision${read.decision && counts.decision === 1 ? '' : 's'}</span>
+    <span class="pill config"${read.config ? '' : ` title="${esc(sourceWhy.config)}"`}>${read.config ? counts.config : UNMEASURED} config</span>
   </span>
   <span class="spacer"></span>
   <span class="where" title="${esc(lastLookTitle(lastLook))}"><span class="wide">local only · ${esc(generated.toTimeString().slice(0, 5))} · </span>${esc(phrase(lastLook))}</span>
@@ -774,21 +859,32 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
 
   <nav class="rail" aria-label="Your queue">
     ${provenanceLine(provenance ?? {})}
-    ${total === 0 ? '<p class="q-empty">Nothing is waiting on you.</p>' : ''}
+    ${total === 0 ? `<p class="q-empty">${esc(allRead
+      ? 'Nothing is waiting on you.'
+      : nothingYet('Nothing has been read on this machine yet', `${unreadNames(read)} could not be collected, so this page is not saying the queue is empty — it is saying it has not been able to look`))}</p>` : ''}
     ${critical.length ? group('Critical', critical, '') : ''}
     ${queue.overBudget ? `<p class="overbudget">${queue.overBudget} more item${queue.overBudget === 1 ? '' : 's'} claim${queue.overBudget === 1 ? 's' : ''} critical. The tag is capped at ${CRITICAL_BUDGET} so it keeps meaning something — the rest are at the top of their own sections.</p>` : ''}
-    ${group('Release candidates', queue.rcs.items, queue.rcs.refreshing ? 'Sweeping GitHub…' : 'None waiting.', queue.rcs.moved)}
+    ${group('Release candidates', queue.rcs.items, rcEmpty, queue.rcs.moved, read.rc)}
+    ${rcAge}
     ${standardLane(queue.rcs.standard)}
-    ${group('Decisions', queue.decisions.items, 'All answered.', queue.decisions.moved)}
+    ${group('Decisions', queue.decisions.items, decisionEmpty, queue.decisions.moved, read.decision)}
     ${foldedLane(queue.decisions.folded)}
-    ${group('Config', queue.config.items, 'Nothing needs your keyboard.', queue.config.moved)}
-    ${queue.decisions.error ? `<p class="q-empty">Decisions unavailable: ${esc(queue.decisions.error)}</p>` : ''}
+    ${group('Config', queue.config.items, configEmpty, queue.config.moved, read.config)}
     ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
     ${collapsed('Cleared', cleared, (it) => (it.triage?.action === 'done' ? 'marked done' : 'dismissed'))}
   </nav>
 
   <main class="main" id="main">
     <div class="placeholder" id="placeholder">
+      ${allRead ? '' : `<div class="firstday">
+        <h2>Nothing has been collected on this machine yet.</h2>
+        <p>The page is working; the record is not here. Each list fills itself once its source exists:</p>
+        <ul>
+          ${read.rc ? '' : '<li><strong>Release candidates</strong> — a GitHub sweep has to complete. Authenticate with <code>gh auth login</code>, then reload.</li>'}
+          ${read.decision ? '' : '<li><strong>Decisions</strong> — clone <code>jwildfire/obot.roadmap</code> beside <code>obot.agent</code>; the dashboard reads the clone, not the published site.</li>'}
+          ${read.config ? '' : '<li><strong>Config</strong> — <code>.claude/blockers.md</code> is local to a machine and does not travel. File this machine\'s first setup step with <code>obot.agent/tools/blocker-log</code>.</li>'}
+        </ul>
+      </div>`}
       <h2>Your todo list, and where you answer it.</h2>
       <p>Pick anything on the left: a <strong>decision</strong> opens here and you answer it in the sidebar, a <strong>release candidate</strong> opens here too — summary, release notes, what it closes, and its demo page running live, with approval still a deliberate click on GitHub — and a <strong>config</strong> item opens as an installation qualification: the exact step, what you should see, and a check that proves it. Local, never published.</p>
     </div>
@@ -808,7 +904,9 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
       </div>
       <textarea id="words" placeholder="In your words — quoted verbatim in the artifact's Decisions section."></textarea>
       <button class="send" id="send" disabled>Record this decision</button>
-      <p class="note">Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.</p>
+      <p class="note">${deliverer?.alive === false
+    ? 'Nothing is listening yet — the Navigator sweep is not running on this machine, so an answer recorded here will sit unread until it is installed: <code>bash obot.agent/tools/navigator/install-launchd</code>.'
+    : 'Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.'}</p>
       <p class="ok" id="ok" hidden></p>
     </div>
     <div class="triage" id="triage" hidden>

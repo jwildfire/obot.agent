@@ -910,8 +910,18 @@ test('when nothing is listening the page says so instead of looking like success
   assert.match(dead, /nothing is listening/i, 'the failure is named on the page');
   assert.match(dead, /launchctl kickstart/, 'and the page carries the restart command');
 
-  // No answer waiting: a dead deliverer is not an alarm about nothing.
-  assert.ok(!/nothing is listening/i.test(withAnswers([], { alive: false, ageMin: 260 })));
+  // No answer waiting: a dead deliverer is not an ALARM about nothing.
+  const quiet = withAnswers([], { alive: false, ageMin: 260 });
+  assert.ok(!/class="alarm"/.test(quiet), 'an alarm about no stuck answer');
+  assert.ok(!/going nowhere/i.test(quiet));
+  // It is still worth saying before he clicks, in the form's own register: the
+  // promise "handed to an agent by the Navigator within five minutes" was made
+  // unconditionally, on a machine where the sweep has never been installed
+  // (jwildfire/obot.roadmap#223).
+  assert.match(quiet, /Nothing is listening yet/);
+  assert.doesNotMatch(quiet, /handed to an agent by the Navigator within five minutes/);
+  // And with the deliverer alive the promise is the one that holds.
+  assert.match(withAnswers([], { alive: true }), /handed to an agent by the Navigator within five minutes/);
 });
 
 test('an applied answer links the artifact so he can confirm it himself', () => {

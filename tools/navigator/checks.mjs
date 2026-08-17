@@ -174,10 +174,19 @@ export function checksSection(found = {}, now = new Date()) {
   const registry = found.registry ?? []
   const closeouts = found.closeouts ?? []
   const total = orphans.length + registry.length + closeouts.length
+  // Nothing read means nothing found, and nothing found is not clean. On a machine
+  // where every `gh` call fails and there is no hub clone, all three lists are empty
+  // because no source could be opened, and the headline read "roadmap discipline:
+  // clean" — two lines above its own "an absent audit reads as a clean one"
+  // (jwildfire/obot.roadmap#223). Callers summarise by the first line, so the
+  // headline is the only part that has to carry this.
+  const unread = found.errors?.length ?? 0
   const lines = ['## Roadmap discipline', '']
-  lines.push(total === 0
-    ? `roadmap discipline: clean — no findings across the project repos, last ${WINDOW_DAYS} days`
-    : `roadmap discipline: **${total} finding${total === 1 ? '' : 's'}** across the project repos, last ${WINDOW_DAYS} days`)
+  lines.push(total > 0
+    ? `roadmap discipline: **${total} finding${total === 1 ? '' : 's'}** across the project repos, last ${WINDOW_DAYS} days`
+    : unread
+      ? `roadmap discipline: **NOT CHECKED** — ${unread} source${unread === 1 ? '' : 's'} could not be read this sweep (below). No finding here means no reading, not a clean roadmap.`
+      : `roadmap discipline: clean — no findings across the project repos, last ${WINDOW_DAYS} days`)
   if (found.audit) lines.push(`  ${found.audit.ok ? found.audit.summary : `**${found.audit.summary}**`}`)
   // The deployed hub's own account of itself (hub#224). Its summary already carries
   // its own bold ALL-CAPS headline in the alarm form, so it is printed as written

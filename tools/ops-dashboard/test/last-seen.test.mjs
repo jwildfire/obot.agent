@@ -88,10 +88,22 @@ test('an automated poll never counts as a look', () => {
 
 test('no record renders first look — never nothing changed', () => {
   const dir = ws();
+  // No store at all. The visit record is local-only and never committed, so on a
+  // new machine it is absent while he has read the page daily for weeks — "first
+  // look" is an assertion about him and this one is about the machine
+  // (jwildfire/obot.roadmap#223).
   const v = lastSeen(dir, '/');
   assert.equal(v.state, 'first');
-  assert.equal(phrase(v), 'first look');
+  assert.equal(v.storeMissing, true);
+  assert.equal(phrase(v), 'no visit recorded here');
   assert.equal(fs.existsSync(lastSeenFile(dir)), false, 'reading records nothing');
+
+  // A store that exists and has never seen this surface is a genuine first look.
+  noteLook(dir, '/other', new Date('2026-08-16T08:00:00.000Z'));
+  const fresh = lastSeen(dir, '/');
+  assert.equal(fresh.state, 'first');
+  assert.equal(fresh.storeMissing, false);
+  assert.equal(phrase(fresh), 'first look');
 });
 
 test('a second load reports a real prior timestamp', () => {

@@ -40,8 +40,8 @@
 // judges, corrects, or touches other agents' work. Nothing it writes is
 // published.
 import { execFileSync, spawnSync } from 'node:child_process'
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, statSync,
-         writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync,
+         statSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -104,8 +104,20 @@ const reviewKey = r => `${r.author}:${r.submittedAt}`
 // the state file wants the sentence, the dashboard's feed wants the parts, and
 // recovering parts from a sentence with a regex is how the feed would drift the
 // first time a sentence changed shape.
-export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
+export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { baseline = false } = {}) {
   const events = []
+  // The first sweep on a machine has no snapshot to compare against, so every RC
+  // that has been open for a week is "absent from the previous reading" and used to
+  // be stamped with this morning's clock and pushed to the scratchpad as today's
+  // news — history invented out of a file that does not exist
+  // (jwildfire/obot.roadmap#223). The baseline is recorded instead; events start
+  // from the next sweep.
+  if (baseline) {
+    const n = Object.keys(next).length
+    return n
+      ? [{ type: 'baseline', ref: null, url: null, line: `First sweep on this machine — ${n} RC${n === 1 ? '' : 's'} already open, recorded as the baseline; events start from the next sweep` }]
+      : []
+  }
   for (const [key, cur] of Object.entries(next)) {
     const old = prev[key]
     const name = short(cur.repo, cur.number)
@@ -137,9 +149,17 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
 
 export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
+  // Has this machine ever had a reading of the queue? On a new machine there is no
+  // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
+  // produces. Rendering both as "**RC queue: EMPTY.** [verified gh]" asserts a
+  // verification that did not happen, and 🎩🤖 prime reads this file
+  // (jwildfire/obot.roadmap#223).
+  const everRead = meta.ok || !!meta.lastGoodAt
   const head = meta.ok
     ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · ok — ${meta.repoCount} repos, ${Object.keys(snapshot).length} RCs`
-    : `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · **FAILED** (${(meta.errors || []).join('; ')}) — queue below is from the last good sweep ${meta.lastGoodAt || 'unknown'}, treat as stale`
+    : meta.lastGoodAt
+      ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · **FAILED** (${(meta.errors || []).join('; ')}) — queue below is from the last good sweep ${meta.lastGoodAt}, treat as stale`
+      : `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · **FAILED** (${(meta.errors || []).join('; ')}) — this is the first sweep on this machine and it failed, so there is no queue to show, stale or otherwise`
   const lines = [
     '# navigator-state — 🧭🤖 Navigator RC-review sweep',
     '',
@@ -154,21 +174,24 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // keeps an append-only journal of every id it issues; this is the reading that
   // fires without anyone running the tool. Reported even when clean, because a
   // detector that only ever speaks up on failure is indistinguishable from a dead one.
-  if (ledger) {
-    lines.push(ledger.ok ? `config ledger: ${ledger.summary}` : `**CONFIG LEDGER GAP** — ${ledger.summary}`)
-    for (const d of ledger.detail || []) lines.push(`  ${d}`)
-    lines.push('')
-  }
+  lines.push(ledger
+    ? (ledger.ok ? `config ledger: ${ledger.summary}` : `**CONFIG LEDGER GAP** — ${ledger.summary}`)
+    : 'config ledger: **NO READING** — `tools/blocker-log --audit` did not run this sweep (missing, not executable, or timed out). The ledger\'s state is unknown, not clean.')
+  for (const d of (ledger?.detail) || []) lines.push(`  ${d}`)
+  lines.push('')
   // The worker ledger (#130). Same discipline, different question: not "did the
   // record lose something" but "is anything writing to the record at all". A
   // worker that spawned with no id can never be attributed to what it wrote, and
   // since every agent write is authored by the same bot identity, an unattributed
   // worker is unattributable forever — there is no second chance to recover it.
-  if (workers) {
-    lines.push(workers.ok ? `worker ledger: ${workers.summary}` : `**WORKER LEDGER FINDING** — ${workers.summary}`)
-    for (const d of workers.detail || []) lines.push(`  ${d}`)
-    lines.push('')
-  }
+  // A detector that fails to read used to vanish from the file entirely, which is
+  // worse than either verdict it could have printed: the section's own rule is that
+  // it reports even when clean, precisely so silence cannot be mistaken for health.
+  lines.push(workers
+    ? (workers.ok ? `worker ledger: ${workers.summary}` : `**WORKER LEDGER FINDING** — ${workers.summary}`)
+    : 'worker ledger: **NO READING** — `tools/worker-id --audit` did not run this sweep (missing, not executable, or timed out). The ledger\'s state is unknown, not clean.')
+  for (const d of (workers?.detail) || []) lines.push(`  ${d}`)
+  lines.push('')
   // The wake goes first — before the RC queue, before everything. The RC queue is
   // @jwildfire's work; this is the Navigator's own, it is the section that says
   // whether anything is reaching it at all, and on a cold start it is the answer to
@@ -180,7 +203,11 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
     '',
   )
   const rcs = Object.values(snapshot).sort((a, b) => a.repo.localeCompare(b.repo) || a.number - b.number)
-  if (!rcs.length) lines.push(`**RC queue: EMPTY.** ${stamp}`)
+  if (!rcs.length) {
+    lines.push(everRead
+      ? `**RC queue: EMPTY.** ${stamp}`
+      : '**RC queue: UNREAD** — no repository could be listed this sweep and this machine holds no earlier snapshot. This is not an empty queue: nothing was read, so nothing can be said about what is waiting.')
+  }
   for (const rc of rcs) {
     const latest = rc.reviews[rc.reviews.length - 1]
     const review = latest
@@ -200,12 +227,16 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // one; the sweep reads that file and never writes it. They rejoin here because
   // the dashboard's Navigator tab already renders any heading this file carries,
   // so the delivery record reaches him with no rendering code at all.
-  if (delivery && delivery.trim()) lines.push('', delivery.trimEnd())
+  lines.push('', (delivery && delivery.trim())
+    ? delivery.trimEnd()
+    : '## Delivery\n\n- **NO READING** — the delivery record could not be read this sweep, so no worker has been judged. That is the absence of the record, not a finding that nobody delivered.')
 
   // The four checks that missed the night of 2026-08-15 (D0017). Rendered even when
   // clean, because a detector that only ever speaks up on failure is
   // indistinguishable from a dead one — the same reason the ledgers report clean.
-  if (checks && checks.trim()) lines.push('', checks.trimEnd())
+  lines.push('', (checks && checks.trim())
+    ? checks.trimEnd()
+    : '## Roadmap discipline\n\n- **NO READING** — the discipline checks did not run this sweep. Nothing here is a clean bill of health.')
 
   lines.push('', `## Recent events (newest first, capped ${MAX_EVENTS})`, '')
   if (!events.length) lines.push('- (none recorded yet)')
@@ -293,6 +324,8 @@ const auditDelivery = () => shellAudit('delivery-log')
 // A repo that fails to read is named in the section rather than skipped silently. A
 // check that quietly covers six of seven repos and prints "clean" is worse than no
 // check, because the reader takes it as complete.
+// `jobs` is `null` when `~/.claude/jobs` could not be read — distinct from `[]`,
+// which means it was read and no agent has run (jwildfire/obot.roadmap#223).
 function runChecks(repos, jobs = []) {
   const items = []
   const errors = []
@@ -333,7 +366,11 @@ function runChecks(repos, jobs = []) {
   // Agents that finished having produced nothing. Local job records, no API calls.
   let closeouts = []
   try {
-    closeouts = emptyCloseouts(jobs, new Date())
+    // An absent `~/.claude/jobs` used to arrive as `[]` and contribute a silent zero
+    // to the clean verdict above — "agents that finished having produced nothing"
+    // was none because nothing was read (jwildfire/obot.roadmap#223).
+    if (jobs === null) errors.push(`no job ledger at ${JOBS_DIR} — closeouts are not being checked on this machine; the first background agent creates it`)
+    else closeouts = emptyCloseouts(jobs, new Date())
   } catch (e) {
     errors.push(`jobs: ${String(e.message).slice(0, 90)}`)
   }
@@ -374,6 +411,10 @@ function runChecks(repos, jobs = []) {
  * lane broke. Delivery is last and cannot change what the section says.
  */
 function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
+  // `null` means the job ledger is not on this machine; every detector below reads
+  // it, so the section has to say that rather than report a clear channel.
+  const jobsRead = jobs !== null
+  jobs = jobs ?? []
   const now = new Date()
   const away = hostWasAway(prevSweptIso, now)
   const judged = judgedWorkers(safeRead(DELIVERY_JOURNAL))
@@ -396,6 +437,7 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
       held,
       listener,
       outside: outsideWindow(jobs, { now, judged }),
+      jobsRead,
       awayNote: away
         ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
         : null,
@@ -466,7 +508,14 @@ const safeLedger = () => { try { return auditLedger() } catch { return null } }
 const safeWorkers = () => { try { return auditWorkers() } catch { return null } }
 const safeDelivery = () => { try { return readDelivery() } catch { return null } }
 const safeChecks = (repos, jobs) => { try { return runChecks(repos, jobs) } catch { return null } }
-const safeJobs = () => { try { return readJobs(JOBS_DIR) } catch { return [] } }
+// `null` when the job ledger is not on this machine at all — distinct from `[]`,
+// which means it was read and no agent has run. `readJobs` (wake.mjs) flattens both
+// to an empty list, and the difference is what keeps an unread directory out of the
+// discipline verdict below (jwildfire/obot.roadmap#223).
+const safeJobs = () => {
+  if (!existsSync(JOBS_DIR)) return null
+  try { return readJobs(JOBS_DIR) } catch { return null }
+}
 // A broken wake must not break the sweep, and must not fail quietly either: the
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
@@ -480,7 +529,10 @@ function main() {
   const sweptAt = nowStamp()
   const sweptIso = new Date().toISOString()
   let prevWrap = { lastGoodAt: null, snapshot: {}, events: [] }
-  try { prevWrap = JSON.parse(readFileSync(SNAPSHOT, 'utf8')) } catch { /* first run */ }
+  // Whether this machine has ever completed a sweep. An absent snapshot and a
+  // snapshot of an empty queue are different states and must not diff the same way.
+  let firstSweep = false
+  try { prevWrap = JSON.parse(readFileSync(SNAPSHOT, 'utf8')) } catch { firstSweep = true }
   const jobs = safeJobs()
 
   let repos
@@ -488,6 +540,12 @@ function main() {
     repos = discoverRepos(JSON.parse(readFileSync(POLICY, 'utf8')))
   } catch (e) {
     const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: 0, ok: false, errors: [`policy.json: ${e.message}`], lastGoodAt: prevWrap.lastGoodAt }
+    // The success path creates this directory further down, so on a machine where
+    // the sweep has never completed this write used to throw ENOENT and the whole
+    // process died having reported nothing. The dashboard then showed "No sweep
+    // file yet", which reads as "not installed" when the truth is "installed,
+    // firing every five minutes, and crashing each time" (jwildfire/obot.roadmap#223).
+    mkdirSync(dirname(STATE_MD), { recursive: true })
     // A sweep that cannot read the policy still reports his answers: they come
     // from the local store, and a failed RC sweep is no reason to imply there is
     // nothing waiting on an agent.
@@ -522,7 +580,7 @@ function main() {
     try { goneStates[key] = JSON.parse(gh(['pr', 'view', String(old.number), '-R', old.repo, '--json', 'state'])).state } catch { goneStates[key] = 'unknown' }
   }
 
-  const events = diff(prevWrap.snapshot, next, goneStates, failedRepos)
+  const events = diff(prevWrap.snapshot, next, goneStates, failedRepos, { baseline: firstSweep })
 
   // The other half of the sweep: hand over the decision answers he has recorded
   // (#120). Bookkeeping still — the Navigator announces, it never applies — but
