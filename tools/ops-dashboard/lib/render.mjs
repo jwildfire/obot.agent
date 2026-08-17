@@ -35,7 +35,11 @@ export function lastLookTitle(v) {
   if (!v || v.state === 'unknown') {
     return `When you last opened this page is unknown${v?.why ? ` — ${v.why}` : ''}. Nothing is being guessed in its place.`;
   }
-  if (v.state === 'first') return 'No record of you opening this page before. This is the first look.';
+  if (v.state === 'first') {
+    return v.storeMissing
+      ? 'Nothing on this machine records you opening this page before — the visit record is local and does not travel between machines. The record starts with this visit.'
+      : 'No record of you opening this page before. This is the first look.';
+  }
   return `You last opened this page at ${new Date(v.at).toLocaleString()}. Recorded locally, never published.`;
 }
 

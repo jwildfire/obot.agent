@@ -41,6 +41,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { nothingYet } from './absent.mjs';
+
 // Printed on the page rather than left to be discovered. Both are things a reader
 // would otherwise have to be told in person, which is the same as not being told.
 export const PRICE_NOTE = 'Costs are list-price arithmetic over recorded token counts at API rates — an estimate of what this usage would bill, not a copy of an invoice.';
@@ -147,6 +149,13 @@ export function timelineClose(text = '') {
  * the disagreement itself is the finding.
  */
 export function statusOf(o = {}, now = new Date()) {
+  // `jobsRead: false` means `~/.claude/jobs` is not on this machine, so "no session
+  // ever started under this id" is a verdict from an unread directory — and it was
+  // demonstrably wrong on rows that simultaneously showed priced spend and a
+  // confirmed delivery verdict (jwildfire/obot.roadmap#223).
+  if (!o.job && o.claimed && o.jobsRead === false && !o.sub) {
+    return { status: 'no job record', note: `id claimed; no job record for it on this machine — either the session never started, or ~/.claude/jobs is not here` };
+  }
   if (!o.state) {
     if (o.sub) return { status: 'subagent', note: 'no session of its own — its parent worker is accountable for what it wrote' };
     return o.claimed === false
@@ -530,7 +539,7 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], s
     // The newest session wins the status: a worker that was resumed is one agent.
     const job = matched.slice().sort((a, b) => Date.parse(b.startedAt ?? 0) - Date.parse(a.startedAt ?? 0))[0] ?? null;
     const worker = job ? isWorkerName(job.name) : true;
-    const status = statusOf(job ? { ...job, worker, sub } : { sub, claimed: !!id }, now);
+    const status = statusOf(job ? { ...job, worker, sub } : { sub, claimed: !!id, jobsRead: src.jobs.present !== false }, now);
     const startedAt = matched.map((j) => j.startedAt).filter(Boolean).sort()[0] ?? claimedAt ?? null;
     const cost = costCell(usage, { id, label, startedAt });
     const key = slug || slugOfName(job?.name ?? label);
@@ -614,6 +623,39 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], s
   };
 }
 
+/**
+ * What a roster with no rows says — and it depends entirely on WHY there are none.
+ *
+ * "No agent has run since the worker ledger was adopted" is a measurement: the
+ * ledger was read and holds no claim. On a machine where the ledger does not exist
+ * it is a claim about history made out of a file nobody opened, which is the exact
+ * confusion jwildfire/obot.roadmap#223 exists to end.
+ */
+export function emptyRoster(model) {
+  const src = model?.sources ?? {};
+  const ledger = src.workers?.present !== false;
+  const jobs = src.jobs?.present !== false;
+  if (!ledger && !jobs) {
+    return nothingYet(
+      'Nothing has been recorded on this machine yet',
+      'no worker ledger and no job records; the first agent to claim an id starts both',
+    );
+  }
+  if (!ledger) {
+    return nothingYet(
+      'No worker ledger on this machine yet',
+      'agents may have run, but nothing can be attributed until one claims an id (obot.agent/tools/worker-id)',
+    );
+  }
+  if (!jobs) {
+    return nothingYet(
+      'No job records on this machine yet',
+      'the ledger is here but ~/.claude/jobs is not, so no session can be matched to an id',
+    );
+  }
+  return 'No agent has run since the worker ledger was adopted.';
+}
+
 // ---- the section --------------------------------------------------------
 
 /**
@@ -627,7 +669,10 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], s
 export function rosterMarkdown(model) {
   const out = ['## Agents', ''];
 
-  if (!model.rows.length) out.push('- no agent has run since the worker ledger was adopted');
+  // The same sentence the page renders, from the same function. This is the
+  // greppable, paste-into-an-issue form of one model, and it used to contradict the
+  // HTML — it was the dishonest half (jwildfire/obot.roadmap#223).
+  if (!model.rows.length) out.push(`- ${emptyRoster(model)}`);
 
   for (const r of model.rows) {
     // An id nobody launched is not an agent that produced nothing — it is an id
@@ -739,6 +784,11 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
   const jobsPath = jobsDir ?? path.join(os.homedir(), '.claude', 'jobs');
   const workersPath = path.join(workspace, '.claude', 'workers.journal');
   const deliveryPath = path.join(workspace, '.claude', 'session-hub', 'delivery.md');
+  // The record is two files. `/session/log` renders the typed journal and the roster
+  // reads the markdown, so keying "was the delivery record read" on delivery.md alone
+  // lets the page say "no delivery record on this machine" two screens above a table
+  // built from the journal (jwildfire/obot.roadmap#223).
+  const journalPath = path.join(workspace, '.claude', 'session-hub', 'delivery.journal');
 
   const jobs = readJobs(jobsPath);
   const workers = parseWorkers(readText(workersPath));
@@ -762,7 +812,11 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
     jobs: { path: jobsPath, present: fs.existsSync(jobsPath) },
     workers: { path: workersPath, present: fs.existsSync(workersPath) },
     usage: { path: usageFile, present: fs.existsSync(usageFile) },
-    delivery: { path: deliveryPath, present: fs.existsSync(deliveryPath) },
+    delivery: {
+      path: deliveryPath,
+      present: fs.existsSync(deliveryPath) || fs.existsSync(journalPath),
+      note: fs.existsSync(deliveryPath) ? '' : 'read from the typed journal; delivery.md is not on this machine',
+    },
   };
 
   return buildRoster({ workers, jobs, usage, delivery, sources, now });

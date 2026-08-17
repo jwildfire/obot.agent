@@ -64,6 +64,7 @@ export function buildMetricsModel(cache, now = new Date()) {
   ];
   return {
     ageMin,
+    decisionsRead: !!cache.decisions,
     stale: ageMin === null || ageMin > METRICS_STALE_MIN,
     repoCount: (cache.repos ?? []).length,
     rows,
@@ -106,7 +107,9 @@ export function metricsHtml(model, { hubUrl = 'https://jwildfire.github.io/obot.
     ...model.bounds.map((b) => `${b.repo} ${b.kind}: history older than ${String(b.oldestFetched ?? '').slice(0, 10)} not counted`),
   ];
   return `<h2 class="nav-h">Release metrics</h2>
-<p class="mprov">Counted from GitHub across ${model.repoCount} project repos, and from the decisions record, ${esc(humanMin(model.ageMin))} · <a href="${esc(hubUrl)}/decisions/" target="_blank" rel="noopener">decisions log</a></p>
+<p class="mprov">${model.repoCount
+    ? `Counted from GitHub across ${model.repoCount} project repos${model.decisionsRead ? ', and from the decisions record' : ' — the decisions record could not be read'}, ${esc(humanMin(model.ageMin))}`
+    : 'No repos were counted — the sweep found no repo list to count across'} · <a href="${esc(hubUrl)}/decisions/" target="_blank" rel="noopener">decisions log</a></p>
 ${staleLine}
 <div class="mwrap"><table class="metrics">
 <thead><tr><th class="mlabel"></th>${head}</tr></thead>
@@ -182,7 +185,7 @@ export function buildFeedModel(events = [], now = new Date()) {
 export function feedHtml(groups) {
   if (!groups.length) {
     return `<h2 class="nav-h">What changed</h2>
-<p class="nav-empty">Nothing recorded yet — events appear here as the sweep sees them.</p>`;
+<p class="nav-empty">Nothing recorded yet — this feed reads the delivery journal, the worker ledger, the job records and the GitHub sweep cache, and none of them has produced an event on this machine.</p>`;
   }
   return `<h2 class="nav-h">What changed</h2>
 ${groups.map((g) => `<h3 class="fday">${esc(g.day)}</h3>

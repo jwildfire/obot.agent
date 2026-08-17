@@ -53,8 +53,13 @@ const when = (iso) => {
 
 export function deliveryTablesHtml({ verdicts, calls }) {
   if (!verdicts.length && !calls.length) {
-    return '<h2 class="nav-h">Delivery record</h2><p class="ag-empty">No delivery record yet.</p>';
+    return '<h2 class="nav-h">Delivery record</h2><p class="ag-empty">No delivery record yet — the Navigator writes one the first time it judges a worker or takes a decision in his place.</p>';
   }
+  // Day two: verdicts recorded, no calls yet. The both-empty case was handled and
+  // neither one-sided case was, so a heading sat over a full <thead> and a literally
+  // empty <tbody> — the blank panel the requirement forbids
+  // (jwildfire/obot.roadmap#223).
+  const empty = (cols, sentence) => `<tr><td class="lg-empty" colspan="${cols}">${sentence}</td></tr>`;
   const vRows = verdicts.map((v) => `<tr>
   <td class="lg-t">${esc(when(v.at))}</td>
   <td class="lg-a">${esc(v.worker ?? '')}</td>
@@ -72,17 +77,18 @@ export function deliveryTablesHtml({ verdicts, calls }) {
 <div class="mwrap"><table class="lg">
 <thead><tr><th>when</th><th>agent</th><th>produced</th><th>requirement</th><th>verdict</th></tr></thead>
 <tbody>
-${vRows}
+${vRows || empty(5, 'No closeout has been judged yet — a verdict appears here the first time the Navigator weighs what a worker produced.')}
 </tbody></table></div>
 <h2 class="nav-h">Calls made for him — decisions the Navigator took in his place</h2>
 <div class="mwrap"><table class="lg">
 <thead><tr><th>when</th><th>call</th><th>kind</th><th>what was decided</th></tr></thead>
 <tbody>
-${cRows}
+${cRows || empty(4, 'No Navigator call recorded yet — one appears here the first time it decides something in his place.')}
 </tbody></table></div>`;
 }
 
 export const LOG_CSS = `
+  table.lg td.lg-empty { color:var(--muted); font-style:normal; padding:0.4rem 0.45rem; }
   table.lg { border-collapse:collapse; width:100%; font-size:0.72rem; }
   table.lg th { font-size:0.62rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--faint);
                 font-weight:500; text-align:left; padding:0.2rem 0.45rem; }

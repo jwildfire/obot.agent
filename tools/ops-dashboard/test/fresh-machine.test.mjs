@@ -187,3 +187,83 @@ test('the sessions brief keeps its feed and its record link with nothing to show
   assert.match(text, /What changed/);
   assert.ok(routes['/live.html'].body.includes('/session/log'), 'the record link is gone');
 });
+
+// ---- day two, and day three ----------------------------------------------
+//
+// Partial absence is the state the machine is actually in for most of its first
+// week, and it is where the same defect keeps reappearing: the file exists, so the
+// "was it read" guard passes, and a total is summed over rows that carry no figure.
+
+import { buildRoster, parseWorkers, usageIndex, collectRoster } from '../lib/roster.mjs';
+import { rosterHtml } from '../lib/roster-view.mjs';
+import { deliveryTablesHtml } from '../lib/log-view.mjs';
+
+const DAY_TWO_NOW = new Date('2026-08-17T10:00:00Z');
+const LEDGER = [
+  { ts: '2026-08-16T07:00:00Z', op: 'seed', epoch: '2026-08-16T07:00:00Z' },
+  { ts: '2026-08-17T08:00:00Z', op: 'claim', id: 'W0001', slug: 'first' },
+].map((r) => JSON.stringify(r)).join('\n');
+const JOB = {
+  job: 'aaa11122', name: '👯🤖 W0001 first', state: 'working', detail: 'day two',
+  startedAt: '2026-08-17T08:00:00Z', updatedAt: '2026-08-17T09:55:00Z', tokens: 1234,
+  timeline: { last: 'working', closed: false, at: '2026-08-17T09:55:00Z', entries: 4 },
+};
+
+test('a usage artifact that holds no cell for any agent is not a spend of zero', () => {
+  // The artifact exists — built yesterday, before any of today's agents — so the
+  // "did the file open" guard passes and every row still reads "no usage recorded".
+  const usage = usageIndex({ generatedAt: '2026-08-16T20:00:00Z', cells: [], totals: {} }, { now: DAY_TWO_NOW });
+  const html = rosterHtml(buildRoster({
+    workers: parseWorkers(LEDGER), jobs: [JOB], usage, delivery: [], now: DAY_TWO_NOW,
+    sources: { usage: { present: true }, delivery: { present: true } },
+  }));
+  assert.doesNotMatch(html, /\$0\.00/);
+  assert.match(html, /holds no figure for any of these agents yet/);
+});
+
+test('no agent credited with anything is not "every one delivered"', () => {
+  const html = rosterHtml(buildRoster({
+    workers: parseWorkers(LEDGER), jobs: [JOB], usage: usageIndex(null), delivery: [],
+    now: DAY_TWO_NOW, sources: { delivery: { present: true } },
+  }));
+  // `delivered === 0` with `nothing === 0` used to fall through to the congratulation.
+  assert.doesNotMatch(html, /every one delivered/);
+  assert.match(html, /no agent has been credited with anything yet/);
+});
+
+test('no standing session is not a standing session that cost nothing', () => {
+  const usage = usageIndex({ generatedAt: '2026-08-17T09:00:00Z', cells: [{ label: '👯🤖 W0001 first', cost: 2.5, tokens: 1234 }], totals: { cost: 2.5 } }, { now: DAY_TWO_NOW });
+  const html = rosterHtml(buildRoster({
+    workers: parseWorkers(LEDGER), jobs: [JOB], usage, delivery: [], now: DAY_TWO_NOW,
+    sources: { usage: { present: true }, delivery: { present: true } },
+  }));
+  assert.match(html, /no standing session on this machine yet/);
+});
+
+test('the delivery record is two files, and either one is a reading', () => {
+  // The roster reads delivery.md and /session/log renders delivery.journal. Keying
+  // "was it read" on the markdown alone let the page say "no delivery record on this
+  // machine" two screens above a table built from the journal.
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'fresh-partial-'));
+  fs.mkdirSync(path.join(ws, '.claude', 'session-hub'), { recursive: true });
+  fs.writeFileSync(path.join(ws, '.claude', 'session-hub', 'delivery.journal'), '{"op":"verdict"}\n');
+  const model = collectRoster({ workspace: ws, hub: path.join(ws, 'obot.roadmap'), jobsDir: path.join(ws, 'nojobs'), now: DAY_TWO_NOW });
+  assert.equal(model.sources.delivery.present, true);
+  assert.match(model.sources.delivery.note, /typed journal/);
+});
+
+test('one half of the delivery record present is a sentence, not an empty table body', () => {
+  const html = deliveryTablesHtml({
+    verdicts: [{ at: '2026-08-17T09:00:00Z', worker: 'W0001', produced: 'obot.agent#1 merged', requirement: 'hub#223', verdict: 'confirmed' }],
+    calls: [],
+  });
+  assert.match(html, /No Navigator call recorded yet/);
+  assert.doesNotMatch(html, /<tbody>\s*<\/tbody>/, 'a heading over an empty table body is the blank panel');
+});
+
+test('an absent visit record is about the machine, not about him', () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'fresh-seen-'));
+  const html = deliveryTablesHtml({ verdicts: [], calls: [] });
+  assert.match(html, /the Navigator writes one the first time/);
+  assert.ok(fs.existsSync(ws));
+});
