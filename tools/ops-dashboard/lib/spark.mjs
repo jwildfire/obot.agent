@@ -70,15 +70,20 @@ export function sparkSvg({
     return `<svg class="spark" viewBox="0 0 ${VB_W} ${VB_H}" role="img" aria-label="${esc(label || 'no data')}"></svg>`;
   }
   const max = Math.max(1, ...buckets.map((b) => b.n));
-  const slot = VB_W / n;
-  const gap = Math.min(1.6, slot * 0.28);
-  const w = Math.max(0.8, slot - gap);
-  const rx = Math.min(1.5, w / 2);
-  const bars = buckets.map((b, i) => {
+  // Bars are placed and sized by the time they actually cover, not by their index.
+  // Only the 365-day view has an uneven bucket — its first one is the day the year
+  // does not divide into weeks — and drawing that one day as wide as a week would
+  // overstate it by seven times, on the exact chart where the honesty of the span is
+  // the point.
+  const gapFor = (b) => Math.min(1.6, (xAt(b.end, { start, end }) - xAt(b.start, { start, end })) * 0.28);
+  const bars = buckets.map((b) => {
     if (!b.n) return '';
+    const x0 = xAt(b.start, { start, end });
+    const x1 = xAt(b.end, { start, end });
+    const gap = gapFor(b);
+    const w = Math.max(0.8, x1 - x0 - gap);
     const h = Math.max(1, (b.n / max) * (BASE - TOP));
-    const x = r2(i * slot + gap / 2);
-    return `<rect class="sbar" x="${x}" y="${r2(BASE - h)}" width="${r2(w)}" height="${r2(h)}" rx="${r2(rx)}"/>`;
+    return `<rect class="sbar" x="${r2(x0 + gap / 2)}" y="${r2(BASE - h)}" width="${r2(w)}" height="${r2(h)}" rx="${r2(Math.min(1.5, w / 2))}"/>`;
   }).join('');
 
   // Bands first so the bars sit on top of them — a bar inside the unmeasured span is

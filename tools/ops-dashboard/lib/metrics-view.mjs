@@ -365,6 +365,7 @@ ${coverageLine(model)}
 ${model.tiles.map((t, i) => tileHtml(t, `t${i}`, model)).join('\n')}
 </div>
 <details class="mfold"><summary>All five periods at once, as a table</summary>
+<p class="mepoch">These columns count backwards from this minute; the tiles above count whole days, hours or weeks on the clock. So a tile and its column can differ by whatever happened in the few hours at the edge — both are right, and neither is the other rounded.</p>
 <div class="mwrap"><table class="metrics">
 <thead><tr><th class="mlabel"></th>${head}</tr></thead>
 <tbody>

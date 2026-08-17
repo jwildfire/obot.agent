@@ -193,11 +193,18 @@ export function trendSeries(items = [], {
   // filed today lands in today's bucket rather than in the future, where a
   // now-anchored window silently drops it and the page reads "he decided nothing".
   const end = Math.ceil(now.getTime() / plan.size) * plan.size
-  const span = plan.size * plan.count
+  // The window is EXACTLY the period he selected. An earlier cut let the bucket size
+  // set the span, so "365d" drew 53 whole weeks and the tile said 371d underneath a
+  // chip saying 365d — a chart quietly measuring six days more than it was asked to.
+  // Only the year is not divisible by its bucket, so only the year gets a short first
+  // bucket, and the renderer sizes bars by their real duration so a one-day bucket is
+  // not drawn as wide as a week.
+  const span = period * 86400000
   const start = end - span
-  const buckets = Array.from({ length: plan.count }, (_, i) => ({
-    start: start + i * plan.size, end: start + (i + 1) * plan.size, n: 0,
-  }))
+  const buckets = []
+  for (let b = end; b > start; b -= plan.size) {
+    buckets.unshift({ start: Math.max(start, b - plan.size), end: b, n: 0 })
+  }
   let total = 0
   let prevTotal = 0
   for (const item of items) {
@@ -206,8 +213,8 @@ export function trendSeries(items = [], {
     if (Number.isNaN(t)) continue
     if (t >= start && t < end) {
       total += 1
-      const idx = Math.min(plan.count - 1, Math.floor((t - start) / plan.size))
-      buckets[idx].n += 1
+      const idx = buckets.findIndex((b) => t < b.end)
+      buckets[idx < 0 ? buckets.length - 1 : idx].n += 1
     } else if (t >= start - span && t < start) {
       prevTotal += 1
     }

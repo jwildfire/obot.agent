@@ -326,3 +326,40 @@ test('goalSlug: the short name comes from the goal body, the same bit the hub si
   assert.equal(goalSlug('Goal:  Keep adding charts (static + interactive)'), null)
   assert.equal(goalSlug(null), null)
 })
+
+test('trendSeries: the window is exactly the period asked for, whatever the bucket size', () => {
+  const now = new Date('2026-08-17T09:30:00Z')
+  for (const period of [1, 3, 7, 30, 365]) {
+    const t = trendSeries([], { period, now })
+    assert.equal((t.end - t.start) / 86400000, period, `${period}d must span ${period} days`)
+    assert.equal(t.buckets[0].start, t.start, 'the first bucket starts at the window start')
+    assert.equal(t.buckets.at(-1).end, t.end, 'the last bucket ends at the window end')
+    for (let i = 1; i < t.buckets.length; i++) {
+      assert.equal(t.buckets[i].start, t.buckets[i - 1].end, `${period}d buckets must not gap or overlap`)
+    }
+  }
+})
+
+test('trendSeries: only the year has an uneven bucket, and it is the first one', () => {
+  const now = new Date('2026-08-17T09:30:00Z')
+  const y = trendSeries([], { period: 365, now })
+  // 52 whole weeks is 364 days; the odd day out is the earliest bucket, never the
+  // newest — a short bar at the right edge would read as a collapse in the present.
+  assert.equal(y.buckets.length, 53)
+  assert.equal((y.buckets[0].end - y.buckets[0].start) / 86400000, 1)
+  for (const b of y.buckets.slice(1)) assert.equal((b.end - b.start) / 86400000, 7)
+  for (const period of [1, 3, 7, 30]) {
+    const t = trendSeries([], { period, now })
+    const sizes = new Set(t.buckets.map((b) => b.end - b.start))
+    assert.equal(sizes.size, 1, `${period}d buckets are all the same width`)
+  }
+})
+
+test('trendSeries: an item on the very first instant of the year window is counted once', () => {
+  const now = new Date('2026-08-17T09:30:00Z')
+  const y = trendSeries([], { period: 365, now })
+  const t = trendSeries([{ createdAt: new Date(y.start).toISOString() }], { period: 365, now })
+  assert.equal(t.total, 1)
+  assert.equal(t.buckets[0].n, 1, 'it lands in the short leading bucket, not off the chart')
+  assert.equal(t.buckets.reduce((s, b) => s + b.n, 0), 1)
+})
