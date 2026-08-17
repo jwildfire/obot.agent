@@ -579,11 +579,16 @@ function main() {
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, sweptIso, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
-  // Delivered wakes reach the shared scratchpad too. The notification is the
-  // Navigator's; this line is everyone else's — the wrapup folds the scratchpad, so
-  // a wake that produced no verdict is visible the next morning rather than lost
-  // with the session that received it.
-  for (const d of wake.delivered) scratchpad(`WAKE ${d.kind} — ${d.line}`)
+  // Delivered wakes reach the shared scratchpad too, as ONE line per sweep rather
+  // than one per wake. The notification is the Navigator's; this line is everyone
+  // else's — the wrapup folds the scratchpad, so a wake that produced no verdict is
+  // visible the next morning rather than lost with the session that received it.
+  // One line because the scratchpad is shared by every session and the wrapup reads
+  // all of it: six pending stop-states on a 30-minute floor would otherwise write a
+  // line every few minutes all day. The detail is in the wake log and the state file.
+  if (wake.delivered.length) {
+    scratchpad(`WAKE x${wake.delivered.length} delivered — ${wake.delivered.map(d => `${d.worker} ${d.kind}`).join(', ')}`)
+  }
   log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 

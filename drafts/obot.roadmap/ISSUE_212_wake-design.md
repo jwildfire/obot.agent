@@ -49,6 +49,7 @@ What it costs when it fails, which is the honest half:
 - A `Monitor` dies with its session, so this lane can be silently absent. The listener therefore heartbeats a file, and the sweep reports `wake channel: armed` or `WAKE CHANNEL DOWN` beside the pending list every five minutes.
 - The pending list is computed and rendered whether or not anything is delivered, and it is the first section of `navigator-state.md`, which is read #1 on the Navigator's cold start. So a missed wake degrades to exactly today's behaviour — the Navigator finds it on its next read — and never to a claim that everything is judged.
 - Every bound reports itself: the 24-hour window prints how many older closeouts it skipped, the per-run cap of three prints what it held for the next sweep, and the backlog count says "at least" when its page filled.
+- The one case this cannot cover: if the Navigator session is not running at all, there is nothing to wake, and the only reader of `WAKE CHANNEL DOWN` is the role that is absent. Relaunching is `obot.agent/scripts/obot-navigator`, and it stays @jwildfire's or the concierge's move — escalating an absent officer to him is the one thing this requirement forbids, so it is recorded as a known limit rather than closed with a notification.
 
 Suppression is a comparison, not new state:
 
