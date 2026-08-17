@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url'
 
 import { answersSection, deliverAnswers, pendingAnswers } from '../ops-dashboard/lib/answers.mjs'
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
-         orphansOutsideWindow, parseIndexRows, readJson, registryDisagreement,
+         orphansAccepted, orphansOutsideWindow, parseIndexRows, readJson, registryDisagreement,
          shapeRepo, siteVersionFreshness } from './checks.mjs'
 // What counts as a release candidate now lives beside this file rather than in it,
 // because the Operations Dashboard has to answer the same question and used to answer
@@ -357,6 +357,7 @@ function runChecks(repos, jobs = []) {
       site,
       orphans: orphanedWork(items, now),
       orphansOutsideWindow: orphansOutsideWindow(items, now),
+      orphansAccepted: orphansAccepted(items),
       registry,
       closeouts,
       errors,
