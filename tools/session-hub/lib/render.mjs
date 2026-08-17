@@ -694,7 +694,10 @@ const CSS = `
           background:var(--panel-2); border:1px solid var(--line); color:var(--ink-2); white-space:nowrap; }
   .prose { font-size:13px; color:var(--ink-2); }
   .prose div { margin-bottom:4px; }
-  .notice { font-family:var(--mono); font-size:11.5px; color:var(--warn); margin:0; }
+  /* A notice names the file it could not read, and an absolute path in a monospace
+     face is wider than a phone. Measured at 390px: the notice scrolled its own
+     panel sideways, so the path it exists to name was the part off screen. */
+  .notice { font-family:var(--mono); font-size:11.5px; color:var(--warn); margin:0; overflow-wrap:anywhere; }
   .foot { font-family:var(--mono); font-size:11px; color:var(--ink-3); text-align:center; }
 
   /* chat panel (#77) — live mode with the session-chat server only */
