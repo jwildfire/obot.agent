@@ -724,15 +724,19 @@ test('a cost cell carries a short form as well as its sentence', () => {
   assert.match(html, /<li><code>unpriced<\/code>[^<]*started after the last usage build/);
 });
 
-test('an empty roster still carries the feed and the record link — CI has no job records', () => {
+test('an empty roster still carries the record link — CI has no job records', () => {
   // The red build on obot.agent#149: locally the workstation's real ~/.claude/jobs
-  // made the roster non-empty, so the brief always took the populated branch; in CI
-  // the roster is empty and the page rendered one sentence with no way to the
-  // record and no feed. The brief's frame must not depend on the roster having rows.
+  // made the roster non-empty, so the page always took the populated branch; in CI
+  // the roster is empty and the page rendered one sentence with no way out. The
+  // frame must not depend on the roster having rows.
   const html = sessionShell({ roster: { rows: [] } });
   assert.match(html, /No agent has run/);
   assert.match(html, /\/session\/log/);
-  assert.match(html, /What changed/);
+  // The what-changed feed moved to the record with the outcome groups when the tab
+  // became a table (jwildfire/obot.agent#154). It must still render there, and in
+  // its empty state too — a feed that only appears when populated cannot be told
+  // apart from a feed that broke.
+  assert.match(sessionLogShell({ roster: { rows: [] }, feed: [] }), /What changed/);
 });
 
 // ---- a machine with no history -------------------------------------------

@@ -17,6 +17,7 @@ import assert from 'node:assert/strict'
 
 import {
   orphanedWork, registryDisagreement, emptyCloseouts, checksSection, WINDOW_DAYS,
+  orphansAccepted, orphansOutsideWindow, ACCEPTED_LABEL,
 } from '../checks.mjs'
 import { OVERDUE_MIN } from '../../ops-dashboard/lib/answers.mjs'
 
@@ -157,6 +158,79 @@ test('the answers check that already exists still holds its threshold at an hour
   assert.equal(OVERDUE_MIN, 60)
 })
 
+// -------------------------------------------------- orphans he settled on purpose
+//
+// hub#233. The backfill attached what could honestly be attached and labelled the
+// rest, because most of the rest predate the requirement they would have hung from.
+// A labelled item is a settled state, so it stops being a finding — and the number of
+// them keeps being printed, because an exclusion nobody can see is indistinguishable
+// from a check that found nothing.
+
+test('a labelled orphan is settled, not a finding', () => {
+  const found = orphanedWork([
+    { repo: 'jwildfire/obot.agent', number: 60, kind: 'pr', state: 'MERGED', closedAt: day(1), parent: null, title: 'history', labels: [ACCEPTED_LABEL] },
+  ], NOW)
+  assert.deepEqual(found, [])
+})
+
+test('the label settles a closed issue as well as a merged pull request', () => {
+  const items = [
+    { repo: 'jwildfire/safety.viz', number: 71, kind: 'issue', state: 'CLOSED', closedAt: day(1), parent: null, title: 'nav', labels: [ACCEPTED_LABEL] },
+    { repo: 'jwildfire/safety.viz', number: 72, kind: 'issue', state: 'CLOSED', closedAt: day(1), parent: null, title: 'real drift', labels: ['bug'] },
+  ]
+  assert.deepEqual(orphanedWork(items, NOW).map((f) => f.number), [72])
+})
+
+test('an unlabelled orphan is still a finding — the label is the only thing that settles one', () => {
+  const found = orphanedWork([
+    { repo: 'jwildfire/obot.agent', number: 61, kind: 'pr', state: 'MERGED', closedAt: day(1), parent: null, title: 'drift', labels: [] },
+    { repo: 'jwildfire/obot.agent', number: 62, kind: 'pr', state: 'MERGED', closedAt: day(1), parent: null, title: 'drift, no labels field at all' },
+  ], NOW)
+  assert.deepEqual(found.map((f) => f.number), [61, 62])
+})
+
+test('the label also settles the ones outside the window, so the backlog number falls too', () => {
+  const items = [
+    { repo: 'jwildfire/safety.viz', number: 10, kind: 'pr', state: 'MERGED', closedAt: day(40), parent: null, title: 'old history', labels: [ACCEPTED_LABEL] },
+    { repo: 'jwildfire/safety.viz', number: 11, kind: 'pr', state: 'MERGED', closedAt: day(40), parent: null, title: 'old drift', labels: [] },
+  ]
+  assert.equal(orphansOutsideWindow(items, NOW), 1)
+})
+
+test('what the label excluded is counted and printed, never silently dropped', () => {
+  const items = [
+    { repo: 'jwildfire/obot.agent', number: 1, kind: 'pr', state: 'MERGED', closedAt: day(1), parent: null, title: 'a', labels: [ACCEPTED_LABEL] },
+    { repo: 'jwildfire/obot.agent', number: 2, kind: 'issue', state: 'CLOSED', closedAt: day(40), parent: null, title: 'b', labels: [ACCEPTED_LABEL] },
+    { repo: 'jwildfire/obot.agent', number: 3, kind: 'issue', state: 'CLOSED', closedAt: day(1), parent: { number: 9 }, title: 'parented', labels: [ACCEPTED_LABEL] },
+  ]
+  // The parented one is not an orphan at all, labelled or not, so it is not counted here.
+  assert.equal(orphansAccepted(items), 2)
+  const out = checksSection({ orphans: orphanedWork(items, NOW), orphansAccepted: orphansAccepted(items) }, NOW)
+  assert.match(out, /roadmap discipline: clean/)
+  assert.match(out, /accepted: 2 labelled orphan-accepted and not counted/)
+})
+
+test('shapeRepo carries the labels the filter reads — without them the label would do nothing', async () => {
+  const { shapeRepo } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: { nodes: [{ number: 1, title: 'i', closedAt: day(1), parent: null, labels: { nodes: [{ name: ACCEPTED_LABEL }] } }] },
+      pullRequests: {
+        nodes: [{ number: 2, title: 'p', mergedAt: day(1), closingIssuesReferences: { nodes: [] }, labels: { nodes: [{ name: 'chore' }] } }],
+      },
+    },
+  })
+  assert.deepEqual(items.map((i) => i.labels), [[ACCEPTED_LABEL], ['chore']])
+  assert.deepEqual(orphanedWork(items, NOW).map((f) => f.number), [2])
+})
+
+test('the live query asks for the labels — a filter reading a field the query never fetched is a silent no-op', async () => {
+  const { ORPHAN_QUERY } = await import('../checks.mjs')
+  const closed = ORPHAN_QUERY.slice(ORPHAN_QUERY.indexOf('issues(states:CLOSED'))
+  assert.equal((closed.match(/labels\(first:\d+\)/g) || []).length, 2,
+    'both the closed-issue and merged-PR selections must request labels')
+})
+
 // ------------------------------------------------------------- shaping the API
 
 test('shapeRepo: a merged pull request that closes an issue has an ancestor', async () => {
@@ -249,4 +323,97 @@ test('every source read and nothing found is still clean', () => {
   const md = checksSection({ orphans: [], registry: [], closeouts: [], errors: [] })
   assert.match(md.split('\n')[2], /roadmap discipline: clean/)
   assert.doesNotMatch(md, /NOT CHECKED/)
+})
+
+// ---- the deployed build's own stamp (hub#224) ------------------------------
+//
+// The sweep relays this rather than computing it: the hub clone it reads is not the
+// deployed tree and was measured five commits behind the deployed commit. These feed
+// literal objects and never touch the network — this file runs in CI on every push,
+// and a test that reaches jwildfire.github.io is flaky when online and green when not.
+
+const STAMP = (over = {}) => ({
+  version: '2.12.0',
+  changelogAt: '2026-08-16T05:20:00Z',
+  builtAt: '2026-08-16T22:15:14Z',
+  short: '8823cd5',
+  ci: true,
+  drift: { ok: true, unknown: false, behind: 0, summary: 'changelog v2.12.0 is current with this build' },
+  ...over,
+})
+const JUST_AFTER = new Date('2026-08-16T23:00:00Z')
+
+test('the exact 2026-08-16 situation: a build carrying unlogged changes is a finding', async () => {
+  const { siteVersionFreshness } = await import('../checks.mjs')
+  const r = siteVersionFreshness(STAMP({
+    drift: { ok: false, unknown: false, behind: 11, summary: 'changelog v2.12.0 is 11 commits behind this build — last written 17h ago, so 11 changes to what the site shows are unrecorded' },
+  }), JUST_AFTER)
+  assert.equal(r.ok, false)
+  assert.match(r.summary, /CHANGELOG DRIFT FINDING/)
+  assert.match(r.summary, /2026-08-16T22:15:14Z/, 'the build instant is named')
+  assert.match(r.summary, /8823cd5/, 'so is the commit it shipped from')
+  assert.match(r.summary, /11 commits behind/, "the build's own words are relayed, not restated")
+})
+
+test('an aligned build still prints its version, its build time and its commit', async () => {
+  const { siteVersionFreshness } = await import('../checks.mjs')
+  const r = siteVersionFreshness(STAMP(), JUST_AFTER)
+  assert.equal(r.ok, true)
+  assert.match(r.summary, /v2\.12\.0/)
+  assert.match(r.summary, /2026-08-16T22:15:14Z/)
+  assert.match(r.summary, /8823cd5/)
+  assert.match(r.summary, /45m ago/, 'the age is carried on the healthy path too')
+})
+
+test('no stamp on the deployed site is a finding, not silence', async () => {
+  const { siteVersionFreshness } = await import('../checks.mjs')
+  for (const empty of [null, undefined, {}, { version: '2.12.0' }]) {
+    const r = siteVersionFreshness(empty, JUST_AFTER)
+    assert.equal(r.ok, false)
+    assert.match(r.summary, /DEPLOY STAMP FINDING/)
+  }
+})
+
+test('a drift check that could not run is a finding rather than a clean line', async () => {
+  const { siteVersionFreshness } = await import('../checks.mjs')
+  const r = siteVersionFreshness(STAMP({
+    drift: { ok: false, unknown: true, behind: null, summary: 'changelog drift unknown — the checkout is shallow' },
+  }), JUST_AFTER)
+  assert.equal(r.ok, false)
+  assert.match(r.summary, /CHANGELOG DRIFT FINDING/)
+  assert.match(r.summary, /shallow/, 'the reason travels with the verdict')
+})
+
+test('a build older than the daily cron means the deploy stopped, and says so separately', async () => {
+  const { siteVersionFreshness } = await import('../checks.mjs')
+  const r = siteVersionFreshness(STAMP(), new Date('2026-08-20T22:15:14Z'))
+  assert.equal(r.ok, false)
+  assert.match(r.summary, /DEPLOY GAP FINDING/)
+  assert.match(r.summary, /stopped running/)
+  assert.doesNotMatch(r.summary, /CHANGELOG DRIFT/, 'a dead deploy is a different failure from an unlogged one')
+})
+
+test('the drift headline matches the dashboard alarm form; the healthy line does not', async () => {
+  const { siteVersionFreshness } = await import('../checks.mjs')
+  // ops-dashboard/lib/navigator.mjs ALARM_RE, copied here so this file does not import
+  // the dashboard: a bold ALL-CAPS run containing GAP/FINDING/BREACHED/FAILED.
+  const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED)[A-Z0-9 ]*\*\*/
+  const drifted = siteVersionFreshness(STAMP({
+    drift: { ok: false, unknown: false, behind: 11, summary: 'eleven unrecorded' },
+  }), JUST_AFTER)
+  assert.match(drifted.summary, ALARM_RE, 'a warning that does not match this renders as ordinary grey text')
+  assert.doesNotMatch(siteVersionFreshness(STAMP(), JUST_AFTER).summary, ALARM_RE)
+  assert.match(siteVersionFreshness(null, JUST_AFTER).summary, ALARM_RE)
+})
+
+test('the section prints the stamp line as written, without double-bolding it', async () => {
+  const { siteVersionFreshness } = await import('../checks.mjs')
+  const site = siteVersionFreshness(STAMP({
+    drift: { ok: false, unknown: false, behind: 11, summary: 'eleven unrecorded' },
+  }), JUST_AFTER)
+  const out = checksSection({ site }, JUST_AFTER)
+  assert.match(out, /\*\*CHANGELOG DRIFT FINDING\*\*/)
+  assert.doesNotMatch(out, /\*\*hub build stamp/, 'wrapping it again would break the alarm match')
+  const clean = checksSection({ site: siteVersionFreshness(STAMP(), JUST_AFTER) }, JUST_AFTER)
+  assert.match(clean, /hub build stamp: v2\.12\.0 built/)
 })

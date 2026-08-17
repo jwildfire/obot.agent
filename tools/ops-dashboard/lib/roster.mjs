@@ -435,7 +435,7 @@ export function usageIndex(usage, { epochDay = null, now = new Date(), current =
   const preDays = [...pre.days].sort();
   const unattributed = pre.labels.size ? {
     agents: pre.labels.size, cost: pre.cost, calls: pre.calls,
-    first: preDays[0] ?? null, last: preDays.at(-1) ?? null,
+    first: preDays[0] ?? null, last: preDays.at(-1) ?? null, days: preDays,
     top: [...preByLabel.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
       .map(([label, cost]) => ({ label, cost })),
   } : null;
@@ -464,14 +464,14 @@ export function usageIndex(usage, { epochDay = null, now = new Date(), current =
  */
 function costCell(usage, { id, label, startedAt }) {
   if (!usage || usage.missing) {
-    return { value: null, code: 'unavailable', short: 'n/a', text: 'cost unavailable — no usage artifact', sub: null };
+    return { value: null, code: 'unavailable', short: 'n/a', text: 'cost unavailable — no usage artifact', sub: null, days: [] };
   }
   const bucket = (id && usage.byId.get(id)) || (label && usage.byLabel.get(label)) || null;
   if (!bucket) {
     if (startedAt && usage.generatedAt && Date.parse(startedAt) > Date.parse(usage.generatedAt)) {
-      return { value: null, code: 'unpriced', short: 'unpriced', text: 'not yet priced — it started after the last usage build', sub: null };
+      return { value: null, code: 'unpriced', short: 'unpriced', text: 'not yet priced — it started after the last usage build', sub: null, days: [] };
     }
-    return { value: null, code: 'none', short: '—', text: 'no usage recorded', sub: null };
+    return { value: null, code: 'none', short: '—', text: 'no usage recorded', sub: null, days: [] };
   }
   const days = [...bucket.days].sort();
   return {
@@ -483,6 +483,10 @@ function costCell(usage, { id, label, startedAt }) {
     sub: bucket.subCost > 0 ? { cost: bucket.subCost, calls: bucket.subCalls } : null,
     // A long-lived session's total is its whole life, not today — say which days.
     span: days.length > 1 ? `${days[0]} to ${days.at(-1)}` : null,
+    // The priced days themselves, so a date filter can be built out of the same
+    // feed the money comes from rather than out of a second guess at when an
+    // agent ran (jwildfire/obot.roadmap#227).
+    days,
   };
 }
 
@@ -544,6 +548,20 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], s
     const cost = costCell(usage, { id, label, startedAt });
     const key = slug || slugOfName(job?.name ?? label);
     const entries = (id && byWorker.get(id)) || (key && byWorker.get(key)) || [];
+    // Last activity, from whichever record saw the agent most recently. A date
+    // filter reading only the job record would date an agent by when the harness
+    // last wrote a heartbeat and miss the spend recorded against it.
+    const lastAt = [...matched.map((j) => j.updatedAt ?? j.startedAt), claimedAt]
+      .filter(Boolean).sort().at(-1) ?? null;
+    // Every day this agent is known to have been alive, from both records. The
+    // priced days come from the shared usage feed; the job days come from the
+    // harness. Neither alone is complete: a worker that started at 22:48 and ran
+    // to 04:03 has its money on one date and its job activity on the next.
+    const days = [...new Set([
+      ...(cost.days ?? []),
+      ...matched.flatMap((j) => [day(j.startedAt), day(j.updatedAt)]),
+      day(claimedAt),
+    ].filter(Boolean))].sort();
     return {
       id: id ?? null,
       idText: id ?? 'no worker id',
@@ -552,6 +570,8 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], s
       task: task ?? '',
       claimedAt: claimedAt ?? null,
       startedAt,
+      lastAt,
+      days,
       sessions: matched.length,
       tokens: matched.reduce((n, j) => n + (j.tokens ?? 0), 0),
       status,

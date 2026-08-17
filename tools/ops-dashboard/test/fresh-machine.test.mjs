@@ -183,9 +183,15 @@ test('the live session view says it has not been built rather than 404-ing blank
 test('the sessions brief keeps its feed and its record link with nothing to show', () => {
   // The one case that already had coverage — kept here because this file is the
   // contract for the whole surface and that regression is the reason it exists.
-  const text = readable(routes['/live.html'].body);
-  assert.match(text, /What changed/);
+  //
+  // The two halves now sit on two surfaces. #161 made /session (and its alias
+  // /live.html) the agents table and moved the feed whole to /session/log, so the
+  // feed is absent there for a full roster as much as an empty one — which is not
+  // the regression this guards. The invariant is unchanged and still asserted:
+  // with nothing to show, the table page keeps the way to the record, and the
+  // record page keeps its feed.
   assert.ok(routes['/live.html'].body.includes('/session/log'), 'the record link is gone');
+  assert.match(readable(routes['/session/log'].body), /What changed/);
 });
 
 // ---- day two, and day three ----------------------------------------------
