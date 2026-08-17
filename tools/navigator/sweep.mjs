@@ -17,11 +17,20 @@
 //      never writes prime-state.md.
 //   6. appends one scratchpad `## Session log` line per event (tag 🧭🤖 nav)
 //      so working sessions and the wrapup see review activity without polling.
+//   7. reads every worker's job record, renders the ones that stopped, stalled,
+//      died or are waiting into a `## Wake` section above everything else, and
+//      appends one line per wake to the log the Navigator's Monitor tails
+//      (hub#212). See wake.mjs — this file supplies the readings.
 //
 // Why scheduled, not a session Monitor: session-bound watchers die with the
 // session and coverage was manual per-RC — both failed on sv#131 (2026-08-15,
 // CHANGES_REQUESTED at 08:29Z unseen for hours). Installed via
 // tools/navigator/install-launchd, cadence 5 min.
+//
+// The wake in step 7 is the mirror of that and not a contradiction: the OBSERVER
+// stays scheduled and session-independent, and only the notification is
+// session-bound — because only a session can be notified. When that half dies the
+// state file says so on every run, and the pending list is still written.
 //
 // Failure contract: a failed sweep must never look fresh. On error the state
 // file is rewritten with a FAILED header naming the last good sweep; a repo
@@ -31,7 +40,8 @@
 // judges, corrects, or touches other agents' work. Nothing it writes is
 // published.
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdirSync, statSync, appendFileSync } from 'node:fs'
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, statSync,
+         writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -368,7 +378,30 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
 }
 
 const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
-const parseLog = () => parseWakeLog(safeRead(WAKE_LOG))
+
+/**
+ * The wake log's recent tail, for the re-wake floors.
+ *
+ * The file is append-only and stays that way — it is the record of what was
+ * delivered, and rotating it to keep a read cheap would trade a permanent record
+ * for a five-minute saving. Instead only the last stretch is read, which is all
+ * the floors need: the longest is an hour, and this holds days. A cut first line
+ * simply fails the line pattern and is ignored.
+ */
+const WAKE_TAIL_BYTES = 128 * 1024
+function readWakeTail() {
+  try {
+    const size = statSync(WAKE_LOG).size
+    if (size <= WAKE_TAIL_BYTES) return safeRead(WAKE_LOG)
+    const fd = openSync(WAKE_LOG, 'r')
+    try {
+      const buf = Buffer.alloc(WAKE_TAIL_BYTES)
+      readSync(fd, buf, 0, WAKE_TAIL_BYTES, size - WAKE_TAIL_BYTES)
+      return buf.toString('utf8')
+    } finally { closeSync(fd) }
+  } catch { return '' }
+}
+const parseLog = () => parseWakeLog(readWakeTail())
 
 // The worker ledger: is the W-id convention actually being applied? (#130)
 //
