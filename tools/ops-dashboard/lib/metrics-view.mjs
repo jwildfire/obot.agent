@@ -307,6 +307,12 @@ export function buildMetricsModel(cache, now = new Date(), filters = {}) {
     repoCount: allRepos.length,
     period, repo, goal, tiles, rows,
     unknown: filters.unknown ?? [],
+    // A cache written before this feature existed carries no `goals` key at all. That
+    // is not "there are no goals" and must not render as an empty filter row: the
+    // sweep refreshes hourly, so for up to an hour after this ships the page will be
+    // reading exactly such a cache, and an unexplained missing control is how a
+    // working feature gets reported as broken.
+    goalsUnavailable: !Array.isArray(cache.goals),
     repos: allRepos.map((r) => ({ key: r, short: shortRepo(r), epoch: epochs.get(r) ?? null })),
     goals: (cache.goals ?? []).map((g) => ({ ...g, key: refKey(g.repo, g.number) })),
     // How much of the record the goal filter can even see. Stated whenever a goal is
@@ -400,12 +406,14 @@ export function filterBar(model) {
       filterHref(model, { repo: r.key }), r.short, model.repo === r.key,
       r.epoch ? `on record here since ${r.epoch}` : '',
     ))).join('');
-  const goals = [chip(filterHref(model, { goal: null }), 'all goals', !model.goal)]
-    .concat(model.goals.map((g) => chip(
-      filterHref(model, { goal: g }), g.slug || `#${g.number}`,
-      model.goal?.number === g.number,
-      `${g.title} (#${g.number})`,
-    ))).join('');
+  const goals = model.goalsUnavailable
+    ? '<span class="fnote">not in these numbers yet — the collector picks goal links up on its next hourly run</span>'
+    : [chip(filterHref(model, { goal: null }), 'all goals', !model.goal)]
+      .concat(model.goals.map((g) => chip(
+        filterHref(model, { goal: g }), g.slug || `#${g.number}`,
+        model.goal?.number === g.number,
+        `${g.title} (#${g.number})`,
+      ))).join('');
   return `<div class="filters">
   <div class="frow"><span class="flab">period</span><div class="fset">${periods}</div></div>
   <div class="frow"><span class="flab">repo</span><div class="fset">${repos}</div></div>
@@ -581,6 +589,7 @@ export const METRICS_CSS = `${SPARK_CSS}
   .chip:hover { border-color:var(--muted); }
   .chip.on { background:var(--accent-soft); color:var(--accent); border-color:var(--accent); }
   .chip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .fnote { font-size:0.68rem; color:var(--muted); line-height:1.3; }
 
   /* auto-fill with a 150px floor: at 390px that is one or two columns and never a
      starved track, and the same rule gives five across on a wide window. */
