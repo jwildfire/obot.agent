@@ -229,3 +229,34 @@ test('DEATH matches the errors this machine actually produced, not invented ones
   assert.equal(DEATH.test('approve Bash: python3 "$CLAUDE_JOB_DIR/t'), false)
   assert.equal(DEATH.test('Review hub#199 (agent roster cost) and #200'), false)
 })
+
+// ---- the section has to survive the dashboard's reader ----------------------
+//
+// Three times now a verdict has been written where the reader drops it: the config
+// ledger's headline behind its notes (obot.agent#129), the ledger verdicts above the
+// first heading, the discipline headline as a plain line. This section is checked
+// against the actual parser rather than eyeballed, because "it renders" has been
+// wrong every previous time it was assumed.
+
+test('the wake section reaches the dashboard with its verdict and its alarm intact', async () => {
+  const { parseNavigatorState } = await import('../../ops-dashboard/lib/navigator.mjs')
+  const p = pending([job({ state: 'done', firstTerminalAt: agoMin(10) })], { now: NOW })
+  const md = [
+    '# navigator-state', '', 'swept: 2026-08-17 06:00 · cadence 5m · ok', '',
+    wakeSection({
+      pending: p, delivered: [], held: [],
+      listener: listenerState('x', NOW, { stat: () => { throw new Error('ENOENT') } }),
+      outside: 36,
+    }),
+  ].join('\n')
+  const parsed = parseNavigatorState(md, new Date('2026-08-17T04:02:00Z'))
+  const wake = parsed.sections.find((s) => s.title === 'Wake')
+  assert.ok(wake, 'the Wake section reaches the page at all')
+  const notes = wake.items.filter((i) => i.note)
+  assert.ok(notes.some((i) => /1 unresolved stop-state/.test(i.text)), 'the verdict renders')
+  const alarm = notes.find((i) => /WAKE CHANNEL DOWN/.test(i.text))
+  assert.ok(alarm, 'the channel alarm renders as a row of its own, not as small print')
+  assert.equal(alarm.alarm, true, 'and is flagged as an alarm')
+  assert.ok(notes.some((i) => /36 unjudged closeout/.test(i.text)), 'the bound renders')
+  assert.ok(wake.items.some((i) => /W0007 closed out/.test(i.text)), 'and so does the pending row')
+})

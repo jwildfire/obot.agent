@@ -414,28 +414,33 @@ export function hostWasAway(prevSweptIso, now = new Date()) {
 // ---- the section the sweep folds into navigator-state.md --------------------
 
 /**
- * Verdict first, then the list, then what was held.
+ * Verdict first, then the channel, then the bounds, then the list.
  *
- * The channel's own state leads, because every other line here is a claim about the
- * fleet and this one is a claim about whether those claims are reaching anybody. A
- * pending list under a dead channel reads as a to-do; under a live one it reads as
- * something already on its way.
+ * Every line above the list is UNINDENTED on purpose. The dashboard's reader treats
+ * an indented line as the detail of the line above it, and a detail carries no alarm
+ * flag — so `WAKE CHANNEL DOWN` written as a sub-line would reach the page as small
+ * print under a headline that says everything is fine. That is obot.agent#129 for
+ * the third time (verdict swallowed, detail kept), and the one alarm here that must
+ * never be quiet is the one saying the alarms are not being delivered.
  */
 export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0 } = {}) {
   const lines = ['## Wake — workers that stopped', '']
   lines.push(pending.length
     ? `wake: **${pending.length} unresolved stop-state${pending.length === 1 ? '' : 's'}** — ${delivered.length} delivered this sweep`
     : 'wake: clear — every worker that stopped has been judged, and no worker is stalled or waiting')
-  if (listener) lines.push(`  ${listener.summary}`)
-  if (awayNote) lines.push(`  ${awayNote}`)
-  if (outside) lines.push(`  bounded: ${outside} unjudged closeout(s) older than ${WAKE_WINDOW_HOURS}h are not woken for — judge them from the delivery record, not from here`)
+  if (listener) lines.push(listener.summary)
+  if (awayNote) lines.push(awayNote)
+  if (outside) lines.push(`bounded: ${outside} unjudged closeout(s) older than ${WAKE_WINDOW_HOURS}h are not woken for — judge them from the delivery record, not from here`)
   if (pending.length) {
     lines.push('', '### Pending', '')
     for (const d of pending) {
       const state = delivered.some((x) => x.key === d.key)
         ? 'delivered'
         : (held.find((x) => x.key === d.key)?.why ?? 'pending')
-      lines.push(`- ${d.kind.toUpperCase()} ${d.line} · _${state}_`)
+      // No markdown emphasis on the state: the dashboard's reader strips `*` and
+      // backticks but not underscores, so an italicised tail arrives on the page as
+      // literal underscores. Plain text renders correctly on both surfaces.
+      lines.push(`- ${d.kind.toUpperCase()} ${d.line} · ${state}`)
     }
   }
   return lines.join('\n') + '\n'
