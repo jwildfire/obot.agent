@@ -496,8 +496,14 @@ export function fleetSection({ trigger = null, decision = null, overruns = [],
   // BROKEN (tools/ops-dashboard/lib/navigator.mjs). "MANAGER OVERRUN" matches none
   // of them and would reach his page as ordinary grey text — the exact shape of
   // obot.agent#129, where a real headline rendered as if nothing were wrong.
+  //
+  // The character class is [A-Z0-9 ] and nothing else, so punctuation between the
+  // asterisks silently breaks the match: "MANAGER KILLED, BUDGET BREACHED" contains
+  // BREACHED and still renders grey, purely because of the comma. Its test caught
+  // exactly that, which is the argument for testing the wording rather than reading it.
   for (const o of overruns) {
-    lines.push(o.hard ? `**MANAGER BUDGET BREACHED** — ${o.line}` : `manager overrun — ${o.line}`)
+    if (o.killed) lines.push(`**MANAGER KILLED ON A BREACHED BUDGET** — ${o.line} · ${o.killed}`)
+    else lines.push(o.hard ? `**MANAGER BUDGET BREACHED** — ${o.line}` : `manager overrun — ${o.line}`)
   }
 
   if (!trigger.fired) {

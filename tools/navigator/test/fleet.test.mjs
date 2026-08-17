@@ -370,3 +370,14 @@ test('a suppressed detector still says so when OTHER conditions fired', () => {
   assert.equal(t.gaps.length, 0)
   assert.match(fleetSection({ trigger: t, decision: { why: 'x' } }), /SUPPRESSED/)
 })
+
+test('a kill that fired reaches the page as its own ALARM, not as a quiet exit', () => {
+  // A ceiling that fires silently is indistinguishable from a manager that exited
+  // cleanly, which would make the enforcement invisible exactly when it acted.
+  const o = [{ job: 'm', state: 'working', mins: 90, hard: true, killed: 'SIGTERM to pid 123',
+               line: 'manager job m has run 90m against a 30m budget (state working)' }]
+  const s = fleetSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: o })
+  assert.match(s, ALARM_RE)
+  assert.match(s, /MANAGER KILLED ON A BREACHED BUDGET/)
+  assert.match(s, /SIGTERM to pid 123/)
+})

@@ -168,11 +168,23 @@ test('the relaunch floor holds a second launch inside the hour', () => {
   assert.match(r.stdout, /held: last launch \d+m ago, floor is 60m/)
 })
 
-test('an overrunning manager is reported, and is NOT killed unless the kill is armed', () => {
+test('an overrunning manager is reported, and a DRY RUN never kills', () => {
   const old = new Date(Date.now() - 90 * 60000).toISOString()
   const { r } = run(['--check'], {
     jobs: { mgr1: { name: '🚦🤖 obot-fleet', state: 'working', createdAt: old, updatedAt: old } },
   })
   assert.match(r.stderr, /manager job mgr1 has run \d+m against a 30m budget/)
-  assert.doesNotMatch(r.stderr, /SIGTERM/, 'terminating a process is not a default')
+  assert.doesNotMatch(r.stderr, /SIGTERM/, '--check reports; it never acts')
+})
+
+test('the hard ceiling is ARMED by default and OBOT_FLEET_KILL=0 disarms it', () => {
+  // The Navigator's call, 2026-08-17: a kill that ships disarmed is documentation.
+  // The job id here matches nothing in `claude agents`, so the kill path runs and
+  // reports that it found no pid rather than terminating anything real.
+  const old = new Date(Date.now() - 90 * 60000).toISOString()
+  const mgr = { mgr1: { name: '🚦🤖 obot-fleet', state: 'working', createdAt: old, updatedAt: old } }
+  const armed = run([], { jobs: mgr })
+  assert.match(armed.r.stderr, /killed overrunning manager mgr1/)
+  const disarmed = run([], { jobs: mgr, env: { OBOT_FLEET_KILL: '0' } })
+  assert.doesNotMatch(disarmed.r.stderr, /killed overrunning manager/)
 })

@@ -36,9 +36,19 @@
 // prints a FLEET TRIGGER BROKEN section, which is the reading that matters.
 //
 // Env: OBOT_WORKSPACE, OBOT_JOBS_DIR, and the OBOT_FLEET_* thresholds documented in
-// tools/navigator/fleet.mjs. OBOT_FLEET_KILL=1 arms the hard-ceiling kill of an
-// overrunning manager; unarmed it is reported only, because terminating a process
-// mid-write is not a thing to do on a default.
+// tools/navigator/fleet.mjs.
+//
+// THE HARD CEILING IS ARMED BY DEFAULT; OBOT_FLEET_KILL=0 disarms it. The Navigator
+// decided this on 2026-08-17 and the reasoning is worth keeping: a kill that ships
+// disarmed is documentation, and the failure it prevents is the one the requirement
+// names — a manager with no enforced limit is a standing session that has not
+// admitted it yet. The risk of an armed kill is interrupting a write, and that risk
+// is small here by construction, because everything fleet writes is append-only and
+// an interrupted append is a shorter record rather than a corrupted one.
+//
+// A ceiling that fires silently is indistinguishable from a manager that exited
+// cleanly, so the kill leaves a line in the fleet log AND an alarm headline in the
+// section that reaches the dashboard.
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -200,10 +210,11 @@ function main() {
   // the hold were normal.
   for (const o of overruns) {
     say(o.line)
-    if (MODE === 'run' && o.hard && process.env.OBOT_FLEET_KILL === '1') {
+    if (MODE === 'run' && o.hard && process.env.OBOT_FLEET_KILL !== '0') {
       const killed = killManager(o.job, jobs)
       appendFileSync(FLEET_LOG, `${now.toISOString()} HOLD - — killed overrunning manager ${o.job}: ${killed}\n`)
       say(`killed overrunning manager ${o.job}: ${killed}`)
+      o.killed = killed
     }
   }
 
