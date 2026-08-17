@@ -40,7 +40,7 @@
 // overrunning manager; unarmed it is reported only, because terminating a process
 // mid-write is not a thing to do on a default.
 import { execFileSync, spawn } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -162,8 +162,16 @@ function main() {
   const away = prevSweptIso ? hostWasAway(prevSweptIso, now) : false
 
   const { prs, errors } = listPRs(repos)
-  const judged = judgedWorkers(safeRead(DELIVERY_JOURNAL))
-  const trigger = triggers({ jobs, prs, policy, judged, now, hostWasAway: away })
+  // Readability is a separate fact from emptiness. `judgedWorkers('')` returns an
+  // empty set, which is indistinguishable from a journal in which nothing has been
+  // judged — and that difference decides whether every recent closeout is a gap.
+  // existsSync rather than a try/catch on the parse, because the journal is
+  // append-only JSONL and a torn last line is normal and must NOT read as unreadable.
+  const journal = safeRead(DELIVERY_JOURNAL)
+  const judgedReadable = existsSync(DELIVERY_JOURNAL) && journal.trim().length > 0
+  const judged = judgedWorkers(journal)
+  const trigger = triggers({ jobs, prs, policy, judged, judgedReadable, now, hostWasAway: away })
+  if (!judgedReadable) errors.push(`delivery journal not readable at ${DELIVERY_JOURNAL}`)
   // A repo that failed to list contributes no candidates, and saying the queue is
   // empty when it could not be read is the wrong direction to fail in. Named, so the
   // section is never read as complete.

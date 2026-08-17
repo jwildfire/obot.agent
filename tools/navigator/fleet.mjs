@@ -280,7 +280,24 @@ export function stuckPRs(prs = [], { now = new Date(), idleMin = PR_IDLE_MIN } =
  * manager to fill in.
  */
 export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
+                                          judgedReadable = true,
                                           minMins = CLOSEOUT_GAP_MIN, windowHours = 24 } = {}) {
+  // AN UNREADABLE JOURNAL IS NOT AN EMPTY ONE, and the difference is the whole
+  // condition. `judged` empty means "nothing has been judged", which makes every
+  // recent closeout a gap; a journal that could not be read produces the identical
+  // empty set and would fire on the entire fleet at once.
+  //
+  // Found by running it rather than by reasoning about it: a sandboxed integration
+  // run pointed OBOT_WORKSPACE at a fresh directory with the real job ledger, read
+  // no journal, and launched a real manager holding twelve phantom gaps for workers
+  // the Navigator had judged hours earlier. Nothing was written, because a gap is
+  // only ever reported — but the same failure on a condition that ACTS would have
+  // been a manager closing a fleet on a missing file.
+  //
+  // So it fails the other way: no reading means no detection, said out loud. Same
+  // discipline as the sweep's `backlogCapped`, where a repo that failed to list must
+  // never make the queue look smaller than it is.
+  if (!judgedReadable) return []
   const out = []
   for (const job of jobs) {
     if (!isWorker(job) || !job.firstTerminalAt) continue
@@ -316,10 +333,11 @@ export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
  * expensive to notice.
  */
 export function triggers({ jobs = [], prs = [], policy = {}, judged = new Set(),
-                           now = new Date(), hostWasAway: away = false } = {}) {
+                           judgedReadable = true, now = new Date(),
+                           hostWasAway: away = false } = {}) {
   const sessions = stalledSessions(jobs, { now, hostWasAway: away })
   const pulls = stuckPRs(prs, { now })
-  const gaps = closeoutGaps(jobs, { now, judged })
+  const gaps = closeoutGaps(jobs, { now, judged, judgedReadable })
   const conditions = [
     ...sessions.map((s) => ({ type: 'session', ...s })),
     ...pulls.map((p) => ({ type: 'pr', ...p })),
@@ -331,6 +349,7 @@ export function triggers({ jobs = [], prs = [], policy = {}, judged = new Set(),
     pulls,
     gaps,
     fired: conditions.length > 0,
+    judgedReadable,
     signature: signatureOf(conditions),
     operational: operationalRepos(policy).map((r) => r.repo),
   }
@@ -432,6 +451,13 @@ export function overrun(jobs = [], { now = new Date(), ttlMin = MANAGER_TTL_MIN,
 
 const SHOW = 6
 
+/** Said on every run where the journal could not be read, because a suppressed
+ *  detector that stays silent is indistinguishable from one that found nothing. */
+export const UNJUDGED_NOTE =
+  'delivery journal unreadable — closeout-gap detection SUPPRESSED this run; an unreadable ' +
+  'journal is not an empty one, and treating it as empty would make every recent closeout a gap'
+
+
 /**
  * Verdict first, then what held the launch, then the conditions.
  *
@@ -464,8 +490,10 @@ export function fleetSection({ trigger = null, decision = null, overruns = [],
   if (!trigger.fired) {
     lines.push('fleet: nothing to act on — no session past the bar, no idle operational PR, no unrecorded closeout')
     lines.push('  the trigger is a positive condition: an empty fleet never launches a manager')
+    if (trigger.judgedReadable === false) lines.push(`  ${UNJUDGED_NOTE}`)
     return lines.join('\n') + '\n'
   }
+  if (trigger.judgedReadable === false) lines.push(`  ${UNJUDGED_NOTE}`)
 
   lines.push(`fleet: **${trigger.conditions.length} condition(s)** — ${trigger.sessions.length} session(s) past the bar, ` +
              `${trigger.pulls.length} idle operational PR(s), ${trigger.gaps.length} closeout gap(s)`)

@@ -9,7 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ACT_MIN, CLOSEOUT_GAP_MIN, MANAGER_NAME, MANAGER_TAG, PR_IDLE_MIN,
+import { ACT_MIN, CLOSEOUT_GAP_MIN, UNJUDGED_NOTE, MANAGER_NAME, MANAGER_TAG, PR_IDLE_MIN,
          REPEAT_FLOOR_MIN, RELAUNCH_FLOOR_MIN, brief, closeoutGaps, fleetSection,
          holdLine, isManager, launchLine, operationalRepos, overrun, parseFleetLog,
          shouldLaunch, signatureOf, stalledSessions, stuckPRs,
@@ -312,4 +312,46 @@ test('the manager tag is not a worker tag', () => {
   assert.equal(MANAGER_TAG, '\u{1F6A6}\u{1F916}')
   assert.ok(!MANAGER_NAME.startsWith('\u{1F46F}\u{1F916}'))
   assert.ok(!MANAGER_NAME.startsWith('\u{1F9BE}\u{1F916}'))
+})
+
+// ---- an unreadable journal is not an empty one ------------------------------
+//
+// This section exists because of a real launch, not a thought experiment. A
+// sandboxed integration run pointed OBOT_WORKSPACE at a fresh directory while
+// keeping the real job ledger, read no delivery journal, and launched a real
+// manager holding twelve phantom gaps for workers the Navigator had judged hours
+// earlier. Nothing was written — a gap is only ever reported — but the identical
+// failure on a condition that ACTS is a manager closing a fleet on a missing file.
+
+test('an unreadable journal SUPPRESSES the closeout-gap condition rather than firing on all of it', () => {
+  const closed = [
+    worker({ id: 'a', name: '👯🤖 W0003 x', state: 'done', firstTerminalAt: agoMin(600) }),
+    worker({ id: 'b', name: '👯🤖 W0004 x', state: 'done', firstTerminalAt: agoMin(700) }),
+  ]
+  // Journal read, genuinely nothing judged: these ARE gaps.
+  assert.equal(closeoutGaps(closed, { now: NOW, judged: new Set(), judgedReadable: true }).length, 2)
+  // Journal not readable: the same empty set must mean "no reading", not "no verdicts".
+  assert.equal(closeoutGaps(closed, { now: NOW, judged: new Set(), judgedReadable: false }).length, 0)
+})
+
+test('the whole trigger goes quiet on an unreadable journal, and says so out loud', () => {
+  const closed = [worker({ state: 'done', firstTerminalAt: agoMin(600) })]
+  const t = triggers({ jobs: closed, prs: [], policy: POLICY, judgedReadable: false, now: NOW })
+  assert.equal(t.fired, false, 'a missing file must not launch a manager')
+  const s = fleetSection({ trigger: t })
+  assert.match(s, /closeout-gap detection SUPPRESSED/)
+  assert.equal(UNJUDGED_NOTE.includes('not an empty one'), true)
+})
+
+test('a suppressed detector still says so when OTHER conditions fired', () => {
+  // Otherwise the run reads as a complete picture of the fleet when one third of it
+  // was never looked at.
+  const jobs = [
+    worker({ id: 'w', state: 'blocked', tempo: 'blocked', needs: 'x', updatedAt: agoMin(600) }),
+    worker({ id: 'c', state: 'done', firstTerminalAt: agoMin(600) }),
+  ]
+  const t = triggers({ jobs, prs: [], policy: POLICY, judgedReadable: false, now: NOW })
+  assert.equal(t.fired, true)
+  assert.equal(t.gaps.length, 0)
+  assert.match(fleetSection({ trigger: t, decision: { why: 'x' } }), /SUPPRESSED/)
 })
