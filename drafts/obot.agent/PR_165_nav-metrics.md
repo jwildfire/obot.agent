@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-17 07:20 BST -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/165 on 2026-08-17 07:24 BST -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0, Assignee: none (App bots cannot be assignees), Reviewers: none — standard lane, not an RC -->
 
 ## The Navigator tab is the dashboard you described, one period at a time
