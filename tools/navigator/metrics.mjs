@@ -205,21 +205,43 @@ export function trendSeries(items = [], {
   for (let b = end; b > start; b -= plan.size) {
     buckets.unshift({ start: Math.max(start, b - plan.size), end: b, n: 0 })
   }
+  // The last bucket is in progress, so the window is not finished. A comparison that
+  // sets a part-elapsed period against a whole one is not a comparison: at period=1 the
+  // decisions tiles read six hours of today against the whole of yesterday and printed
+  // "-6", a fall invented entirely by the clock. So the delta is computed over COMPLETE
+  // buckets only, on both sides — `completeTotal` against `prevComplete`, equal spans,
+  // both fully elapsed. `total` still counts everything including today, because the
+  // headline number is what has happened; it is only the comparison that has to be fair.
+  const completeEnd = now.getTime() < end
+    ? (buckets.find((b) => now.getTime() < b.end)?.start ?? start)
+    : end
+  const completeSpan = completeEnd - start
   let total = 0
   let prevTotal = 0
+  let completeTotal = 0
+  let prevComplete = 0
   for (const item of items) {
     const raw = String(dateOf(item) ?? '')
     const t = Date.parse(grain === 'day' ? raw.slice(0, 10) : raw)
     if (Number.isNaN(t)) continue
     if (t >= start && t < end) {
       total += 1
+      if (t < completeEnd) completeTotal += 1
       const idx = buckets.findIndex((b) => t < b.end)
       buckets[idx < 0 ? buckets.length - 1 : idx].n += 1
     } else if (t >= start - span && t < start) {
       prevTotal += 1
+      if (t >= start - completeSpan) prevComplete += 1
     }
   }
-  return { plan, start, end, buckets, total, prevTotal }
+  // No complete bucket at all — a one-day window on the day itself. There is nothing
+  // fair to compare, and the view says so rather than reaching for the whole of
+  // yesterday.
+  const comparableSpan = completeSpan > 0
+  return {
+    plan, start, end, buckets, total, prevTotal,
+    completeEnd, completeSpan, comparableSpan, completeTotal, prevComplete,
+  }
 }
 
 /**

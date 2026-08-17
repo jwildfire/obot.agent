@@ -65,9 +65,17 @@ export function parseFilters(query = '', cache = null) {
   const wantRepo = q.get('repo');
   const wantGoal = q.get('goal');
   const repos = (cache?.repos ?? []);
-  const repo = repos.find((r) => r === wantRepo || shortRepo(r) === wantRepo) ?? null;
   const goals = (cache?.goals ?? []);
-  const goal = goals.find((g) => String(g.number) === wantGoal || g.slug === wantGoal) ?? null;
+  // Guard the absent case before matching. `find` on a null needle used to match a
+  // goal whose own slug was null, so bare /navigator silently applied that goal as the
+  // active filter and rendered every tile as 0 or "not attributable" — a filtered page
+  // presenting itself as the whole picture, which is the one thing this view must not do.
+  const repo = wantRepo
+    ? repos.find((r) => r === wantRepo || shortRepo(r) === wantRepo) ?? null
+    : null;
+  const goal = wantGoal
+    ? goals.find((g) => String(g.number) === wantGoal || (g.slug && g.slug === wantGoal)) ?? null
+    : null;
   return {
     period: PERIODS.includes(p) ? p : PERIOD_DEFAULT,
     repo,
@@ -146,24 +154,57 @@ function countInWindow(items, { start, end }, dateOf = (i) => i.createdAt) {
  *
  *   - `unmeasuredUntil` — before this, nothing in this series could have been
  *     recorded at all. It is the LATEST of the structural floors that apply: the
- *     earliest repo on record, the date the selected goal was created (nothing can
- *     belong to a goal that does not exist yet), and any floor the series carries of
- *     its own (the decisions record began three days ago; the release lane only
- *     exists in a repo once that repo has a branch model).
+ *     earliest repo on record, and any floor the series carries of its own (the
+ *     decisions record began three days ago; the release lane only exists in a repo
+ *     once that repo has a branch model).
+ *
+ *     The selected goal's creation date is deliberately NOT one of them, though it
+ *     looks like the most obvious floor of all. Sub-issue links are granted
+ *     retroactively: five requirements under goal #73 were filed before the goal issue
+ *     existed and linked to it afterwards. Using the goal's birthday as a floor drew a
+ *     hatched band captioned "before this series could record anything" with real bars
+ *     standing inside it — 38 of them across the filtered views — which is a caption
+ *     contradicting the chart it labels.
  *   - `partialUntil` — before this, only SOME of the included repos were on record.
  *     With one repo selected the two dates coincide and the second band vanishes,
  *     which is the honest outcome: there is nothing partial about a single repo.
  */
-function seriesEpoch({ repos, epochs, goal, floor = null }) {
+function seriesEpoch({ repos, epochs, floor = null }) {
   const included = repos.map((r) => epochs.get(r)).filter(Boolean).sort();
-  const parts = [included[0], goal?.createdAt?.slice(0, 10), floor].filter(Boolean);
-  const partialParts = [included.at(-1), goal?.createdAt?.slice(0, 10), floor].filter(Boolean);
+  const parts = [included[0], floor].filter(Boolean);
+  const partialParts = [included.at(-1), floor].filter(Boolean);
   const pick = (xs) => (xs.length ? xs.sort().at(-1) : null);
   const unmeasured = pick(parts);
   const partial = pick(partialParts);
   return {
     unmeasuredUntil: unmeasured ? Date.parse(`${unmeasured}T00:00:00Z`) : null,
     partialUntil: partial && partial !== unmeasured ? Date.parse(`${partial}T00:00:00Z`) : null,
+  };
+}
+
+/**
+ * A caption may never contradict the chart it labels.
+ *
+ * The band says "before this, nothing in this series could have been recorded". If the
+ * series contains something older, the band is wrong — and it is the band that yields,
+ * because the data is the evidence and the floor is only a rule about the data. This is
+ * a general guard rather than a fix for one series: the release lane's floor is its
+ * repo's branch-model date, but the lane classifier has a title escape hatch, so one
+ * gsm.safety pull request is genuinely a release candidate three weeks before that
+ * repo's release lane is supposed to exist. Any future floor that overreaches the same
+ * way is caught here instead of appearing as a bar standing inside its own hatch.
+ */
+function clampToData(zone, items, dateOf = (i) => i.createdAt) {
+  if (!zone.unmeasuredUntil || !items.length) return zone;
+  let earliest = Infinity;
+  for (const it of items) {
+    const t = Date.parse(String(dateOf(it) ?? ''));
+    if (!Number.isNaN(t) && t < earliest) earliest = t;
+  }
+  if (!Number.isFinite(earliest) || earliest >= zone.unmeasuredUntil) return zone;
+  return {
+    unmeasuredUntil: earliest,
+    partialUntil: zone.partialUntil && zone.partialUntil > earliest ? zone.partialUntil : null,
   };
 }
 
@@ -216,7 +257,7 @@ export function buildMetricsModel(cache, now = new Date(), filters = {}) {
 
   const rcFloor = included
     .map((r) => BRANCH_MODEL_EPOCH[r]).filter(Boolean).sort()[0] ?? null;
-  const ep = (over, floor = null) => seriesEpoch({ repos: over, epochs, goal, floor });
+  const ep = (over, floor = null) => seriesEpoch({ repos: over, epochs, floor });
   const trend = (items, opts = {}) => trendSeries(items, { period, now, ...opts });
 
   const tile = (group, label, pool, {
@@ -229,21 +270,26 @@ export function buildMetricsModel(cache, now = new Date(), filters = {}) {
       ? { kept: pool, unlinked: [], elsewhere: [] }
       : splitByFilters(pool, { goalKey, resolve });
     const t = trend(split.kept, { ...(grain ? { grain } : {}), ...(dateOf ? { dateOf } : {}) });
-    const zone = blocked ? { unmeasuredUntil: null, partialUntil: null } : ep(over, floor);
+    const zone = blocked ? { unmeasuredUntil: null, partialUntil: null } : clampToData(ep(over, floor), split.kept, dateOf);
     // A delta is a comparison, and there is nothing to compare against when the
     // period before this one is wholly before measurement began. Printing "+400%"
     // off a base of zero-because-unmeasured is the lie with a slope, restated as
     // arithmetic — so the comparison is withheld and the reason is printed instead.
-    const prevStart = t.start - (t.end - t.start);
-    const comparable = !blocked && !(zone.unmeasuredUntil && zone.unmeasuredUntil > prevStart);
+    const prevStart = t.start - t.completeSpan;
+    const comparable = !blocked
+      && t.comparableSpan
+      && !(zone.unmeasuredUntil && zone.unmeasuredUntil > prevStart);
     return {
       group, label, muted, blocked,
       // Counted over this tile's own subset and this tile's own window — the two
       // things the first version of this note got wrong.
       unlinked: countInWindow(split.unlinked, t, dateOf ?? ((i) => i.createdAt)),
       elsewhere: countInWindow(split.elsewhere, t, dateOf ?? ((i) => i.createdAt)),
-      total: t.total, prev: t.prevTotal, comparable,
-      delta: comparable ? t.total - t.prevTotal : null,
+      total: t.total, prev: t.prevComplete, comparable,
+      // Complete buckets on both sides. The headline `total` includes the bucket in
+      // progress; the comparison deliberately does not.
+      delta: comparable ? t.completeTotal - t.prevComplete : null,
+      completeSpan: t.completeSpan, inProgress: t.completeEnd < t.end,
       buckets: t.buckets, plan: t.plan, start: t.start, end: t.end, zone,
       // Where the clock actually is inside the last bucket. Time is injected here
       // like everywhere else in this codebase — a renderer reading the wall clock is
@@ -281,7 +327,7 @@ export function buildMetricsModel(cache, now = new Date(), filters = {}) {
   // two panels on one page can never disagree about what a filter means.
   const issues = goalKey ? splitByFilters(allIssues, { goalKey, resolve: resolveIssue }).kept : allIssues;
   const prs = goalKey ? splitByFilters(allPrs, { goalKey, resolve: resolvePr }).kept : allPrs;
-  const releases = releasesBlocked ? [] : releasesAll;
+  const releases = releasesAll;
   const clsW = (...cs) => issues.filter((i) => cs.includes(i.cls));
   const laneW = (l) => prs.filter((p) => p.lane === l);
 
@@ -297,9 +343,15 @@ export function buildMetricsModel(cache, now = new Date(), filters = {}) {
     { group: 'PRs opened', label: 'release candidates', counts: windowCounts(laneW('release-candidate'), now) },
     { group: 'PRs opened', label: 'standard lane', counts: windowCounts(laneW('standard'), now) },
     { group: 'PRs opened', label: 'stacked (feature branch)', counts: windowCounts(laneW('stacked'), now), muted: true },
-    { group: 'Shipped', label: 'releases published', counts: windowCounts(releases, now, (r) => r.publishedAt), items: releases },
-    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date, day), epoch: filed.map((d) => d.date).sort()[0] ?? null },
-    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date, day), epoch: decided.map((d) => d.date).sort()[0] ?? null },
+    // The blocked flag rides on the row for the same reason it rides on the tile: a
+    // filter this series cannot answer must read the same in both panels. Without it
+    // the folded table printed releases as five zeros directly beneath a tile saying
+    // "not attributable", and printed the decisions rows unfiltered beneath tiles that
+    // had refused to answer at all — one page contradicting itself twice under one
+    // filter, which is worse than either panel alone would have been.
+    { group: 'Shipped', label: 'releases published', counts: windowCounts(releases, now, (r) => r.publishedAt), items: releases, blocked: releasesBlocked },
+    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date, day), epoch: filed.map((d) => d.date).sort()[0] ?? null, blocked: decisionsBlocked },
+    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date, day), epoch: decided.map((d) => d.date).sort()[0] ?? null, blocked: decisionsBlocked },
   ];
   return {
     ageMin,
@@ -350,6 +402,9 @@ export function metricsHtml(model, { hubUrl = 'https://jwildfire.github.io/obot.
     const label = r.items
       ? `<details><summary>${esc(r.label)}</summary><ul class="mrel">${releaseList(r.items)}</ul></details>`
       : esc(r.label);
+    if (r.blocked) {
+      return `${groupCell}<tr class="mmuted"><td class="mlabel">${label}</td><td class="mcell mna" colspan="${WINDOWS.length}">not attributable &mdash; ${esc(r.blocked)}</td></tr>`;
+    }
     return `${groupCell}<tr${r.muted ? ' class="mmuted"' : ''}><td class="mlabel">${label}</td>${WINDOWS.map((w) => `<td class="mcell">${num(r.counts[w])}</td>`).join('')}</tr>`;
   }).join('\n');
   const decidedEpoch = model.rows.find((r) => r.label === 'decided by him')?.epoch;
@@ -405,10 +460,12 @@ export function filterBar(model) {
     p === 365 ? '365d' : `${p}d`,
     p === model.period,
   )).join('');
+  // No `title` on these. A tooltip is hover-only and the requirement is explicit that a
+  // hover affordance needs a tap equivalent, so nothing may live there alone: the repo's
+  // own record-start already prints under every chart on the page.
   const repos = [chip(filterHref(model, { repo: null }), 'all repos', !model.repo)]
     .concat(model.repos.map((r) => chip(
       filterHref(model, { repo: r.key }), r.short, model.repo === r.key,
-      r.epoch ? `on record here since ${r.epoch}` : '',
     ))).join('');
   const goals = model.goalsUnavailable
     ? '<span class="fnote">not in these numbers yet — the collector picks goal links up on its next hourly run</span>'
@@ -441,22 +498,38 @@ export function coverageLine(model) {
   const c = model.goalCoverage;
   if (!c) return '';
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
-  return `<p class="mcover">Goal filter on. Of everything on record, ${c.issuesLinked} of ${c.issuesTotal} issues (${pct(c.issuesLinked, c.issuesTotal)}%) and ${c.prsLinked} of ${c.prsTotal} pull requests (${pct(c.prsLinked, c.prsTotal)}%) carry a structural link to any goal — the rest belong to no goal and are in none of these counts. Releases and decisions carry no goal link at all and say so below.</p>`;
+  // The selected goal's full title is printed here, in text, not left in the chip's
+  // tooltip: the chip says "autonomy" and this says which issue that is.
+  const g = model.goal;
+  const named = g
+    ? `Showing ${esc(g.title ?? `#${g.number}`)} (#${g.number}). `
+    : '';
+  return `<p class="mcover">${named}Of everything on record, ${c.issuesLinked} of ${c.issuesTotal} issues (${pct(c.issuesLinked, c.issuesTotal)}%) and ${c.prsLinked} of ${c.prsTotal} pull requests (${pct(c.prsLinked, c.prsTotal)}%) carry a structural link to any goal — the rest belong to no goal and are in none of these counts. Releases and decisions carry no goal link at all and say so below.</p>`;
 }
 
 const deltaHtml = (t) => {
   if (t.blocked) return '';
   if (!t.comparable) {
-    return '<span class="t-delta t-none">no comparable period — measurement began inside this one</span>';
+    const why = t.comparableSpan === false || !t.completeSpan
+      ? 'no comparable period — this one has not finished yet'
+      : 'no comparable period — measurement began inside this one';
+    return `<span class="t-delta t-none">${esc(why)}</span>`;
   }
   const d = t.delta;
   const sign = d > 0 ? '+' : '';
-  return `<span class="t-delta">${d === 0 ? 'level' : `${sign}${d}`} vs the ${prevWords(t)}</span>`;
+  return `<span class="t-delta">${d === 0 ? 'level' : `${sign}${d}`} vs the ${esc(prevWords(t))}</span>`;
 };
 
+/**
+ * What the comparison actually covers — the complete part of the window, named, and
+ * never the period on the chip when those differ. "vs the previous 7d" beside a figure
+ * built from six complete days would be the same overclaim in words that the delta
+ * itself used to make in arithmetic.
+ */
 const prevWords = (t) => {
-  const days = Math.round((t.end - t.start) / 86400000);
-  return days >= 1 ? `previous ${days}d` : 'previous 24h';
+  const hours = t.completeSpan / 3600000;
+  const unit = hours >= 24 ? `${Math.round(hours / 24)}d` : `${Math.round(hours)}h`;
+  return t.inProgress ? `previous complete ${unit}` : `previous ${unit}`;
 };
 
 /**
@@ -631,6 +704,7 @@ export const METRICS_CSS = `${SPARK_CSS}
                      color:var(--faint); font-weight:500; text-align:right; padding:0.2rem 0.45rem; }
   table.metrics td { padding:0.22rem 0.45rem; border-top:1px solid var(--line); }
   table.metrics td.mcell { text-align:right; font-family:var(--mono); font-size:0.74rem; }
+  table.metrics td.mna { text-align:left; font-family:var(--sans); color:var(--muted); font-size:0.7rem; }
   table.metrics .m0 { color:var(--faint); opacity:0.6; }
   table.metrics tr.mgroup td { border-top:0; padding-top:0.6rem; font-size:0.66rem;
                                letter-spacing:0.11em; text-transform:uppercase; color:var(--muted); font-weight:600; }

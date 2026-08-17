@@ -228,3 +228,107 @@ test('filter values are escaped: a goal slug cannot inject markup into its own c
   assert.doesNotMatch(html, /<script>x<\/script>/)
   assert.doesNotMatch(html, /<img src=x/)
 })
+
+// ---- what the adversarial pass found, pinned so it cannot come back -----------
+
+test('a goal whose slug is null is never selected by a URL that names no goal', () => {
+  // `find` on a null needle matched `g.slug === null`, so bare /navigator silently
+  // applied that goal and rendered every tile as 0 or "not attributable" — a filtered
+  // page presenting itself as the whole picture.
+  const withNullSlug = {
+    ...filterCache,
+    goals: [{ repo: 'jwildfire/hub', number: 230, title: 'Goal: new', slug: null, createdAt: '2026-08-01T00:00:00Z' }],
+  }
+  assert.equal(parseFilters('', withNullSlug).goal, null)
+  assert.equal(parseFilters('period=7', withNullSlug).goal, null)
+  assert.doesNotMatch(metricsHtml(buildMetricsModel(withNullSlug, now, parseFilters('', withNullSlug))), /Of everything on record/)
+  // …and it is still reachable by its number, which is the only handle it has.
+  assert.equal(parseFilters('goal=230', withNullSlug).goal.number, 230)
+})
+
+test('the goal\'s creation date is not treated as a measurement floor', () => {
+  // Sub-issue links are granted retroactively: requirements filed before a goal existed
+  // get linked to it afterwards. Flooring the hatch at the goal's birthday drew a band
+  // captioned "before this series could record anything" with real bars inside it.
+  const retro = {
+    ...filterCache,
+    issues: [
+      { repo: 'jwildfire/a', number: 1, createdAt: '2026-07-01T00:00:00Z', cls: 'requirement', parent: { repo: 'jwildfire/hub', number: 73 } },
+      ...filterCache.issues,
+    ],
+  }
+  const m = buildMetricsModel(retro, now, parseFilters('period=365&goal=autonomy', retro))
+  const req = m.tiles.find((t) => t.label === 'requirements')
+  assert.equal(req.total, 2)
+  // A bucket may straddle the boundary — the hatch ends on the real date, not on a
+  // bucket edge. What must never happen is a counted bucket lying WHOLLY inside the
+  // span the caption calls unrecordable.
+  const inside = req.buckets.filter((b) => b.n && req.zone.unmeasuredUntil && b.end <= req.zone.unmeasuredUntil)
+  assert.deepEqual(inside, [], 'no counted bucket may lie wholly inside the unrecordable span')
+})
+
+test('the comparison uses complete buckets on both sides, and says so when it cannot', () => {
+  // 24% of a day measured against a whole previous day printed "-6": a fall invented
+  // by the clock. Now both sides are complete buckets, or there is no comparison.
+  const decisions = {
+    ...cache,
+    decisions: {
+      filed: [{ id: 'D1', date: '2026-08-16' }, { id: 'D2', date: '2026-08-16' }, { id: 'D3', date: '2026-08-17' }],
+      decided: [],
+    },
+  }
+  const midMorning = new Date('2026-08-17T06:00:00Z')
+  const oneDay = buildMetricsModel(decisions, midMorning, { period: 1 })
+  const filed = oneDay.tiles.find((t) => t.label === 'filed for him')
+  assert.equal(filed.total, 1, 'the headline still counts today')
+  assert.equal(filed.comparable, false, 'but today alone has no complete bucket to compare')
+  assert.equal(filed.delta, null)
+  assert.match(metricsHtml(oneDay), /this one has not finished yet/)
+  // Over a week there ARE complete days, and the comparison names what it covers.
+  const week = buildMetricsModel(decisions, midMorning, { period: 7 })
+  const w = week.tiles.find((t) => t.label === 'filed for him')
+  assert.equal(w.total, 3, 'the headline includes today')
+  assert.equal(w.inProgress, true)
+  assert.match(metricsHtml(week), /previous complete \d+d/)
+})
+
+test('the folded table refuses the same filters the tiles refuse', () => {
+  const m = buildMetricsModel(filterCache, now, parseFilters('goal=autonomy', filterCache))
+  const html = metricsHtml(m)
+  // It printed releases as five zeros directly beneath a tile saying "not attributable",
+  // and printed the decisions rows unfiltered beneath tiles that refused to answer.
+  const rel = m.rows.find((r) => r.label === 'releases published')
+  assert.match(rel.blocked, /release carries no structural link to a goal/)
+  assert.match(m.rows.find((r) => r.label === 'filed for him').blocked, /no goal link/)
+  assert.match(html, /not attributable &mdash; a release carries no structural link to a goal/)
+  // With no filter, both rows are ordinary counted rows again.
+  const plain = buildMetricsModel(filterCache, now, {})
+  assert.equal(plain.rows.find((r) => r.label === 'releases published').blocked, null)
+  assert.equal(plain.rows.find((r) => r.label === 'filed for him').blocked, null)
+})
+
+test('nothing on the filter bar exists only behind a hover', () => {
+  const html = metricsHtml(buildMetricsModel(filterCache, now, parseFilters('goal=autonomy', filterCache)))
+  // The repo chips carried their record-start in a tooltip; it is on every tile instead.
+  assert.doesNotMatch(html, /title="on record here since/)
+  // The selected goal's full name is visible text, not a tooltip.
+  assert.match(html, /Showing Goal: autonomy \(#73\)/)
+})
+
+test('a band never claims a span the series has data in — whatever the declared floor', () => {
+  // The release lane's floor is its repo's branch-model date, but the lane classifier
+  // has a title escape hatch, so one gsm.safety PR really is a release candidate three
+  // weeks before that repo's release lane is meant to exist. The band yields to the
+  // data, not the other way round.
+  const early = {
+    ...cache,
+    repos: ['jwildfire/gsm.safety'],
+    issues: [{ repo: 'jwildfire/gsm.safety', number: 1, createdAt: '2026-07-01T00:00:00Z', cls: 'task' }],
+    prs: [{ repo: 'jwildfire/gsm.safety', number: 2, createdAt: '2026-07-09T00:00:00Z', lane: 'release-candidate' }],
+  }
+  const rc = buildMetricsModel(early, now, { period: 365 }).tiles.find((t) => t.label === 'release candidates')
+  assert.equal(rc.total, 1)
+  assert.ok(rc.zone.unmeasuredUntil <= Date.parse('2026-07-09T00:00:00Z'),
+    'the declared 2026-07-29 branch-model floor must yield to the release that predates it')
+  assert.deepEqual(rc.buckets.filter((b) => b.n && b.end <= rc.zone.unmeasuredUntil), [])
+})

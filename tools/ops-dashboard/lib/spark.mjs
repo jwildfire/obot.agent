@@ -115,15 +115,19 @@ export function sparkSvg({
  * A bucket's label — the date or hour it covers, in the reader's own terms.
  *
  * Buckets sit on a UTC grid (tools/navigator/metrics.mjs, trendSeries) precisely so
- * this can name them. Rendered in the local zone, because the page is his and the
- * hours he reads are his.
+ * this can name them — so the NAME has to be the UTC day the bucket actually covers.
+ * Reading the boundary through local getters labels the bucket with one calendar while
+ * filling it from another: in BST the row called 2026-08-15 holds items from 01:00 that
+ * day to 01:00 the next, and from any zone west of UTC every daily bar would be labelled
+ * a whole day early while its contents stayed put. The unit is stamped on the column
+ * header so the reader knows which clock this is.
  */
 export function bucketLabel(b, unit) {
   const d = new Date(b.start);
   const p = (x) => String(x).padStart(2, '0');
-  if (unit === 'hour') return `${p(d.getHours())}:00`;
-  if (unit === '6 hours') return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:00`;
-  const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  if (unit === 'hour') return `${p(d.getUTCHours())}:00`;
+  if (unit === '6 hours') return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${p(d.getUTCHours())}:00`;
+  const day = d.toISOString().slice(0, 10);
   if (unit === 'week') return `week of ${day}`;
   return day;
 }
@@ -136,7 +140,7 @@ export function bucketLabel(b, unit) {
 export function bucketTable(buckets, unit) {
   const rows = buckets.map((b, i) => ({ b, i })).filter(({ b }) => b.n);
   if (!rows.length) return '<p class="t-none">Nothing in any bucket of this period.</p>';
-  return `<table class="sbt"><thead><tr><th>${esc(unit)}</th><th>count</th></tr></thead><tbody>${
+  return `<table class="sbt"><thead><tr><th>${esc(unit)} (UTC)</th><th>count</th></tr></thead><tbody>${
     rows.map(({ b }) => `<tr><td>${esc(bucketLabel(b, unit))}</td><td>${b.n}</td></tr>`).join('')
   }</tbody></table>`;
 }
