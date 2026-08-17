@@ -175,11 +175,18 @@ export function hubSource(args) {
   }
 }
 
+/** The sweep script, when this machine has one. Null is a state, not a path. */
+export function sweepScript(workspace) {
+  const rq = path.join(workspace, 'obot.agent', 'scripts', 'reviews-queue');
+  return fs.existsSync(rq) ? rq : null;
+}
+
 async function page(args, lastLook = null) {
   const hub = hubSource(args);
-  const queue = await collectQueue(args.workspace, hub.root, {
-    agent: path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue'),
-  });
+  // A path that does not exist is not a collector. Handing one to the sweep meant
+  // every render fired a spawn that failed with ENOENT and left the page promising
+  // a sweep that could not start (jwildfire/obot.roadmap#223).
+  const queue = await collectQueue(args.workspace, hub.root, { agent: sweepScript(args.workspace) });
   // The last recorded pass/fail per item, so an installation qualification opens
   // showing whether it has ever been proved rather than starting blank.
   const checks = readChecks(args.workspace);
@@ -326,16 +333,19 @@ export function serve(args) {
           try {
             delivery = parseDeliveryJournal(fs.readFileSync(path.join(args.workspace, ...SESSION_DIR, 'delivery.journal'), 'utf8'));
           } catch { /* no journal yet — the tables say so */ }
+          // The what-changed feed moved here with the outcome groups when the tab
+          // became a table (jwildfire/obot.agent#154). A feed that cannot assemble
+          // costs the feed, never the page.
+          let feed = [];
+          try {
+            feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
+          } catch { /* no feed — the record renders without it */ }
           return send(200, 'text/html; charset=utf-8', sessionLogShell({
-            roster, delivery, lastLook: before,
+            roster, delivery, feed, lastLook: before,
             missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
           }));
         }
-        let feed = [];
-        try {
-          feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
-        } catch { /* a feed that cannot assemble costs the feed, never the page */ }
-        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, feed, lastLook: before }));
+        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, lastLook: before }));
       }
       if (p === '/session/frame') {
         const live = sessionLivePath(args.workspace);
@@ -371,8 +381,18 @@ export function serve(args) {
       }
 
       if (p === '/queue.json') {
-        const q = await collectQueue(args.workspace, hubSource(args).root);
-        return send(200, 'application/json', JSON.stringify({ items: q.items }, null, 2));
+        const q = await collectQueue(args.workspace, hubSource(args).root, { agent: sweepScript(args.workspace) });
+        // The provenance travels with the data. `{"items": []}` was the whole
+        // answer, so a machine reader was told the queue is empty when the truth
+        // was that none of its three sources could be opened.
+        return send(200, 'application/json', JSON.stringify({
+          items: q.items,
+          sources: {
+            rcs: { read: !q.rcs?.error, why: q.rcs?.error ?? null },
+            decisions: { read: !q.decisions?.error, why: q.decisions?.error ?? null },
+            config: { read: !q.config?.error, why: q.config?.error ?? null },
+          },
+        }, null, 2));
       }
       return send(404, 'text/plain', 'not found');
     } catch (e) {

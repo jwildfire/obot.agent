@@ -95,11 +95,26 @@ test('render: the day renders as one ## Delivery section, calls set apart', () =
   assert.match(r.stdout, /W0007/)
 })
 
-test('render: an empty record says so rather than rendering as a clean day', () => {
-  const r = run(ws(), ['render'])
-  assert.equal(r.status, 0)
-  assert.match(r.stdout, /^## Delivery/m)
-  assert.match(r.stdout, /no closeouts recorded/i)
+test('render: an absent record and an empty one are different sentences', () => {
+  // Absent: nothing is being recorded at all. The tool's own `report()` has always
+  // said "This is not the same as a clean day; it means nothing has been written",
+  // and that sentence never reached the state file the Navigator tab renders
+  // (jwildfire/obot.roadmap#223).
+  const absent = run(ws(), ['render'])
+  assert.equal(absent.status, 0)
+  assert.match(absent.stdout, /^## Delivery/m)
+  assert.match(absent.stdout, /NO RECORD/)
+  assert.match(absent.stdout, /not a quiet day; it is an unwritten one/)
+  assert.doesNotMatch(absent.stdout, /no closeouts recorded/i)
+
+  // Present, with an entry from another day: the record exists and today is quiet,
+  // which IS a measurement and keeps the old wording.
+  const w = ws()
+  run(w, ['call', '--kind', 'requirement-filed', '--summary', 'filed hub#199'])
+  const empty = run(w, ['render', '--day', '2001-01-01'])
+  assert.equal(empty.status, 0)
+  assert.match(empty.stdout, /no closeouts recorded/i)
+  assert.doesNotMatch(empty.stdout, /NO RECORD/)
 })
 
 test('audit: the verdict is the first line, and a clean record exits 0', () => {
@@ -138,11 +153,15 @@ test('the sweep renders the delivery section it is handed, under its own heading
   assert.match(out, /W0007/)
 })
 
-test('the sweep is unharmed when there is no delivery record at all', () => {
+test('the sweep is unharmed when there is no delivery record at all, and says so', () => {
   const out = renderState({
     snapshot: {}, events: [],
     meta: { sweptAt: '2026-08-16 09:00', cadenceMin: 5, repoCount: 7, ok: true },
   })
   assert.match(out, /navigator-state/)
-  assert.doesNotMatch(out, /## Delivery/)
+  // The section used to disappear, which reads as a day with no verdicts rather
+  // than a sweep that read no record (jwildfire/obot.roadmap#223).
+  assert.match(out, /## Delivery/)
+  assert.match(out, /NO READING/)
+  assert.match(out, /not a finding that nobody delivered/)
 })

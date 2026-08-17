@@ -56,6 +56,25 @@ const daysAgo = (at, now) => (at ? (now.getTime() - Date.parse(at)) / 86400000 :
 const inWindow = (at, now) => daysAgo(at, now) <= WINDOW_DAYS
 
 /**
+ * The label that settles an orphan.
+ *
+ * @jwildfire, 2026-08-17: "i'm fine if some orphans stay orphaned, but fix the ones
+ * we can. Let's tag true orphans with a label." The backfill (hub#233) attached the
+ * 51 items that could honestly be attached and labelled the 146 that could not — most
+ * of them because they predate the requirement they would have hung from, and a parent
+ * that is chronologically impossible is a fiction rather than a fix.
+ *
+ * A labelled item is a settled state, not a pending task, so it stops being a finding.
+ * It does not stop being counted: the section prints how many were excluded, for the
+ * same reason the window prints what it dropped. An exclusion nobody can see is
+ * indistinguishable from a check that found nothing.
+ */
+export const ACCEPTED_LABEL = 'orphan-accepted'
+
+const accepted = (i) => (i.labels ?? []).includes(ACCEPTED_LABEL)
+const shipped = (i) => (i.kind === 'pr' ? i.state === 'MERGED' : i.state === 'CLOSED')
+
+/**
  * Work that shipped with nothing in the plan above it.
  *
  * `items` are issues and pull requests already fetched, each carrying the structural
@@ -63,8 +82,9 @@ const inWindow = (at, now) => daysAgo(at, now) <= WINDOW_DAYS
  */
 export function orphanedWork(items = [], now = new Date()) {
   return items
-    .filter((i) => (i.kind === 'pr' ? i.state === 'MERGED' : i.state === 'CLOSED'))
+    .filter(shipped)
     .filter((i) => !i.parent)
+    .filter((i) => !accepted(i))
     .filter((i) => inWindow(i.closedAt, now))
     .map((i) => ({
       kind: 'orphan',
@@ -76,9 +96,15 @@ export function orphanedWork(items = [], now = new Date()) {
 
 /** How many the window dropped, so the count can be reported rather than hidden. */
 export function orphansOutsideWindow(items = [], now = new Date()) {
-  return items.filter((i) => (i.kind === 'pr' ? i.state === 'MERGED' : i.state === 'CLOSED'))
+  return items.filter(shipped)
     .filter((i) => !i.parent)
+    .filter((i) => !accepted(i))
     .filter((i) => !inWindow(i.closedAt, now)).length
+}
+
+/** How many the label settled, so the exclusion is reported rather than hidden. */
+export function orphansAccepted(items = []) {
+  return items.filter(shipped).filter((i) => !i.parent).filter(accepted).length
 }
 
 /**
@@ -148,13 +174,32 @@ export function checksSection(found = {}, now = new Date()) {
   const registry = found.registry ?? []
   const closeouts = found.closeouts ?? []
   const total = orphans.length + registry.length + closeouts.length
+  // Nothing read means nothing found, and nothing found is not clean. On a machine
+  // where every `gh` call fails and there is no hub clone, all three lists are empty
+  // because no source could be opened, and the headline read "roadmap discipline:
+  // clean" — two lines above its own "an absent audit reads as a clean one"
+  // (jwildfire/obot.roadmap#223). Callers summarise by the first line, so the
+  // headline is the only part that has to carry this.
+  const unread = found.errors?.length ?? 0
   const lines = ['## Roadmap discipline', '']
-  lines.push(total === 0
-    ? `roadmap discipline: clean — no findings across the project repos, last ${WINDOW_DAYS} days`
-    : `roadmap discipline: **${total} finding${total === 1 ? '' : 's'}** across the project repos, last ${WINDOW_DAYS} days`)
+  lines.push(total > 0
+    ? `roadmap discipline: **${total} finding${total === 1 ? '' : 's'}** across the project repos, last ${WINDOW_DAYS} days`
+    : unread
+      ? `roadmap discipline: **NOT CHECKED** — ${unread} source${unread === 1 ? '' : 's'} could not be read this sweep (below). No finding here means no reading, not a clean roadmap.`
+      : `roadmap discipline: clean — no findings across the project repos, last ${WINDOW_DAYS} days`)
   if (found.audit) lines.push(`  ${found.audit.ok ? found.audit.summary : `**${found.audit.summary}**`}`)
+  // The deployed hub's own account of itself (hub#224). Its summary already carries
+  // its own bold ALL-CAPS headline in the alarm form, so it is printed as written
+  // rather than wrapped — double-bolding would break the dashboard's alarm match.
+  if (found.site) lines.push(`  ${found.site.summary}`)
   if (found.orphansOutsideWindow) {
     lines.push(`  bounded: ${found.orphansOutsideWindow} older than ${WINDOW_DAYS} days not shown — widen the window to work through the backlog`)
+  }
+  // The exclusion is printed, not assumed. The label removes these from the findings
+  // by design (hub#233); a reader who cannot see how many were removed cannot tell a
+  // clean check from a muted one.
+  if (found.orphansAccepted) {
+    lines.push(`  accepted: ${found.orphansAccepted} labelled ${ACCEPTED_LABEL} and not counted — settled history, not pending work (hub#233)`)
   }
   if (found.errors?.length) {
     for (const e of found.errors) lines.push(`  unread: ${e}`)
@@ -217,6 +262,66 @@ export function auditFreshness(findings, now = new Date()) {
   }
 }
 
+/**
+ * What the deployed hub says about itself — relayed, not recomputed.
+ *
+ * @jwildfire asked for a version number in the hub header with a hover saying when the
+ * page launched (hub#224). The build stamps that, and the same computation answers a
+ * question this sweep should be watching: has the changelog fallen behind what the site
+ * actually ships? On 2026-08-16 it had. The roadmap rebuild (#211, D0018) deployed with
+ * no changelog entry, so the header's badge read a version dated 05:20Z on a page built
+ * at 22:15Z and told anyone who looked that the site was seventeen hours older than it
+ * was — confidently, in public, for a day.
+ *
+ * THE VERDICT IS THE BUILD'S, NOT OURS. This reads `version.json` off the deployed site
+ * and relays the answer the header is showing. It would be easy to recompute it here
+ * from the local hub clone, and it would be wrong: that clone is not the deployed tree
+ * and was measured five commits behind the deployed commit while this was written. Two
+ * surfaces answering one question is the defect that forced classify.mjs into its own
+ * module; across a repo boundary the only honest fix is for one side to publish and the
+ * other to quote.
+ *
+ * ABSENCE IS NOT AGREEMENT. An unreadable stamp is a finding, not silence. Until the
+ * hub side deploys this will 404 on every sweep, and that reads correctly: nothing can
+ * currently tell whether the header's version matches the build it is on.
+ *
+ * The headlines are ALL-CAPS and carry FINDING or GAP because that is what the
+ * dashboard's alarm styling matches (ops-dashboard/lib/navigator.mjs ALARM_RE, case
+ * sensitive). A carefully worded warning that renders as ordinary grey text is a
+ * warning nobody sees.
+ */
+export const BUILD_STALE_HOURS = 48
+
+export function siteVersionFreshness(stamp, now = new Date()) {
+  if (!stamp || !stamp.builtAt) {
+    return {
+      ok: false,
+      summary: "hub build stamp: **DEPLOY STAMP FINDING** — the deployed site publishes no readable version.json, so nothing can say whether the header's version matches the build it is on",
+    }
+  }
+  const hours = (now.getTime() - Date.parse(stamp.builtAt)) / 3600000
+  const age = Number.isFinite(hours)
+    ? (hours < 1 ? `${Math.round(hours * 60)}m` : hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`)
+    : 'an unknown time'
+  const who = `v${stamp.version ?? '?'} built ${stamp.builtAt} (${age} ago) on ${stamp.short ?? 'an unknown commit'}`
+
+  // The site redeploys on a daily cron, so a build this old means the deploy itself has
+  // stopped running — a different failure from changelog drift, and worth its own line.
+  if (Number.isFinite(hours) && hours > BUILD_STALE_HOURS) {
+    return { ok: false, summary: `hub build stamp: **DEPLOY GAP FINDING** — ${who}; the site redeploys daily, so a build this old means the deploy has stopped running` }
+  }
+  if (stamp.drift?.unknown) {
+    return { ok: false, summary: `hub build stamp: **CHANGELOG DRIFT FINDING** — ${who}; the drift check could not run, and an unanswered question is not a clean one (${stamp.drift.summary ?? 'no reason given'})` }
+  }
+  if (stamp.drift && stamp.drift.ok === false) {
+    return { ok: false, summary: `hub build stamp: **CHANGELOG DRIFT FINDING** — ${who}; ${stamp.drift.summary}` }
+  }
+  // Even the healthy line carries the numbers, for the reason auditFreshness gives
+  // above: a check that speaks only when something is late teaches nobody what current
+  // looks like, and the 2026-08-16 misreading happened inside every sane threshold.
+  return { ok: true, summary: `hub build stamp: ${who}; the changelog is current with it` }
+}
+
 /** The index rows, read from the decisions README the site publishes from. */
 export function parseIndexRows(markdown = '') {
   const rows = []
@@ -250,10 +355,11 @@ query($owner:String!, $name:String!) {
       nodes { number milestone { title } labels(first:10) { nodes { name } } }
     }
     issues(states:CLOSED, first:50, orderBy:{field:UPDATED_AT, direction:DESC}) {
-      nodes { number title closedAt parent { number } }
+      nodes { number title closedAt parent { number } labels(first:20) { nodes { name } } }
     }
     pullRequests(states:MERGED, first:50, orderBy:{field:UPDATED_AT, direction:DESC}) {
-      nodes { number title mergedAt closingIssuesReferences(first:5) { nodes { number } } }
+      nodes { number title mergedAt closingIssuesReferences(first:5) { nodes { number } }
+              labels(first:20) { nodes { name } } }
     }
   }
 }`
@@ -269,14 +375,16 @@ query($owner:String!, $name:String!) {
 export function shapeRepo(repo, data) {
   const r = data?.repository
   if (!r) return []
+  const names = (n) => (n?.nodes ?? []).map((l) => l.name)
   const issues = (r.issues?.nodes ?? []).map((i) => ({
     repo, number: i.number, kind: 'issue', state: 'CLOSED',
     closedAt: i.closedAt, parent: i.parent ?? null, title: i.title,
+    labels: names(i.labels),
   }))
   const prs = (r.pullRequests?.nodes ?? []).map((p) => ({
     repo, number: p.number, kind: 'pr', state: 'MERGED', closedAt: p.mergedAt,
     parent: (p.closingIssuesReferences?.nodes ?? []).length ? { via: 'closes' } : null,
-    title: p.title,
+    title: p.title, labels: names(p.labels),
   }))
   return [...issues, ...prs]
 }

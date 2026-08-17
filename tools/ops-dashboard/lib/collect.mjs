@@ -17,7 +17,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-import { readCache, writeCache } from './store.mjs';
+import { readCache, writeCache, opsDir } from './store.mjs';
 import { parseIQ, iqComplete } from './iq.mjs';
 import { fingerprint, applyTriage } from './triage.mjs';
 import { rankQueue } from './rank.mjs';
@@ -361,6 +361,15 @@ export function parseRCBody(body) {
 export const RC_CACHE = 'rcs-lane';
 export const RC_CACHE_V = 2;
 
+// Where a failed sweep leaves its reason. Separate from the queue cache on purpose:
+// a sweep that fails must not erase the last one that worked, and a queue that is
+// six hours old is still worth reading as long as the page says so. Until
+// jwildfire/obot.roadmap#223 the failure was thrown away entirely — the sweep printed
+// "gh search failed — is 'gh' authenticated?" and the page answered with an ellipsis
+// that never resolved, because "refreshing" and "has never succeeded" were the same
+// state on disk: nothing.
+export const RC_FAIL = 'rcs-lane-failed';
+
 /**
  * Release candidates, from the sweep `reviews-queue` already does.
  *
@@ -375,6 +384,9 @@ export const RC_CACHE_V = 2;
  */
 export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
   const raw = readCache(workspace, RC_CACHE, maxAgeMin);
+  // A failure record outlives its cache window: the question it answers is "has a
+  // sweep ever worked here", and that does not go stale after twenty minutes.
+  const failed = readCache(workspace, RC_FAIL, Infinity)?.value ?? null;
   // A pre-v2 cache is an array of items; a current one is `{v, items, standard}`.
   const shaped = raw && !Array.isArray(raw.value) && raw.value?.v === RC_CACHE_V ? raw : null;
   const cached = shaped ?? (raw ? { ...raw, stale: true } : null);
@@ -389,9 +401,18 @@ export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
   }));
   const items = label(shaped?.value?.items);
   const standard = shaped?.value?.standard ?? [];
-  if (shaped && !shaped.stale) return { items, standard, ageMin: shaped.ageMin, refreshing: false };
+  if (shaped && !shaped.stale) return { items, standard, ageMin: shaped.ageMin, refreshing: false, read: true };
   if (agent) refreshRCs(workspace, agent);
-  return { items, standard, ageMin: cached?.ageMin ?? null, refreshing: true };
+  // Never swept AND the last attempt failed: there is nothing to show and nothing
+  // in flight, so the page must say so rather than promise a sweep. A cache that
+  // exists but is stale still counts as read — its rows are real, just old.
+  const error = !cached
+    ? (failed?.reason ?? (agent ? null : 'no sweep script at obot.agent/scripts/reviews-queue'))
+    : null;
+  return {
+    items, standard, ageMin: cached?.ageMin ?? null,
+    refreshing: !error, read: !!cached, error,
+  };
 }
 
 /**
@@ -430,10 +451,20 @@ export function refreshRCs(workspace, script) {
   // reason to show him a wrong queue, so the whole refresh is abandoned rather than
   // falling back to the bucket-only test this change exists to retire.
   let releases;
-  try { releases = releaseBranchesByRepo(readPolicy()); } catch { refreshing = false; return; }
-  execFile(script, ['--json'], { timeout: 60000, maxBuffer: 4 << 20 }, (err, stdout) => {
+  try { releases = releaseBranchesByRepo(readPolicy()); } catch (e) {
     refreshing = false;
-    if (err) return;
+    recordSweepFailure(workspace, `the merge policy file could not be read (${e.message})`);
+    return;
+  }
+  execFile(script, ['--json'], { timeout: 60000, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
+    refreshing = false;
+    if (err) {
+      // The sweep already prints the sentence the reader needs. Keeping it is the
+      // whole difference between "Sweeping GitHub…" and "gh is not authenticated".
+      const said = String(stderr || err.message || '').split('\n').map((l) => l.trim()).filter(Boolean).at(-1);
+      recordSweepFailure(workspace, said || 'the sweep exited without saying why');
+      return;
+    }
     const items = [];
     const standard = [];
     for (const line of String(stdout).split('\n')) {
@@ -479,7 +510,18 @@ export function refreshRCs(workspace, script) {
       } catch { /* a non-JSON line is the human table; skip it */ }
     }
     writeCache(workspace, RC_CACHE, { v: RC_CACHE_V, items, standard });
+    clearSweepFailure(workspace);
   });
+}
+
+/** Remember why the last sweep did not produce a queue. */
+export function recordSweepFailure(workspace, reason) {
+  try { writeCache(workspace, RC_FAIL, { reason: String(reason).slice(0, 300) }); } catch { /* a store we cannot write is not worth failing a render over */ }
+}
+
+/** Forget it, once one has worked. */
+export function clearSweepFailure(workspace) {
+  try { fs.rmSync(path.join(opsDir(workspace), 'cache', `${RC_FAIL}.json`), { force: true }); } catch { /* nothing to forget */ }
 }
 
 /**

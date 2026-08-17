@@ -84,7 +84,7 @@ issues "appear".
 |---|---|---|
 | Base | integration branch (`dev`, or `main` where there is no `dev`) | release branch (`main`; obot.agent's `stable`; demo-301's `site`) |
 | Reviewer | none — never assign or request @jwildfire | @jwildfire, always |
-| Merge lane | standard — `obot-merge <pr> -R <repo>` | attested — `obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'` |
+| Merge lane | standard — `obot.agent/scripts/obot-merge <pr> -R <repo>` | attested — `obot.agent/scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'` |
 | Body | short: what changed, why, evidence link | the full five sections below |
 | Demo | not required | **required** |
 
@@ -186,7 +186,7 @@ release at its last step over a string.
    {One sentence: what this release lets someone do that they could not do before.}
 
    <!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
-        attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'.
+        attested lane: scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'.
         Agent-facing note — it is a comment because he does not need to be told a
         rule about himself. See obot.agent docs/rc-framework.md. -->
 

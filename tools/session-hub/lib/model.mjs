@@ -172,7 +172,10 @@ export function buildModel({ collected, workspace, date, mode, generatedAtIso, t
 
   const overview = scratchpad?.data?.overview ?? null;
   linkAgentsToPriorities(agents, overview);
-  const priorities = { open: 0, done: 0 };
+  // Null, not two zeros. With no scratchpad the loop below never runs and the seeded
+  // zeros used to survive into the tile, asserting that session-init had produced an
+  // empty kickoff list (jwildfire/obot.roadmap#223).
+  const priorities = overview ? { open: 0, done: 0 } : null;
   for (const g of overview?.groups ?? []) {
     for (const it of g.items) {
       if (it.checked === true) priorities.done++;
@@ -181,6 +184,20 @@ export function buildModel({ collected, workspace, date, mode, generatedAtIso, t
   }
   const activity = ghSweep?.data?.items?.filter((i) => i.updatedAt >= boundary.startIso) ?? null;
   const accomplishments = buildAccomplishments(ghSweep, boundary);
+
+  // Whether the sources behind the agent and token tiles were opened at all. A
+  // collector that returned a notice read nothing, and a count over nothing is not
+  // zero — it is unmeasured (jwildfire/obot.roadmap#223).
+  //
+  // The job records are the half that decides it. `claude agents` lists interactive
+  // sessions and is a real reading, but it cannot see a background agent, and every
+  // token count comes from a `state.json`. So a page that says "2" because the
+  // session index answered while `~/.claude/jobs` was never opened is not reporting
+  // a partial count — it is reporting an unknown one with two of the digits filled
+  // in. The CLI's own absence is reported separately, as a caveat rather than a gap.
+  const jobsRead = jobs?.read ?? !jobs?.notice;
+  const cliRead = agentsCli?.read ?? !agentsCli?.notice;
+  const agentsRead = jobsRead;
 
   const byState = {};
   let tokens = 0;
@@ -207,8 +224,8 @@ export function buildModel({ collected, workspace, date, mode, generatedAtIso, t
     chat: mode === 'live' && chat ? chat : null,
     tiles: {
       priorities,
-      agents: { total: agents.length, byState },
-      tokens: { total: tokens, reporting: tokensKnown },
+      agents: { total: agentsRead ? agents.length : null, byState, read: agentsRead, cliRead },
+      tokens: { total: agentsRead ? tokens : null, reporting: tokensKnown, read: agentsRead },
       activity: activity ? activity.length : null,
       closure: accomplishments
         ? accomplishments.closedIssues.length + accomplishments.mergedPrs.length + accomplishments.releases.length

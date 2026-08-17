@@ -96,7 +96,7 @@ comment placed directly *below* the sentence:
 {One sentence: what this release lets someone do that they could not do before.}
 
 <!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
-     attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
+     attested lane: scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
 ```
 
 GitHub hides the comment wherever it sits; the dashboard's summary rule does not, and it
