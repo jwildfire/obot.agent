@@ -384,6 +384,10 @@ function runChecks(repos, jobs = []) {
  * lane broke. Delivery is last and cannot change what the section says.
  */
 function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
+  // `null` means the job ledger is not on this machine; every detector below reads
+  // it, so the section has to say that rather than report a clear channel.
+  const jobsRead = jobs !== null
+  jobs = jobs ?? []
   const now = new Date()
   const away = hostWasAway(prevSweptIso, now)
   const judged = judgedWorkers(safeRead(DELIVERY_JOURNAL))
@@ -406,6 +410,7 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
       held,
       listener,
       outside: outsideWindow(jobs, { now, judged }),
+      jobsRead,
       awayNote: away
         ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
         : null,
@@ -487,7 +492,7 @@ const safeJobs = () => {
 // A broken wake must not break the sweep, and must not fail quietly either: the
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
-  try { return runWake(jobs ?? [], opts) } catch (e) {
+  try { return runWake(jobs, opts) } catch (e) {
     return { delivered: [], note: `wake broken: ${String(e.message).slice(0, 80)}`,
              section: `## Wake — workers that stopped\n\n**WAKE CHECK BROKEN** — ${String(e.message).slice(0, 160)}. No worker stop-state was read this run; this is not a quiet fleet.\n` }
   }

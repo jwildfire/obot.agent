@@ -423,11 +423,17 @@ export function hostWasAway(prevSweptIso, now = new Date()) {
  * the third time (verdict swallowed, detail kept), and the one alarm here that must
  * never be quiet is the one saying the alarms are not being delivered.
  */
-export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0 } = {}) {
+export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true } = {}) {
   const lines = ['## Wake — workers that stopped', '']
-  lines.push(pending.length
-    ? `wake: **${pending.length} unresolved stop-state${pending.length === 1 ? '' : 's'}** — ${delivered.length} delivered this sweep`
-    : 'wake: clear — every worker that stopped has been judged, and no worker is stalled or waiting')
+  // Every detector here reads `~/.claude/jobs`. With no ledger on the machine the
+  // pending list is empty because nothing was looked at, and "clear — every worker
+  // that stopped has been judged" is the strongest possible claim built on the
+  // weakest possible evidence (jwildfire/obot.roadmap#223).
+  lines.push(!jobsRead
+    ? 'wake: **NO READING** — there is no job ledger on this machine, so no worker\'s stop-state has been looked at. This is not a clear channel; it is an unwatched one.'
+    : pending.length
+      ? `wake: **${pending.length} unresolved stop-state${pending.length === 1 ? '' : 's'}** — ${delivered.length} delivered this sweep`
+      : 'wake: clear — every worker that stopped has been judged, and no worker is stalled or waiting')
   if (listener) lines.push(listener.summary)
   if (awayNote) lines.push(awayNote)
   if (outside) lines.push(`bounded: ${outside} unjudged closeout(s) older than ${WAKE_WINDOW_HOURS}h are not woken for — judge them from the delivery record, not from here`)
