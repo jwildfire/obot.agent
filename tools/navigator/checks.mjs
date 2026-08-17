@@ -153,6 +153,10 @@ export function checksSection(found = {}, now = new Date()) {
     ? `roadmap discipline: clean — no findings across the project repos, last ${WINDOW_DAYS} days`
     : `roadmap discipline: **${total} finding${total === 1 ? '' : 's'}** across the project repos, last ${WINDOW_DAYS} days`)
   if (found.audit) lines.push(`  ${found.audit.ok ? found.audit.summary : `**${found.audit.summary}**`}`)
+  // The deployed hub's own account of itself (hub#224). Its summary already carries
+  // its own bold ALL-CAPS headline in the alarm form, so it is printed as written
+  // rather than wrapped — double-bolding would break the dashboard's alarm match.
+  if (found.site) lines.push(`  ${found.site.summary}`)
   if (found.orphansOutsideWindow) {
     lines.push(`  bounded: ${found.orphansOutsideWindow} older than ${WINDOW_DAYS} days not shown — widen the window to work through the backlog`)
   }
@@ -215,6 +219,66 @@ export function auditFreshness(findings, now = new Date()) {
     ok: true,
     summary: `nightly audit: last run ${age} ago at ${findings.generatedAt} — ${total} finding(s); anything filed since then is invisible to it`,
   }
+}
+
+/**
+ * What the deployed hub says about itself — relayed, not recomputed.
+ *
+ * @jwildfire asked for a version number in the hub header with a hover saying when the
+ * page launched (hub#224). The build stamps that, and the same computation answers a
+ * question this sweep should be watching: has the changelog fallen behind what the site
+ * actually ships? On 2026-08-16 it had. The roadmap rebuild (#211, D0018) deployed with
+ * no changelog entry, so the header's badge read a version dated 05:20Z on a page built
+ * at 22:15Z and told anyone who looked that the site was seventeen hours older than it
+ * was — confidently, in public, for a day.
+ *
+ * THE VERDICT IS THE BUILD'S, NOT OURS. This reads `version.json` off the deployed site
+ * and relays the answer the header is showing. It would be easy to recompute it here
+ * from the local hub clone, and it would be wrong: that clone is not the deployed tree
+ * and was measured five commits behind the deployed commit while this was written. Two
+ * surfaces answering one question is the defect that forced classify.mjs into its own
+ * module; across a repo boundary the only honest fix is for one side to publish and the
+ * other to quote.
+ *
+ * ABSENCE IS NOT AGREEMENT. An unreadable stamp is a finding, not silence. Until the
+ * hub side deploys this will 404 on every sweep, and that reads correctly: nothing can
+ * currently tell whether the header's version matches the build it is on.
+ *
+ * The headlines are ALL-CAPS and carry FINDING or GAP because that is what the
+ * dashboard's alarm styling matches (ops-dashboard/lib/navigator.mjs ALARM_RE, case
+ * sensitive). A carefully worded warning that renders as ordinary grey text is a
+ * warning nobody sees.
+ */
+export const BUILD_STALE_HOURS = 48
+
+export function siteVersionFreshness(stamp, now = new Date()) {
+  if (!stamp || !stamp.builtAt) {
+    return {
+      ok: false,
+      summary: "hub build stamp: **DEPLOY STAMP FINDING** — the deployed site publishes no readable version.json, so nothing can say whether the header's version matches the build it is on",
+    }
+  }
+  const hours = (now.getTime() - Date.parse(stamp.builtAt)) / 3600000
+  const age = Number.isFinite(hours)
+    ? (hours < 1 ? `${Math.round(hours * 60)}m` : hours < 48 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`)
+    : 'an unknown time'
+  const who = `v${stamp.version ?? '?'} built ${stamp.builtAt} (${age} ago) on ${stamp.short ?? 'an unknown commit'}`
+
+  // The site redeploys on a daily cron, so a build this old means the deploy itself has
+  // stopped running — a different failure from changelog drift, and worth its own line.
+  if (Number.isFinite(hours) && hours > BUILD_STALE_HOURS) {
+    return { ok: false, summary: `hub build stamp: **DEPLOY GAP FINDING** — ${who}; the site redeploys daily, so a build this old means the deploy has stopped running` }
+  }
+  if (stamp.drift?.unknown) {
+    return { ok: false, summary: `hub build stamp: **CHANGELOG DRIFT FINDING** — ${who}; the drift check could not run, and an unanswered question is not a clean one (${stamp.drift.summary ?? 'no reason given'})` }
+  }
+  if (stamp.drift && stamp.drift.ok === false) {
+    return { ok: false, summary: `hub build stamp: **CHANGELOG DRIFT FINDING** — ${who}; ${stamp.drift.summary}` }
+  }
+  // Even the healthy line carries the numbers, for the reason auditFreshness gives
+  // above: a check that speaks only when something is late teaches nobody what current
+  // looks like, and the 2026-08-16 misreading happened inside every sane threshold.
+  return { ok: true, summary: `hub build stamp: ${who}; the changelog is current with it` }
 }
 
 /** The index rows, read from the decisions README the site publishes from. */
