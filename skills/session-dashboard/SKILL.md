@@ -16,7 +16,10 @@ the ops db and orginal ops hub to be merged. just make them 2 different tabs on 
 [ops-dashboard](../../tools/ops-dashboard/README.md) server owns the port and serves this
 view at `/live.html`; the watch loop below only renders `live.html` to disk — it runs
 **without** `--serve`, because two servers writing `.claude/session-hub/serve.json` is
-the one way to leave the status-line link pointing at the wrong one.
+the one way to leave the status-line link pointing at the wrong one. Since
+[obot.agent#142](https://github.com/jwildfire/obot.agent/issues/142) a second instance
+declines the marker rather than taking it, so testing a change is safe — but the loop
+still has no reason to serve.
 
 ## Procedure
 
@@ -40,9 +43,14 @@ node obot.agent/tools/session-hub/session-hub.mjs --workspace ~/Documents/obot2 
   { nohup node obot.agent/tools/ops-dashboard/ops-dashboard.mjs --serve --workspace ~/Documents/obot2 \
       >> ~/Documents/obot2/.claude/ops/serve.log 2>&1 & }) && \
 sleep 1 && pgrep -f "session-hub.mjs --watch" && \
-open -a "Google Chrome" "$(python3 -c 'import json;print(json.load(open("/Users/jwildfire/Documents/obot2/.claude/session-hub/serve.json"))["url"])' \
+open -a "Google Chrome" "$(node obot.agent/tools/serve-marker --url \
   2>/dev/null || echo "file:///Users/jwildfire/Documents/obot2/.claude/session-hub/live.html")"
 ```
+
+`serve-marker --url` answers only when the marker's server is **still running**, and
+exits non-zero otherwise, so the fallback fires on a stale marker as well as a missing
+one. Reading `serve.json` directly cannot tell those apart — that is how the status line
+ended up pointing at a killed server ([obot.agent#142](https://github.com/jwildfire/obot.agent/issues/142)).
 
 (macOS; a new `open` invocation makes a new tab — Chrome's tab search finds an
 existing one by the "Session hub" title.)

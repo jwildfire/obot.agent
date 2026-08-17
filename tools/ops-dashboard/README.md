@@ -294,8 +294,27 @@ watch loop should now run **without** `--serve`:
 node obot.agent/tools/session-hub/session-hub.mjs --watch   # renders live.html; no server
 ```
 
-Two servers both writing that marker is the one way to confuse the status line, and the
-loop no longer needs to serve anything.
+### A second instance cannot take the marker
+
+Two servers both writing that marker was the one way to confuse the status line, and it
+happened five times on 2026-08-16 — every time an agent running a test server while
+changing this dashboard, which is exactly what it should be doing
+([#142](https://github.com/jwildfire/obot.agent/issues/142)). So the marker is now a claim
+that a second instance declines, rather than one it takes:
+
+```bash
+node obot.agent/tools/ops-dashboard/ops-dashboard.mjs --serve --port 7399
+# ops-dashboard: not claiming the serve marker — an explicit --port (7399) names a
+#                test server, not the machine dashboard
+# ops-dashboard: http://127.0.0.1:7399/
+```
+
+Test freely: a non-default `--port` serves the whole site and touches nothing the status
+line reads. The rules, and why each one removes a failure rather than detecting it, are in
+[`lib/serve-marker.mjs`](lib/serve-marker.mjs). Ask [`tools/serve-marker`](../serve-marker)
+what the marker says — it answers `none` / `unreadable` / `stale` / `live`, and hands back
+a URL only for `live`, because a marker left behind by a killed server looks exactly like
+a healthy one.
 
 ## The Navigator tab
 
