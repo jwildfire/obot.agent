@@ -47,6 +47,7 @@ Failing loudly, everywhere it can fail:
 - The pending list is the first section of `navigator-state.md`, which is read #1 on the Navigator's cold start — a missed wake degrades to exactly today's behaviour.
 - Every bound reports itself: the 24-hour window, the three-per-run cap, and a backlog count that says "at least" when its page filled.
 - A sweep gap longer than fifteen minutes means the host was away rather than the fleet stalled, and elapsed-time detections are suppressed for that run with the reason printed. That misreading is what produced the first amendment to #212.
+- The one case it cannot cover, recorded in the requirement rather than in a comment: if the Navigator session is not running at all, there is nothing to wake and the only reader of `WAKE CHANNEL DOWN` is the role that is absent. Escalating an absent officer to @jwildfire is what #212 forbids, so it is a known limit rather than something closed with a notification.
 
 Suppression is a comparison rather than new state: the delivery journal says which closeouts are judged, and the append-only wake log's own last entry per key is the re-wake floor. Nothing new is stored.
 
