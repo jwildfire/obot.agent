@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# wake-listen — the Navigator's ears (jwildfire/obot.roadmap#212).
+#
+# Run this from the Navigator session as a persistent Monitor:
+#
+#   Monitor(command: "bash obot.agent/tools/navigator/wake-listen",
+#           description: "worker stop-states", persistent: true)
+#
+# Every line it prints becomes one notification inside that session, and a
+# notification reaches a session that is sitting idle between turns. That is the
+# whole mechanism, and it is the only one available: there is no supported way to
+# prompt a running session from outside it — no `claude send`, no local API — so the
+# wake has to be something the session itself is already listening to. The five
+# minute sweep appends to the log; this tails it; the session wakes and judges.
+#
+# MEASURED, NOT ASSUMED (2026-08-17, probe session ea8238da). A background session
+# was left genuinely idle — tempo `idle`, last activity 2m28s earlier — and a line
+# appended to the watched file reached it four seconds later. The same probe also
+# confirmed a cross-session message wakes a `blocked` session, which is the lane
+# obot-prime hit by accident on 2026-08-16 and the reason anyone noticed W0006 at all.
+#
+# WHY IT HEARTBEATS. A Monitor dies with its session, so this lane can be silently
+# absent — which is the one failure mode #212 forbids, because a wake log nobody
+# tails looks exactly like a fleet with nothing wrong. The beat file's mtime is what
+# the sweep reads to say `wake channel: armed` or `WAKE CHANNEL DOWN` next to the
+# pending list. Missing the wake then degrades to today's behaviour — the Navigator
+# reads the pending list at cold start — and never to a claim that everything is
+# judged.
+#
+# NOTHING HERE REACHES @jwildfire. It prints to the Navigator's own event stream and
+# writes one mtime. There is no notification path out of this script.
+set -uo pipefail
+
+WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+LOG="${OBOT_WAKE_LOG:-$WS/.claude/session-hub/navigator-wake.log}"
+BEAT="${OBOT_WAKE_BEAT:-$WS/.claude/session-hub/cache/navigator-wake.listener}"
+BEAT_SECONDS="${OBOT_WAKE_BEAT_SECONDS:-20}"
+
+mkdir -p "$(dirname "$LOG")" "$(dirname "$BEAT")"
+[ -f "$LOG" ] || : > "$LOG"
+
+# One beat before anything else, so the sweep sees an armed channel on its very next
+# run rather than up to twenty seconds later.
+date -u +%FT%TZ > "$BEAT"
+
+# -n0: start at the end. The pending list in navigator-state.md is what carries
+# history; replaying the log on every session start would deliver a burst of
+# notifications for things already judged.
+tail -n0 -F "$LOG" &
+TAIL=$!
+trap 'kill "$TAIL" 2>/dev/null' EXIT INT TERM
+
+echo "wake channel armed — tailing $LOG (heartbeat $BEAT, every ${BEAT_SECONDS}s)"
+
+while kill -0 "$TAIL" 2>/dev/null; do
+  date -u +%FT%TZ > "$BEAT"
+  sleep "$BEAT_SECONDS"
+done
+
+echo "wake channel CLOSED — the tail died; wakes are no longer being delivered"
