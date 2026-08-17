@@ -31,7 +31,7 @@
 // judges, corrects, or touches other agents' work. Nothing it writes is
 // published.
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync, readdirSync, writeFileSync, mkdirSync, statSync, appendFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, statSync, appendFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -44,6 +44,13 @@ import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWo
 // it differently. Re-exported so this module's callers and tests are unaffected.
 import { classifyRC, discoverRepos, POLICY_FILE } from './classify.mjs'
 import { refreshMetrics } from './metrics.mjs'
+// The wake (hub#212). The sweep already knew a worker had stopped; what it could not
+// do was get the Navigator's attention, so workers stopped and then waited — twenty
+// minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
+// wake.mjs; this file supplies the readings and appends the log the Navigator tails.
+import { hostWasAway, idleDetection, judgedWorkers, listenerState, outsideWindow,
+         deliverable, parseWakeLog, pending as pendingWakes, readJobs, readyBacklog,
+         wakeLine, wakeSection } from './wake.mjs'
 
 export { classifyRC, discoverRepos }
 
@@ -57,6 +64,12 @@ const SNAPSHOT = join(WS, '.claude/session-hub/cache/navigator-rc.json')
 // dashboard's Navigator tab, which never reaches the network at render time.
 const METRICS = join(WS, '.claude/session-hub/cache/metrics.json')
 const METRICS_TTL_MIN = 60
+// The wake channel (hub#212). Append-only: the sweep writes, the Navigator's Monitor
+// tails, and the last entry per key is its own debounce — no separate state file.
+const WAKE_LOG = join(WS, '.claude/session-hub/navigator-wake.log')
+const WAKE_BEAT = join(WS, '.claude/session-hub/cache/navigator-wake.listener')
+const JOBS_DIR = process.env.OBOT_JOBS_DIR || join(process.env.HOME, '.claude', 'jobs')
+const DELIVERY_JOURNAL = join(WS, '.claude/session-hub/delivery.journal')
 const LOG = join(WS, '.claude/session-hub/navigator-sweep.log')
 const SCRATCHPAD_LOG = join(REPO_ROOT, 'tools', 'scratchpad-log')
 // The hub clone, for joining an artifact slug to the decision id he quotes.
@@ -112,7 +125,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set()) {
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   const head = meta.ok
     ? `swept: ${meta.sweptAt} · cadence ${meta.cadenceMin}m · ok — ${meta.repoCount} repos, ${Object.keys(snapshot).length} RCs`
@@ -146,6 +159,12 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
     for (const d of workers.detail || []) lines.push(`  ${d}`)
     lines.push('')
   }
+  // The wake goes first — before the RC queue, before everything. The RC queue is
+  // @jwildfire's work; this is the Navigator's own, it is the section that says
+  // whether anything is reaching it at all, and on a cold start it is the answer to
+  // "what did I miss while I was not running".
+  if (wake && wake.trim()) lines.push(wake.trimEnd(), '')
+
   lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
     '',
@@ -243,17 +262,28 @@ const auditDelivery = () => shellAudit('delivery-log')
 // A repo that fails to read is named in the section rather than skipped silently. A
 // check that quietly covers six of seven repos and prints "clean" is worse than no
 // check, because the reader takes it as complete.
-function runChecks(repos) {
+function runChecks(repos, jobs = []) {
   const items = []
   const errors = []
+  // Ready work, for the idle detection: counted off the query that was already
+  // running rather than off a listing of its own (hub#212).
+  let backlog = 0
+  let backlogCapped = false
   for (const { repo } of repos) {
     const [owner, name] = repo.split('/')
     try {
       const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${ORPHAN_QUERY}`,
         '-F', `owner=${owner}`, '-F', `name=${name}`])).data
       items.push(...shapeRepo(repo, data))
+      const ready = readyBacklog(data)
+      backlog += ready.count
+      backlogCapped = backlogCapped || ready.capped
     } catch (e) {
       errors.push(`${repo}: ${String(e.message).slice(0, 90)}`)
+      // A repo that failed to read contributes no backlog, and saying the queue is
+      // smaller than it is would be the wrong direction to fail in — it turns the
+      // idle detection off. Named here so the count is never read as complete.
+      backlogCapped = true
     }
   }
 
@@ -272,7 +302,7 @@ function runChecks(repos) {
   // Agents that finished having produced nothing. Local job records, no API calls.
   let closeouts = []
   try {
-    closeouts = emptyCloseouts(readJobs(), new Date())
+    closeouts = emptyCloseouts(jobs, new Date())
   } catch (e) {
     errors.push(`jobs: ${String(e.message).slice(0, 90)}`)
   }
@@ -284,41 +314,61 @@ function runChecks(repos) {
   const audit = auditFreshness(readJson(join(HUB, 'site/audit/findings.json')), new Date())
 
   const now = new Date()
-  return checksSection({
-    audit,
-    orphans: orphanedWork(items, now),
-    orphansOutsideWindow: orphansOutsideWindow(items, now),
-    registry,
-    closeouts,
-    errors,
-  }, now)
+  return {
+    backlog,
+    backlogCapped,
+    section: checksSection({
+      audit,
+      orphans: orphanedWork(items, now),
+      orphansOutsideWindow: orphansOutsideWindow(items, now),
+      registry,
+      closeouts,
+      errors,
+    }, now),
+  }
 }
 
-// The harness's own job ledger. `firstTerminalAt` is the closeout watermark; the
-// state file alone is not proof a job finished well, so the timeline is read where
-// it exists and the state is the fallback.
-function readJobs() {
-  const dir = join(process.env.HOME, '.claude', 'jobs')
-  const out = []
-  let names = []
-  try { names = readdirSync(dir) } catch { return out }
-  for (const id of names) {
-    let state
-    try { state = JSON.parse(readFileSync(join(dir, id, 'state.json'), 'utf8')) } catch { continue }
-    let firstTerminalAt = state.firstTerminalAt || null
-    if (!firstTerminalAt && state.state === 'done') {
-      try {
-        const lines = readFileSync(join(dir, id, 'timeline.jsonl'), 'utf8').trim().split('\n')
-        for (const l of lines) {
-          const ev = JSON.parse(l)
-          if (['done', 'blocked', 'failed'].includes(ev.state || ev.type)) { firstTerminalAt = ev.at || ev.ts; break }
-        }
-      } catch { /* no timeline — the state file is what there is */ }
-    }
-    out.push({ id, name: state.name, state: state.state, firstTerminalAt, children: state.children || [] })
+/**
+ * The wake (hub#212): every worker that stopped, and one line each to the Navigator.
+ *
+ * Ordering is the whole safety property. The pending list is computed and rendered
+ * whether or not anything is delivered, and the channel's own state is rendered
+ * beside it, so the section can never read as a judged fleet because the delivery
+ * lane broke. Delivery is last and cannot change what the section says.
+ */
+function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
+  const now = new Date()
+  const away = hostWasAway(prevSweptIso, now)
+  const judged = judgedWorkers(safeRead(DELIVERY_JOURNAL))
+  const detections = pendingWakes(jobs, { now, judged, hostWasAway: away })
+  const idle = idleDetection(jobs, { now, backlog, backlogCapped, pendingCount: detections.length, hostWasAway: away })
+  const all = idle ? [...detections, idle] : detections
+
+  const listener = listenerState(WAKE_BEAT, now)
+  const { deliver, held } = deliverable(all, parseLog(), now)
+
+  for (const d of deliver) {
+    try { appendFileSync(WAKE_LOG, `${wakeLine(d, now.toISOString())}\n`) } catch { /* the section still carries it */ }
   }
-  return out
+
+  return {
+    delivered: deliver,
+    section: wakeSection({
+      pending: all,
+      delivered: deliver,
+      held,
+      listener,
+      outside: outsideWindow(jobs, { now, judged }),
+      awayNote: away
+        ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
+        : null,
+    }),
+    note: `${all.length} pending, ${deliver.length} delivered, channel ${listener.armed ? 'armed' : 'DOWN'}`,
+  }
 }
+
+const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
+const parseLog = () => parseWakeLog(safeRead(WAKE_LOG))
 
 // The worker ledger: is the W-id convention actually being applied? (#130)
 //
@@ -355,12 +405,23 @@ const safePending = () => { try { return pendingAnswers(WS, { hub: HUB }) } catc
 const safeLedger = () => { try { return auditLedger() } catch { return null } }
 const safeWorkers = () => { try { return auditWorkers() } catch { return null } }
 const safeDelivery = () => { try { return readDelivery() } catch { return null } }
-const safeChecks = (repos) => { try { return runChecks(repos) } catch { return null } }
+const safeChecks = (repos, jobs) => { try { return runChecks(repos, jobs) } catch { return null } }
+const safeJobs = () => { try { return readJobs(JOBS_DIR) } catch { return [] } }
+// A broken wake must not break the sweep, and must not fail quietly either: the
+// section says the channel is unreadable rather than saying nothing.
+const safeWake = (jobs, opts) => {
+  try { return runWake(jobs, opts) } catch (e) {
+    return { delivered: [], note: `wake broken: ${String(e.message).slice(0, 80)}`,
+             section: `## Wake — workers that stopped\n\n**WAKE CHECK BROKEN** — ${String(e.message).slice(0, 160)}. No worker stop-state was read this run; this is not a quiet fleet.\n` }
+  }
+}
 
 function main() {
   const sweptAt = nowStamp()
+  const sweptIso = new Date().toISOString()
   let prevWrap = { lastGoodAt: null, snapshot: {}, events: [] }
   try { prevWrap = JSON.parse(readFileSync(SNAPSHOT, 'utf8')) } catch { /* first run */ }
+  const jobs = safeJobs()
 
   let repos
   try {
@@ -370,8 +431,12 @@ function main() {
     // A sweep that cannot read the policy still reports his answers: they come
     // from the local store, and a failed RC sweep is no reason to imply there is
     // nothing waiting on an agent.
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([]) }))
-    log(`FAILED policy.json: ${e.message}`)
+    // The wake runs even here. It reads local job records and the delivery journal,
+    // neither of which needs the policy file, and a worker that stopped is exactly
+    // as unjudged when the RC sweep is broken.
+    const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section }))
+    log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
 
@@ -435,7 +500,14 @@ function main() {
   let delivery = null
   try { delivery = readDelivery() } catch (e) { errors.push(`delivery: ${String(e.message).slice(0, 120)}`) }
   let checks = null
-  try { checks = runChecks(repos) } catch (e) { errors.push(`checks: ${String(e.message).slice(0, 120)}`) }
+  let backlog = 0
+  let backlogCapped = true // until a run proves otherwise, the queue is a floor
+  try {
+    const c = runChecks(repos, jobs)
+    checks = c.section
+    backlog = c.backlog
+    backlogCapped = c.backlogCapped
+  } catch (e) { errors.push(`checks: ${String(e.message).slice(0, 120)}`) }
   // The gap check rides along with the record itself: a finding is prepended to
   // the section so it cannot be read as a quiet day.
   let deliveryAudit = null
@@ -460,14 +532,26 @@ function main() {
     metricsNote = `broken: ${String(e.message).slice(0, 80)}`
   }
 
+  // The wake, last of the readings and first in the file. It writes to the log the
+  // Navigator's Monitor tails; everything it found is in the section either way.
+  const wake = safeWake(jobs, { backlog, backlogCapped, prevSweptIso: prevWrap.sweptIso })
+
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks }))
-  writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, snapshot: next, events: allEvents }, null, 2))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section }))
+  // `sweptIso` is the host guard's only input: the gap between two sweeps is what
+  // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
+  // string cannot be differenced across a timezone or a date boundary.
+  writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, sweptIso, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · metrics: ${metricsNote}${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  // Delivered wakes reach the shared scratchpad too. The notification is the
+  // Navigator's; this line is everyone else's — the wrapup folds the scratchpad, so
+  // a wake that produced no verdict is visible the next morning rather than lost
+  // with the session that received it.
+  for (const d of wake.delivered) scratchpad(`WAKE ${d.kind} — ${d.line}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()

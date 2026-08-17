@@ -137,6 +137,14 @@ const minsSince = (at, now) => {
 
 const label = (job) => workerIdOf(job.name) || `job ${job.id}`
 
+// A cut sentence must look cut. These lines are notifications: the reader cannot
+// scroll them, so one ending mid-quote reads as a corrupted record rather than a
+// bounded one.
+const clip = (s, n) => {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim()
+  return t.length > n ? `${t.slice(0, n)}…` : t
+}
+
 /**
  * Every stop-state one job is in right now. A job can be in two at once and both are
  * real: W0007 had an unjudged closeout from 08:13 AND was stuck on a permission
@@ -171,7 +179,7 @@ export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
       job: job.id,
       worker: label(job),
       at: job.updatedAt,
-      line: `${label(job)} died — ${String(job.detail || job.needs || 'no detail').slice(0, 120)} · quiet ${quiet === null ? '?' : Math.round(quiet)}m · its own record understates what it wrote, so check GitHub for a branch or PR before writing it off`,
+      line: `${label(job)} died — ${clip(job.detail || job.needs || 'no detail', 120)} · quiet ${quiet === null ? '?' : Math.round(quiet)}m · its own record understates what it wrote, so check GitHub for a branch or PR before writing it off`,
     })
   } else if (!terminal && (job.state === 'blocked' || job.tempo === 'blocked') && job.needs &&
              quiet !== null && quiet >= (hostWasAway ? Infinity : WAITING_GRACE_MIN)) {
@@ -181,7 +189,7 @@ export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
       job: job.id,
       worker: label(job),
       at: job.updatedAt,
-      line: `${label(job)} has been waiting ${Math.round(quiet)}m and nobody has resolved it — needs: ${String(job.needs).slice(0, 120)}`,
+      line: `${label(job)} has been waiting ${Math.round(quiet)}m and nobody has resolved it — needs: ${clip(job.needs, 120)}`,
     })
   } else if (!terminal && job.tempo === 'active' && quiet !== null &&
              quiet >= (hostWasAway ? Infinity : STALL_MIN)) {
@@ -191,7 +199,7 @@ export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
       job: job.id,
       worker: label(job),
       at: job.updatedAt,
-      line: `${label(job)} reads working and has not moved for ${Math.round(quiet)}m — the usual gap between a worker's actions is about twenty seconds · last: ${String(job.detail ?? '').slice(0, 90)}`,
+      line: `${label(job)} reads working and has not moved for ${Math.round(quiet)}m — the usual gap between a worker's actions is about twenty seconds · last: ${clip(job.detail, 90)}`,
     })
   }
   return out
@@ -232,7 +240,7 @@ export function outsideWindow(jobs = [], { now = new Date(), judged = new Set() 
  * carrying a milestone, which under the milestone-before-work rule is exactly the
  * set that is allowed to be started.
  */
-export function idleDetection(jobs = [], { now = new Date(), backlog = 0, pendingCount = 0, hostWasAway = false } = {}) {
+export function idleDetection(jobs = [], { now = new Date(), backlog = 0, backlogCapped = false, pendingCount = 0, hostWasAway = false } = {}) {
   if (hostWasAway || backlog <= 0) return null
   const nav = jobs.find(isNavigator)
   if (!nav) return null
@@ -247,7 +255,7 @@ export function idleDetection(jobs = [], { now = new Date(), backlog = 0, pendin
     job: nav.id,
     worker: 'navigator',
     at: nav.updatedAt,
-    line: `you have been idle ${Math.round(navQuiet)}m with no worker running, ${backlog} milestoned issue(s) ready and ${pendingCount} unjudged stop-state(s) — a queue with items and nothing running is itself a detection`,
+    line: `you have been idle ${Math.round(navQuiet)}m with no worker running, ${backlogCapped ? 'at least ' : ''}${backlog} milestoned issue(s) ready and ${pendingCount} unjudged stop-state(s) — a queue with items and nothing running is itself a detection`,
   }
 }
 
@@ -299,10 +307,21 @@ export function deliverable(detections = [], log = [], now = new Date(), { max =
 // ---- reading the world ------------------------------------------------------
 
 /**
- * The harness's own job records, with the three fields the state name hides.
+ * The harness's own job records — the one reader, for every check that asks.
  *
- * `tempo` separates waiting from stalled, `needs` says what it is waiting for, and
- * `updatedAt` is the only liveness clock there is.
+ * It moved here from `sweep.mjs` when this module was added rather than being
+ * written a second time: two readers of the same records is how the closeout check
+ * and the wake would come to disagree about which workers had stopped, and a
+ * disagreement between two halves of the same detector is undetectable from either.
+ *
+ * Three fields the state name hides are what this adds. `tempo` separates a worker
+ * waiting for a human from one that has gone quiet, `needs` says what it is waiting
+ * for, and `updatedAt` is the only liveness clock there is.
+ *
+ * `firstTerminalAt` is the closeout watermark, written once and never revised. Where
+ * the state file lacks it the timeline is read, because a job that died has a state
+ * file reading `done` with a normal-looking completion note and the death survives
+ * only in the append-only timeline.
  */
 export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) {
   const out = []
@@ -311,6 +330,15 @@ export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) 
   for (const id of names) {
     let s
     try { s = JSON.parse(read(`${dir}/${id}/state.json`, 'utf8')) } catch { continue }
+    let firstTerminalAt = s.firstTerminalAt || null
+    if (!firstTerminalAt && s.state === 'done') {
+      try {
+        for (const l of read(`${dir}/${id}/timeline.jsonl`, 'utf8').trim().split('\n')) {
+          const ev = JSON.parse(l)
+          if (['done', 'blocked', 'failed'].includes(ev.state || ev.type)) { firstTerminalAt = ev.at || ev.ts; break }
+        }
+      } catch { /* no timeline — the state file is what there is */ }
+    }
     out.push({
       id,
       name: s.name ?? '',
@@ -319,10 +347,30 @@ export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) 
       detail: s.detail ?? '',
       needs: s.needs ?? '',
       updatedAt: s.updatedAt ?? null,
-      firstTerminalAt: s.firstTerminalAt ?? null,
+      firstTerminalAt,
+      children: s.children || [],
     })
   }
   return out
+}
+
+/**
+ * Ready work, counted for the idle detection.
+ *
+ * A milestone is the program's own definition of ready: no work starts on an issue
+ * until one is assigned. Requirements are containers rather than work, so they are
+ * excluded — counting them would make the queue look permanently full and the
+ * detection permanently on.
+ */
+export function readyBacklog(data) {
+  const open = data?.repository?.openIssues ?? {}
+  const count = (open.nodes ?? []).filter((i) => i?.milestone)
+    .filter((i) => !(i.labels?.nodes ?? []).some((l) => l?.name === 'requirement'))
+    .length
+  // The page is 100 wide and the hub already carries 97 open issues. A count that
+  // silently stops at the page boundary would read as the whole queue, so a capped
+  // read says so and the number becomes a floor.
+  return { count, capped: Boolean(open.pageInfo?.hasNextPage) }
 }
 
 /** Workers whose closeout already carries a verdict, from the append-only journal. */
