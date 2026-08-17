@@ -171,9 +171,15 @@ test('renderState: a gap is shouted, and brings its explanation with it', () => 
   assert.match(md, /A resolved entry MOVES to ## Resolved/)
 })
 
-test('renderState: no reading at all renders nothing rather than a false all-clear', () => {
+test('renderState: no reading says so rather than rendering nothing or a false all-clear', () => {
   const md = renderState({ snapshot: {}, events: [], meta })
-  assert.doesNotMatch(md, /config ledger/)
+  // Rendering nothing avoided the false all-clear and created a worse one: the
+  // section's own rule is that a detector reports even when clean, precisely so its
+  // silence cannot be read as health — and a detector that vanishes is silent
+  // (jwildfire/obot.roadmap#223).
+  assert.match(md, /config ledger: \*\*NO READING\*\*/)
+  assert.match(md, /unknown, not clean/)
+  assert.doesNotMatch(md, /ledger clean/)
 })
 
 test('renderState: a note is kept under a clean verdict, not dropped', () => {
@@ -217,9 +223,10 @@ test('renderState: an unstamped worker is shouted, and brings its instruction wi
   assert.match(md, /Claim one with `worker-id claim --slug <slug>` BEFORE the spawn/)
 })
 
-test('renderState: no worker reading renders nothing rather than a false all-clear', () => {
+test('renderState: no worker reading says so rather than rendering nothing', () => {
   const md = renderState({ snapshot: {}, events: [], meta })
-  assert.doesNotMatch(md, /worker ledger/)
+  assert.match(md, /worker ledger: \*\*NO READING\*\*/)
+  assert.match(md, /unknown, not clean/)
 })
 
 test('renderState: the two ledgers are independent — one silent does not silence the other', () => {
@@ -265,4 +272,49 @@ test('renderState: shows at most MAX_EVENTS even when the snapshot remembers mor
   assert.match(md, /EVENT 0\b/)
   assert.match(md, /EVENT 14\b/)
   assert.doesNotMatch(md, /EVENT 15\b/)
+})
+
+// ---- the first sweep on a machine with no history ------------------------
+//
+// jwildfire/obot.roadmap#223. Every source this sweep joins is absent on a new
+// machine, and the state file it writes is read by 🎩🤖 prime and rendered whole on
+// the dashboard's Navigator tab — so a confident sentence here reaches him twice.
+
+const FRESH = { sweptAt: '2026-08-17 06:00', cadenceMin: 5, repoCount: 0, ok: false, errors: ['gh: not authenticated'], lastGoodAt: null }
+
+test('an unread RC queue is not an empty one, and carries no verification stamp', () => {
+  const md = renderState({ snapshot: {}, events: [], meta: FRESH })
+  // `snapshot: {}` is what an absent snapshot file and a genuinely empty queue both
+  // produce. Rendering both as "**RC queue: EMPTY.** [verified gh]" claims a
+  // verification that did not happen.
+  assert.match(md, /\*\*RC queue: UNREAD\*\*/)
+  assert.match(md, /This is not an empty queue/)
+  assert.doesNotMatch(md, /RC queue: EMPTY/)
+  assert.doesNotMatch(md, /verified gh/)
+})
+
+test('a first sweep that failed does not describe a last good sweep it never had', () => {
+  const md = renderState({ snapshot: {}, events: [], meta: FRESH })
+  assert.doesNotMatch(md, /last good sweep unknown/)
+  assert.match(md, /first sweep on this machine and it failed/)
+})
+
+test('a queue that was read and is empty still says EMPTY', () => {
+  const md = renderState({ snapshot: {}, events: [], meta: { ...FRESH, ok: true, repoCount: 7, errors: [] } })
+  assert.match(md, /\*\*RC queue: EMPTY\.\*\*/)
+  assert.doesNotMatch(md, /UNREAD/)
+})
+
+test('the first sweep records a baseline rather than announcing week-old RCs as news', () => {
+  const open = {
+    'safety.viz#124': { repo: 'jwildfire/safety.viz', number: 124, title: 'nep-explorer Phase 1', base: 'main', url: 'u1', reviews: [], reviewDecision: null, commentCount: 0 },
+    'obot.agent#131': { repo: 'jwildfire/obot.agent', number: 131, title: 'v0.4.0', base: 'stable', url: 'u2', reviews: [], reviewDecision: null, commentCount: 0 },
+  }
+  const baseline = diff({}, open, {}, new Set(), { baseline: true })
+  assert.equal(baseline.length, 1)
+  assert.equal(baseline[0].type, 'baseline')
+  assert.match(baseline[0].line, /First sweep on this machine — 2 RCs already open/)
+  // Without the flag these are two NEW RC events stamped with this morning's clock
+  // and pushed to the scratchpad, which is history invented from an absent file.
+  assert.equal(diff({}, open).filter((e) => e.type === 'rc-new').length, 2)
 })

@@ -41,6 +41,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { nothingYet } from './absent.mjs';
+
 // Printed on the page rather than left to be discovered. Both are things a reader
 // would otherwise have to be told in person, which is the same as not being told.
 export const PRICE_NOTE = 'Costs are list-price arithmetic over recorded token counts at API rates — an estimate of what this usage would bill, not a copy of an invoice.';
@@ -72,6 +74,15 @@ export const STALE_HOURS = 24;
 export const DEAD_SHOWN = 8;
 
 const HUB_WORDS = new Set(['hub', 'goal', 'goals', 'roadmap', 'obot.roadmap']);
+
+// What a caller that does not say is assumed to have read. `assumed` marks it as an
+// assumption rather than an observation, so nothing downstream can quote it as one.
+const DEFAULT_SOURCES = {
+  jobs: { path: null, present: true, assumed: true },
+  workers: { path: null, present: true, assumed: true },
+  usage: { path: null, present: true, assumed: true },
+  delivery: { path: null, present: true, assumed: true },
+};
 
 const money = (n) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -138,6 +149,13 @@ export function timelineClose(text = '') {
  * the disagreement itself is the finding.
  */
 export function statusOf(o = {}, now = new Date()) {
+  // `jobsRead: false` means `~/.claude/jobs` is not on this machine, so "no session
+  // ever started under this id" is a verdict from an unread directory — and it was
+  // demonstrably wrong on rows that simultaneously showed priced spend and a
+  // confirmed delivery verdict (jwildfire/obot.roadmap#223).
+  if (!o.job && o.claimed && o.jobsRead === false && !o.sub) {
+    return { status: 'no job record', note: `id claimed; no job record for it on this machine — either the session never started, or ~/.claude/jobs is not here` };
+  }
   if (!o.state) {
     if (o.sub) return { status: 'subagent', note: 'no session of its own — its parent worker is accountable for what it wrote' };
     return o.claimed === false
@@ -417,7 +435,7 @@ export function usageIndex(usage, { epochDay = null, now = new Date(), current =
   const preDays = [...pre.days].sort();
   const unattributed = pre.labels.size ? {
     agents: pre.labels.size, cost: pre.cost, calls: pre.calls,
-    first: preDays[0] ?? null, last: preDays.at(-1) ?? null,
+    first: preDays[0] ?? null, last: preDays.at(-1) ?? null, days: preDays,
     top: [...preByLabel.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
       .map(([label, cost]) => ({ label, cost })),
   } : null;
@@ -446,14 +464,14 @@ export function usageIndex(usage, { epochDay = null, now = new Date(), current =
  */
 function costCell(usage, { id, label, startedAt }) {
   if (!usage || usage.missing) {
-    return { value: null, code: 'unavailable', short: 'n/a', text: 'cost unavailable — no usage artifact', sub: null };
+    return { value: null, code: 'unavailable', short: 'n/a', text: 'cost unavailable — no usage artifact', sub: null, days: [] };
   }
   const bucket = (id && usage.byId.get(id)) || (label && usage.byLabel.get(label)) || null;
   if (!bucket) {
     if (startedAt && usage.generatedAt && Date.parse(startedAt) > Date.parse(usage.generatedAt)) {
-      return { value: null, code: 'unpriced', short: 'unpriced', text: 'not yet priced — it started after the last usage build', sub: null };
+      return { value: null, code: 'unpriced', short: 'unpriced', text: 'not yet priced — it started after the last usage build', sub: null, days: [] };
     }
-    return { value: null, code: 'none', short: '—', text: 'no usage recorded', sub: null };
+    return { value: null, code: 'none', short: '—', text: 'no usage recorded', sub: null, days: [] };
   }
   const days = [...bucket.days].sort();
   return {
@@ -465,6 +483,10 @@ function costCell(usage, { id, label, startedAt }) {
     sub: bucket.subCost > 0 ? { cost: bucket.subCost, calls: bucket.subCalls } : null,
     // A long-lived session's total is its whole life, not today — say which days.
     span: days.length > 1 ? `${days[0]} to ${days.at(-1)}` : null,
+    // The priced days themselves, so a date filter can be built out of the same
+    // feed the money comes from rather than out of a second guess at when an
+    // agent ran (jwildfire/obot.roadmap#227).
+    days,
   };
 }
 
@@ -495,8 +517,16 @@ function slugOfName(name) {
  * the night before left no machine-recoverable trace at all) and a partial one
  * rendered as clean rows would assert a completeness it does not have.
  */
-export function buildRoster({ workers, jobs = [], usage = null, delivery = [], now = new Date() }) {
+export function buildRoster({ workers, jobs = [], usage = null, delivery = [], sources = null, now = new Date() }) {
   const epoch = workers?.epoch ?? null;
+  // Which of the four files were actually read. Absent means the whole record is
+  // silent; empty means it was read and had nothing to say. By the time a renderer
+  // holds `delivery: []` it can no longer tell those apart, and every honest
+  // sentence on the page turns on the difference (jwildfire/obot.roadmap#223).
+  // A caller that says nothing is taken at its word — `collectRoster` always
+  // reports for real, and it is the only caller that reads a disk.
+  const src = { ...DEFAULT_SOURCES, ...(sources ?? {}) };
+  const deliveryRead = src.delivery.present !== false;
   const epochDay = epoch ? epoch.slice(0, 10) : null;
 
   const byWorker = new Map();
@@ -513,11 +543,25 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
     // The newest session wins the status: a worker that was resumed is one agent.
     const job = matched.slice().sort((a, b) => Date.parse(b.startedAt ?? 0) - Date.parse(a.startedAt ?? 0))[0] ?? null;
     const worker = job ? isWorkerName(job.name) : true;
-    const status = statusOf(job ? { ...job, worker, sub } : { sub, claimed: !!id }, now);
+    const status = statusOf(job ? { ...job, worker, sub } : { sub, claimed: !!id, jobsRead: src.jobs.present !== false }, now);
     const startedAt = matched.map((j) => j.startedAt).filter(Boolean).sort()[0] ?? claimedAt ?? null;
     const cost = costCell(usage, { id, label, startedAt });
     const key = slug || slugOfName(job?.name ?? label);
     const entries = (id && byWorker.get(id)) || (key && byWorker.get(key)) || [];
+    // Last activity, from whichever record saw the agent most recently. A date
+    // filter reading only the job record would date an agent by when the harness
+    // last wrote a heartbeat and miss the spend recorded against it.
+    const lastAt = [...matched.map((j) => j.updatedAt ?? j.startedAt), claimedAt]
+      .filter(Boolean).sort().at(-1) ?? null;
+    // Every day this agent is known to have been alive, from both records. The
+    // priced days come from the shared usage feed; the job days come from the
+    // harness. Neither alone is complete: a worker that started at 22:48 and ran
+    // to 04:03 has its money on one date and its job activity on the next.
+    const days = [...new Set([
+      ...(cost.days ?? []),
+      ...matched.flatMap((j) => [day(j.startedAt), day(j.updatedAt)]),
+      day(claimedAt),
+    ].filter(Boolean))].sort();
     return {
       id: id ?? null,
       idText: id ?? 'no worker id',
@@ -526,11 +570,15 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
       task: task ?? '',
       claimedAt: claimedAt ?? null,
       startedAt,
+      lastAt,
+      days,
       sessions: matched.length,
       tokens: matched.reduce((n, j) => n + (j.tokens ?? 0), 0),
       status,
       cost,
-      impact: impactOf(entries),
+      // `unjudged` rides on the impact so every view gets the distinction without
+      // a new parameter: a silent delivery record is not a verdict of silence.
+      impact: { ...impactOf(entries), unjudged: !deliveryRead },
       subs: [],
     };
   };
@@ -583,6 +631,7 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
 
   return {
     rows: [...rows, ...extras],
+    sources: src,
     droppedDeaths: dropped.length,
     unattributed: usage?.unattributed ?? null,
     usage: usage ? {
@@ -592,6 +641,39 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
     epoch, epochDay,
     generated: now.toISOString(),
   };
+}
+
+/**
+ * What a roster with no rows says — and it depends entirely on WHY there are none.
+ *
+ * "No agent has run since the worker ledger was adopted" is a measurement: the
+ * ledger was read and holds no claim. On a machine where the ledger does not exist
+ * it is a claim about history made out of a file nobody opened, which is the exact
+ * confusion jwildfire/obot.roadmap#223 exists to end.
+ */
+export function emptyRoster(model) {
+  const src = model?.sources ?? {};
+  const ledger = src.workers?.present !== false;
+  const jobs = src.jobs?.present !== false;
+  if (!ledger && !jobs) {
+    return nothingYet(
+      'Nothing has been recorded on this machine yet',
+      'no worker ledger and no job records; the first agent to claim an id starts both',
+    );
+  }
+  if (!ledger) {
+    return nothingYet(
+      'No worker ledger on this machine yet',
+      'agents may have run, but nothing can be attributed until one claims an id (obot.agent/tools/worker-id)',
+    );
+  }
+  if (!jobs) {
+    return nothingYet(
+      'No job records on this machine yet',
+      'the ledger is here but ~/.claude/jobs is not, so no session can be matched to an id',
+    );
+  }
+  return 'No agent has run since the worker ledger was adopted.';
 }
 
 // ---- the section --------------------------------------------------------
@@ -607,7 +689,10 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
 export function rosterMarkdown(model) {
   const out = ['## Agents', ''];
 
-  if (!model.rows.length) out.push('- no agent has run since the worker ledger was adopted');
+  // The same sentence the page renders, from the same function. This is the
+  // greppable, paste-into-an-issue form of one model, and it used to contradict the
+  // HTML — it was the dishonest half (jwildfire/obot.roadmap#223).
+  if (!model.rows.length) out.push(`- ${emptyRoster(model)}`);
 
   for (const r of model.rows) {
     // An id nobody launched is not an agent that produced nothing — it is an id
@@ -716,9 +801,18 @@ export function readJobs(jobsDir) {
  * last ran, not which day it counted.
  */
 export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
-  const jobs = readJobs(jobsDir ?? path.join(os.homedir(), '.claude', 'jobs'));
-  const workers = parseWorkers(readText(path.join(workspace, '.claude', 'workers.journal')));
-  const delivery = parseDelivery(readText(path.join(workspace, '.claude', 'session-hub', 'delivery.md')));
+  const jobsPath = jobsDir ?? path.join(os.homedir(), '.claude', 'jobs');
+  const workersPath = path.join(workspace, '.claude', 'workers.journal');
+  const deliveryPath = path.join(workspace, '.claude', 'session-hub', 'delivery.md');
+  // The record is two files. `/session/log` renders the typed journal and the roster
+  // reads the markdown, so keying "was the delivery record read" on delivery.md alone
+  // lets the page say "no delivery record on this machine" two screens above a table
+  // built from the journal (jwildfire/obot.roadmap#223).
+  const journalPath = path.join(workspace, '.claude', 'session-hub', 'delivery.journal');
+
+  const jobs = readJobs(jobsPath);
+  const workers = parseWorkers(readText(workersPath));
+  const delivery = parseDelivery(readText(deliveryPath));
 
   const usageFile = path.join(hub, 'site', 'usage', 'usage.json');
   const raw = readJson(usageFile);
@@ -731,5 +825,19 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
   const epochDay = workers.epoch ? workers.epoch.slice(0, 10) : null;
   const usage = usageIndex(stamped, { epochDay, now, current: currentLabels(jobs, epochDay, now) });
 
-  return buildRoster({ workers, jobs, usage, delivery, now });
+  // Observed, not assumed. On a machine that has never run an agent all four of
+  // these are false, and a page that cannot tell that from four empty files is the
+  // one that greets @jwildfire on his first morning with a confident set of zeros.
+  const sources = {
+    jobs: { path: jobsPath, present: fs.existsSync(jobsPath) },
+    workers: { path: workersPath, present: fs.existsSync(workersPath) },
+    usage: { path: usageFile, present: fs.existsSync(usageFile) },
+    delivery: {
+      path: deliveryPath,
+      present: fs.existsSync(deliveryPath) || fs.existsSync(journalPath),
+      note: fs.existsSync(deliveryPath) ? '' : 'read from the typed journal; delivery.md is not on this machine',
+    },
+  };
+
+  return buildRoster({ workers, jobs, usage, delivery, sources, now });
 }

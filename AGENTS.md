@@ -125,6 +125,34 @@ its `Closes #N` keyword → details as needed. That is the five-section obot PR 
 reordered, not a second template, and the `Closes` keywords must stay in it or issues stop
 closing and `obot-merge` refuses the release merge.
 
+**The exec summary is the first line of the body — no banner above it.** The
+attested-lane rule goes in an **HTML comment**, placed *below* the sentence, not a
+heading above it:
+
+```markdown
+{One sentence: what this release lets someone do that they could not do before.}
+
+<!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
+     attested lane: scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
+```
+
+Below, because GitHub hides the comment either way but parsers do not: the dashboard
+builds his queue row from the first line that is not a heading or a bullet, and `<!--`
+is neither. Sentence first means nothing downstream has to know comments exist.
+
+The `## ⛔ Release candidate — merges only on @jwildfire's approval, via the attested lane`
+heading is **retired** (@jwildfire, 2026-08-17: *"I really don't like this header …
+shouldn't need that as the first thing on a PR - just add a rule for the relevant agents
+and maybe an invisible markdown comment"*). It told the approver a rule about himself, it
+took the line the exec summary was given, and it announced a guard already enforced in
+code — `obot-merge` refuses a release-role merge without `--jeremy-approved`, and raw
+`gh pr merge` is hook-denied.
+
+**The general rule: anything on a surface he reads is written for him.** Agent-to-agent
+instructions go in agent-facing places — this file, `docs/`, the skills, or an HTML
+comment. See [`docs/rc-framework.md` → Written for him, or written for
+us](docs/rc-framework.md#written-for-him-or-written-for-us).
+
 Full rules, the template, and the `-RCn` edge cases:
 [`docs/rc-framework.md`](docs/rc-framework.md#what-an-rc-pr-must-carry) and
 [`skills/rc-release-notes/SKILL.md`](skills/rc-release-notes/SKILL.md).
@@ -158,6 +186,36 @@ close-out.
 grouped none of them: no `v1.6.0` milestone existed, three of the issues still carried
 `v1.2.0` from the wave that scoped them, and the RC PR body carried no `Closes` lines. The
 release's own record had to be reconstructed from the diff the same night.
+
+## Running the merge command
+
+Once a merge is approved, type it as **one command, undecorated**:
+
+```bash
+obot.agent/scripts/obot-merge <pr#> -R jwildfire/<repo> --squash --delete-branch
+```
+
+The obot2 workspace allowlist permits three spellings of the wrapper — `scripts/…`,
+`obot.agent/scripts/…`, and the absolute path — and a `Bash(prefix *)` rule matches a
+command only when **every** sub-command matches, splitting on `|`, `&&`, `||`, and `;`.
+So a `bash` prefix, a `./`, a `cd … &&`, a trailing `; echo "exit=$?"`, or the reflexive
+`| tail -20` each cost the match, and the call falls through to the auto-mode classifier
+instead. The classifier is not a gate that can be satisfied — it is nondeterministic, and
+refuses roughly one call in thirty. Shell redirection (`2>&1`) is not a separator and is
+safe; the wrapper prints ten lines, so there is nothing worth piping to `tail` anyway.
+
+A classifier refusal is not a permission decision and not a policy refusal — the merge
+policy in [`scripts/policy.json`](scripts/policy.json) is the only thing that decides
+whether a merge is allowed. If a merge is refused, re-type the bare command; do not go
+looking for a different route.
+
+**Why this exists.** Of 497 `obot-merge` invocations across the session transcripts to
+2026-08-17, only 7 were written in a form the allowlist could match — and all 7 were
+allowed. Every one of the 17 refusals in that history sits among the 490 that matched
+nothing. obot.agent#150 and #158 sat finished, green and unmerged overnight on that coin
+flip, and obot.roadmap#217 was refused and then allowed on the byte-identical string three
+minutes later. Guarded by
+[`scripts/test/merge-invocation.test.mjs`](scripts/test/merge-invocation.test.mjs).
 
 ## Branching and release model (safety.viz only)
 

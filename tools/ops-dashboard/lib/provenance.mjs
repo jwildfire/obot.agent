@@ -167,7 +167,16 @@ export function resolveHub(hub, cacheDir, { fetched = null } = {}) {
     root: hub, source: 'clone', head: head?.short ?? null, at: head?.at ?? null,
     behind: 0, dirty: false, fetchedAt: fetched ?? lastFetch(hub), warn: null,
   };
-  if (!head) return { ...base, warn: 'the hub clone is not a git repository — reading it as-is' };
+  // Three different states produced this one sentence, and two of them are not what
+  // it says. On a new machine the likeliest is the third: there is no clone at all,
+  // so nothing is being read and there is nothing to read it "as-is" from
+  // (jwildfire/obot.roadmap#223).
+  if (!head) {
+    if (!fs.existsSync(hub)) {
+      return { ...base, missing: true, warn: `no obot.roadmap clone at ${hub} — decisions cannot be read until one is cloned there` };
+    }
+    return { ...base, warn: 'the hub clone is not a git repository — reading the directory as-is' };
+  }
 
   const up = upstreamRef(hub) ?? 'origin/main';
   const upstream = commitInfo(hub, up);

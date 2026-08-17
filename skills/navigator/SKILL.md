@@ -34,12 +34,34 @@ state file. The wider its discretion over the plan, the harder the line around t
 work has to be — a role that decides freely but only ever moves issues around is one
 whose every mistake is visible and undoable in seconds.
 
-## Cold start — what to read, in this order
+## Cold start — arm your ears first, then read
 
-The session is restarted often. One read should be enough to know the state of the
-world:
+Before the first read, arm the wake channel. It is one tool call and it is the
+difference between judging a closeout in five minutes and judging it in six hours:
 
-1. `.claude/session-hub/navigator-state.md` — what the five-minute sweep saw: open
+```
+Monitor(description: "worker stop-states", persistent: true, timeout_ms: 3600000,
+        command: "bash obot.agent/tools/navigator/wake-listen")
+```
+
+Every line it prints is a worker that stopped, stalled, died or is waiting on an
+answer, and a notification reaches this session while it sits idle between turns —
+measured on 2026-08-17, four seconds after the event, on a session that had been
+idle for two and a half minutes. Nothing else can reach an idle session: there is no
+`claude send`, no local API, and the Stop hook fires only at the end of a turn this
+session is not having.
+
+Re-arm it after any restart, and re-arm it if the sweep starts reporting `WAKE
+CHANNEL DOWN` — that line means the wakes are being written and nobody is listening.
+
+Then read, in this order. The session is restarted often; one read should be enough
+to know the state of the world:
+
+1. `.claude/session-hub/navigator-state.md` — what the five-minute sweep saw. Its
+   first section is `## Wake`: every worker that has stopped and has no verdict,
+   whether or not a notification reached this session. Read it even when no wake
+   arrived — that section is what a missed wake degrades to, and it is the answer to
+   "what happened while I was not running". Then open
    release candidates, recorded decision answers, the ledger verdicts, recent
    events, and the delivery record folded back in. If its `swept:` stamp is older
    than 15 minutes the observer is dead: say so rather than presenting it as
@@ -63,7 +85,8 @@ eyes; this session is the judgment. The split follows from what each half can de
 | Question | Who answers it |
 |---|---|
 | Which release candidates are waiting on him? | The sweep — it is a list |
-| Has a worker gone quiet? | The sweep — silence is measurable |
+| Has a worker gone quiet? | The sweep — silence is measurable, and it wakes you |
+| Is anything running at all? | The sweep — an empty fleet with a queue is a detection |
 | Which task issues have no parent requirement? | The sweep |
 | Does this ask need a new requirement or a change to an open one? | The session |
 | Did this worker attach to the right requirement, and did the stage really move? | The session |
@@ -106,6 +129,27 @@ Nothing in this is on his response path. If the Navigator is slow he does not no
 only the worker's start moves, by a few minutes.
 
 ### 3. Judge delivery when a worker closes
+
+A wake arrives as a notification in this session. It is one line, it names one
+worker, and it is a summons to go and look — never a verdict. Act on it in the turn
+it arrives; that is the whole point of the mechanism.
+
+The four things a wake can say, and what each one asks for:
+
+- `STOPPED` — a closeout with no verdict. Judge it against GitHub and record it.
+- `WAITING` — a worker sitting on a question or a permission prompt that nobody has
+  resolved. Two sat that way for twenty hours on 2026-08-16. Resolve it, retask it,
+  or stop it — but a waiting worker whose wake produced no action is the failure this
+  detection was built for.
+- `DEAD` — a worker terminal on an error. Its record understates what it wrote:
+  `d0003` reported producing nothing and had left five GitHub writes. Look for a
+  branch, a commit or a pull request before writing it off.
+- `IDLE` — no worker is running and there is ready work. Dispatch, or record in one
+  line why not.
+
+The wake reaches this session and never @jwildfire. If a wake is telling him
+something rather than telling you to do something, it is filed wrong — say so rather
+than forwarding it.
 
 Learn that a worker finished from the harness's own job records — the per-job state
 file and event timeline under `~/.claude/jobs/`. Three details are load-bearing and

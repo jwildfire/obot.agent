@@ -73,6 +73,21 @@ export function sessionState(model) {
   const byState = model.tiles.agents.byState ?? {};
   const working = byState.working ?? 0;
   const needsInput = model.alerts.length;
+  // The one place on this surface where the dishonesty leaves the machine: this
+  // projection feeds the public roadmap page's session indicator, and with no
+  // `~/.claude/jobs` it published `idle · 0 agents` — byte-identical to a machine
+  // that was genuinely quiet (jwildfire/obot.roadmap#223). A fourth state, so the
+  // indicator can say "not measured" rather than "idle".
+  if (model.tiles.agents.read === false) {
+    return {
+      state: 'unmeasured',
+      name: `obot session ${model.slug}`,
+      detail: 'no job records on this machine yet',
+      agents: { total: null, working: null, needsInput: null },
+      slug: model.slug,
+      updatedAt: model.generatedAtIso,
+    };
+  }
   const state = needsInput > 0 ? 'needs-input' : working > 0 ? 'working' : 'idle';
   const parts = [`${model.tiles.agents.total} agent${model.tiles.agents.total === 1 ? '' : 's'}`];
   if (working) parts.push(`${working} working`);

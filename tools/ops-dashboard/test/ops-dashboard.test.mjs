@@ -432,9 +432,10 @@ test('the RC second line renders under the title, and is escaped like everything
   assert.ok(nasty.includes('&lt;img src=x'));
 });
 
-const RC_BODY = `## \u26d4 Release candidate — merges only on @jwildfire's approval, via the attested lane
+const RC_BODY = `Adds the participant-level metrics phase: six widgets and their workflows.
 
-Adds the participant-level metrics phase: six widgets and their workflows.
+<!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
+     attested lane: obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
 
 - **See it move:** [annotated demo](https://jwildfire.github.io/obot.roadmap/reports/gs-v1.1-demo/)
 - **Release notes:** [NEWS.md](https://github.com/jwildfire/gsm.safety/blob/dev/NEWS.md) — the v1.1.0 (Upcoming) section
@@ -466,6 +467,49 @@ test('the RC body parses into the panel the dashboard renders instead of an ifra
   assert.equal(rc.links.length, 3);
   assert.equal(rc.links[0].label, 'annotated demo');
   assert.equal(rc.ask, 'approve and I tag v1.1.0.');
+});
+
+test('the agent-facing HTML comment never becomes the row he reads', () => {
+  // The attested-lane rule moved out of a `## ⛔ …` heading and into an HTML comment on
+  // 2026-08-17 — invisible to him, present for an agent reading the PR. Invisible on
+  // GitHub is not invisible here: the parser reads raw markdown, and `<!--` is not a
+  // heading or a bullet, so without an explicit skip the comment's first line becomes
+  // his queue-row summary. The comment spans lines, so skipping only `<!--` leaks the
+  // continuation instead.
+  const rc = parseRCBody(RC_BODY);
+  assert.equal(rc.summary, 'Adds the participant-level metrics phase: six widgets and their workflows.');
+  assert.ok(!JSON.stringify(rc).includes('jeremy-approved'), 'comment text must not reach the panel');
+
+  // The template puts the comment *below* the sentence precisely so a parser that knows
+  // nothing about comments still gets the summary right. This is the belt to that
+  // braces: a body that leads with one anyway must still not put `<!--` on his phone.
+  const leading = parseRCBody([
+    '<!-- Release candidate. Merges only on @jwildfire\'s explicit approval, via the',
+    "     attested lane: obot-merge 10 -R jwildfire/open.gismo --jeremy-approved 'chat'. -->",
+    '',
+    'The release sentence, written second.',
+  ].join('\n'));
+  assert.equal(leading.summary, 'The release sentence, written second.');
+
+  // A comment anywhere else in the body is skipped the same way, including one that
+  // opens and closes on one line and one whose closer trails other text.
+  const inline = parseRCBody([
+    '<!-- one-liner: not the summary -->',
+    '<!-- multi',
+    '     line -->',
+    'The release sentence.',
+    '<!-- trailing --> also not the summary',
+  ].join('\n'));
+  assert.equal(inline.summary, 'The release sentence.');
+
+  // Legacy bodies still open with the retired banner and must keep parsing — the rule
+  // changed, the record on already-open PRs did not.
+  const legacy = parseRCBody([
+    "## ⛔ Release candidate — merges only on @jwildfire's approval, via the attested lane",
+    '',
+    'The legacy release sentence.',
+  ].join('\n'));
+  assert.equal(legacy.summary, 'The legacy release sentence.');
 });
 
 test('a body that ignores the contract degrades instead of throwing', () => {
@@ -910,8 +954,18 @@ test('when nothing is listening the page says so instead of looking like success
   assert.match(dead, /nothing is listening/i, 'the failure is named on the page');
   assert.match(dead, /launchctl kickstart/, 'and the page carries the restart command');
 
-  // No answer waiting: a dead deliverer is not an alarm about nothing.
-  assert.ok(!/nothing is listening/i.test(withAnswers([], { alive: false, ageMin: 260 })));
+  // No answer waiting: a dead deliverer is not an ALARM about nothing.
+  const quiet = withAnswers([], { alive: false, ageMin: 260 });
+  assert.ok(!/class="alarm"/.test(quiet), 'an alarm about no stuck answer');
+  assert.ok(!/going nowhere/i.test(quiet));
+  // It is still worth saying before he clicks, in the form's own register: the
+  // promise "handed to an agent by the Navigator within five minutes" was made
+  // unconditionally, on a machine where the sweep has never been installed
+  // (jwildfire/obot.roadmap#223).
+  assert.match(quiet, /Nothing is listening yet/);
+  assert.doesNotMatch(quiet, /handed to an agent by the Navigator within five minutes/);
+  // And with the deliverer alive the promise is the one that holds.
+  assert.match(withAnswers([], { alive: true }), /handed to an agent by the Navigator within five minutes/);
 });
 
 test('an applied answer links the artifact so he can confirm it himself', () => {
