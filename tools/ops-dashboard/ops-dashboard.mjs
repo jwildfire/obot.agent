@@ -326,16 +326,19 @@ export function serve(args) {
           try {
             delivery = parseDeliveryJournal(fs.readFileSync(path.join(args.workspace, ...SESSION_DIR, 'delivery.journal'), 'utf8'));
           } catch { /* no journal yet — the tables say so */ }
+          // The what-changed feed moved here with the outcome groups when the tab
+          // became a table (jwildfire/obot.agent#154). A feed that cannot assemble
+          // costs the feed, never the page.
+          let feed = [];
+          try {
+            feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
+          } catch { /* no feed — the record renders without it */ }
           return send(200, 'text/html; charset=utf-8', sessionLogShell({
-            roster, delivery, lastLook: before,
+            roster, delivery, feed, lastLook: before,
             missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
           }));
         }
-        let feed = [];
-        try {
-          feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
-        } catch { /* a feed that cannot assemble costs the feed, never the page */ }
-        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, feed, lastLook: before }));
+        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, lastLook: before }));
       }
       if (p === '/session/frame') {
         const live = sessionLivePath(args.workspace);
