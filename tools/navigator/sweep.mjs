@@ -147,7 +147,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, fleet = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -197,6 +197,11 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // whether anything is reaching it at all, and on a cold start it is the answer to
   // "what did I miss while I was not running".
   if (wake && wake.trim()) lines.push(wake.trimEnd(), '')
+  // And the acting half, directly beneath the detecting one (obot.agent#167). The
+  // wake says a worker stopped; this says what was done about it. They sit together
+  // because reading one without the other is how six stalled sessions and seven open
+  // pull requests stayed visible for two days without anything moving.
+  if (fleet && fleet.trim()) lines.push(fleet.trimEnd(), '')
 
   lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
@@ -314,6 +319,29 @@ function readDelivery() {
 // says it made gone missing from the file @jwildfire reads? A delegated decision
 // that leaves no record is indistinguishable from no decision.
 const auditDelivery = () => shellAudit('delivery-log')
+
+/**
+ * The fleet trigger, and the launch when a condition holds (obot.agent#167).
+ *
+ * Shelled rather than imported so the conditions are computed in exactly ONE place:
+ * what this file renders and what actually launched can then never disagree. It
+ * prints its own `## Fleet` section, so the sweep folds it whole in the same way it
+ * folds the delivery record.
+ *
+ * This is the only part of the sweep that CAUSES something rather than recording it,
+ * and it is deliberately the narrowest possible act: it starts a short-lived agent
+ * and returns. Everything the manager then does is the manager's, under its own
+ * skill contract and its own time budget.
+ */
+function runFleet() {
+  const r = spawnSync(join(REPO_ROOT, 'scripts', 'obot-fleet'), [], {
+    env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 120000,
+  })
+  if (r.error || r.status === null) {
+    return `## Fleet — the triggered manager\n\n**FLEET TRIGGER BROKEN** — launcher did not run (${r.error ? String(r.error.message).slice(0, 120) : 'killed'}). No condition was evaluated this run; this is not a quiet fleet.\n`
+  }
+  return (r.stdout || '').trim() || null
+}
 
 // The four checks (#136, under D0017). Scope is every repo in the policy file — all
 // seven project repos, not the hub alone — which is @jwildfire's directive and also
@@ -516,6 +544,15 @@ const safeJobs = () => {
   if (!existsSync(JOBS_DIR)) return null
   try { return readJobs(JOBS_DIR) } catch { return null }
 }
+// A broken trigger must not break the sweep, and must not fail quietly either — a
+// fleet section that simply vanished would read as a page with nothing to report.
+// The launcher reads the job ledger itself rather than taking this one, so the
+// null-versus-empty distinction above is not in its path.
+const safeFleet = () => {
+  try { return runFleet() } catch (e) {
+    return `## Fleet — the triggered manager\n\n**FLEET TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
+  }
+}
 // A broken wake must not break the sweep, and must not fail quietly either: the
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
@@ -553,7 +590,7 @@ function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, fleet: safeFleet() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -657,7 +694,10 @@ function main() {
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section }))
+  // The fleet trigger runs last of the readings, after the wake, because a manager
+  // it launches will read the state file this run is about to write.
+  const fleet = safeFleet()
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, fleet }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

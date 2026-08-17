@@ -49,7 +49,7 @@ export { hostWasAway, judgedWorkers, readJobs }
  *  its own detector reads as a worker would wake the Navigator about itself, and
  *  a later run would find it stalled and close it. */
 export const MANAGER_TAG = '\u{1F6A6}\u{1F916}' // 🚦🤖
-export const MANAGER_NAME = `${MANAGER_TAG} obot-fleet-manager`
+export const MANAGER_NAME = `${MANAGER_TAG} obot-fleet`
 
 export const isManager = (job) => String(job?.name ?? '').startsWith(MANAGER_TAG)
 

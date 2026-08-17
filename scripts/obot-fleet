@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// obot-fleet-manager — evaluate the fleet conditions and, when one holds, launch a
+// obot-fleet — evaluate the fleet conditions and, when one holds, launch a
 // short-lived 🚦🤖 manager that acts and exits.
 //
 // Implements jwildfire/obot.agent#167 under jwildfire/obot.roadmap#236.
@@ -24,12 +24,12 @@
 // session — needs the harness's TaskStop tool, which only an agent has.
 //
 // Usage:
-//   obot-fleet-manager                 evaluate; launch if warranted; print the
+//   obot-fleet                 evaluate; launch if warranted; print the
 //                                      `## Fleet` section on stdout for the sweep
-//   obot-fleet-manager --check         evaluate and report; never launch
-//   obot-fleet-manager --json          the trigger as JSON, no launch
-//   obot-fleet-manager --preflight-only  print the launch command only
-//   obot-fleet-manager --model <m>     model override (default: opus)
+//   obot-fleet --check         evaluate and report; never launch
+//   obot-fleet --json          the trigger as JSON, no launch
+//   obot-fleet --preflight-only  print the launch command only
+//   obot-fleet --model <m>     model override (default: opus)
 //
 // Exit codes: 0 always on a completed evaluation — this runs on the five-minute
 // sweep and a non-zero exit there is noise, not information. A broken evaluation
@@ -52,7 +52,10 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(HERE, '..')
 const WS = process.env.OBOT_WORKSPACE || join(process.env.HOME, 'Documents/obot2')
 const JOBS_DIR = process.env.OBOT_JOBS_DIR || join(process.env.HOME, '.claude', 'jobs')
-const POLICY = join(REPO_ROOT, 'scripts', 'policy.json')
+// Overridable for the same reason OBOT_JOBS_DIR is: the branch where no lane is
+// readable is the one that must NOT report a quiet fleet, and a branch that cannot
+// be reached from a test is a branch nobody has ever seen run.
+const POLICY = process.env.OBOT_FLEET_POLICY || join(REPO_ROOT, 'scripts', 'policy.json')
 const HUB_DIR = join(WS, '.claude/session-hub')
 const FLEET_LOG = join(HUB_DIR, 'fleet.log')
 const BRIEF = join(HUB_DIR, 'cache', 'fleet-brief.json')
@@ -68,10 +71,10 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--preflight-only') MODE = 'preflight'
   else if (a === '--model') MODEL = process.argv[++i]
   else if (a === '-h' || a === '--help') { MODE = 'help' }
-  else { console.error(`obot-fleet-manager: unknown argument: ${a}`); process.exit(1) }
+  else { console.error(`obot-fleet: unknown argument: ${a}`); process.exit(1) }
 }
 
-const say = (m) => console.error(`obot-fleet-manager: ${m}`)
+const say = (m) => console.error(`obot-fleet: ${m}`)
 const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
 
 /**
@@ -87,13 +90,13 @@ const launchCommand = (briefPath) => [
   'claude', '--bg', '--permission-mode', 'auto',
   '--settings', '{"remoteControlAtStartup":false}',
   '-n', MANAGER_NAME, '--model', MODEL,
-  `/s-fleet-manager ${briefPath}`,
+  `/s-fleet ${briefPath}`,
 ]
 
 const printCommand = (cmd) => {
   // %s rather than %q: %q escapes every non-ASCII byte, which turns the session
   // name into mojibake and makes the one line a reader checks unreadable.
-  process.stdout.write('obot-fleet-manager: would run (from ' + WS + '):')
+  process.stdout.write('obot-fleet: would run (from ' + WS + '):')
   for (const arg of cmd) process.stdout.write(/[\s{]/.test(arg) ? ` '${arg}'` : ` ${arg}`)
   process.stdout.write('\n')
 }
