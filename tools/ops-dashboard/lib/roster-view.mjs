@@ -38,7 +38,12 @@
 // produced nothing. Grouping on the id would have buried ten real workers, which is
 // the same failure in the other direction.
 import { esc } from './esc.mjs';
-import { WORKER_TAGS, PRICE_NOTE, ID_NOTE, DEAD_SHOWN } from './roster.mjs';
+import { WORKER_TAGS, PRICE_NOTE, ID_NOTE, DEAD_SHOWN, emptyRoster } from './roster.mjs';
+
+// Re-exported: the sentence is a fact about the model's sources, so it lives with
+// the model — but the page and its tests reach for it here.
+export { emptyRoster };
+import { UNMEASURED, moneyFigure, nothingYet } from './absent.mjs';
 
 const money = (n) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -84,19 +89,51 @@ export function groupRoster(model) {
   const live = workers.filter((r) => r.status.status === 'running');
   const bad = workers.filter((r) => ENDED_BADLY.has(r.status.status));
   const rest = workers.filter((r) => !live.includes(r) && !bad.includes(r) && !NO_SESSION.has(r.status.status));
-  const delivered = rest.filter((r) => !r.impact.empty);
-  const nothing = rest.filter((r) => r.impact.empty);
+  // With no delivery record every finished row looks identical to one the record
+  // was silent about, so they are held apart rather than all sentenced together.
+  const unjudged = rest.filter((r) => r.impact.unjudged);
+  const judgedRest = rest.filter((r) => !r.impact.unjudged);
+  const delivered = judgedRest.filter((r) => !r.impact.empty);
+  const nothing = judgedRest.filter((r) => r.impact.empty);
   const quiet = [...workers.filter((r) => NO_SESSION.has(r.status.status)), ...other];
 
-  const spend = (list) => list.reduce((n, r) => n + (r.cost.value ?? 0), 0);
+  // Only rows that carry a figure. `?? 0` made an unpriced row worth nothing, which
+  // is how "$0.00 spent" appeared above a column of dashes — and it survived the
+  // artifact-absent fix in the day-two case, where the artifact exists and simply
+  // holds no cell for today's agents (jwildfire/obot.roadmap#223).
+  const priced = (list) => list.filter((r) => r.cost.value !== null && r.cost.value !== undefined);
+  const spend = (list) => priced(list).reduce((n, r) => n + r.cost.value, 0);
+
+  // Two measurements the headline may not fake. `costRead` is false when the hub
+  // has produced no priced usage artifact, and every cost below is then a dash
+  // rather than a number — so a total of those dashes is not $0.00, it is nothing.
+  // `judged` is false when the delivery record has never been written, and an
+  // unwritten record is not a finding that nobody delivered.
+  const artifactRead = !!model.usage && !model.usage.missing;
+  const judged = !rows.some((r) => r.impact?.unjudged);
+  // Read and priced are two questions. An artifact that opened but holds nothing for
+  // any of these rows has measured none of them, and their sum is not zero.
+  const costRead = artifactRead && priced(workers).length > 0;
+  const standingCostRead = artifactRead && priced(standing).length > 0;
 
   return {
     headline: {
       workers: workers.length,
-      cost: spend(workers),
-      delivered: workers.filter((r) => !r.impact.empty).length,
-      nothing: workers.filter((r) => r.impact.empty && !NO_SESSION.has(r.status.status)).length,
-      standingCost: spend(standing),
+      cost: costRead ? spend(workers) : null,
+      costRead,
+      artifactRead,
+      unpriced: workers.length - priced(workers).length,
+      delivered: judged ? workers.filter((r) => !r.impact.empty).length : null,
+      // The same set the "Produced nothing" group holds. It used to be every worker
+      // with an empty impact, which swept in the ones still running — so the
+      // headline said "1 produced nothing" over a row the page itself labelled
+      // "still working" under "Running now". A verdict passed early is the same
+      // defect as a verdict passed over an unread file.
+      nothing: judged ? nothing.length : null,
+      judged,
+      standing: standing.length,
+      standingCost: standingCostRead ? spend(standing) : null,
+      standingCostRead,
       unattributed: model.unattributed ?? null,
     },
     groups: [
@@ -108,10 +145,14 @@ export function groupRoster(model) {
         note: 'moved a requirement, or closed or merged something' },
       { id: 'nothing', title: 'Produced nothing', rows: nothing.sort(byCost),
         note: 'finished, and the delivery record shows nothing moved' },
+      { id: 'unjudged', title: 'Finished, not judged', rows: unjudged.sort(byCost),
+        note: 'no delivery record on this machine yet, so nothing here has been weighed either way' },
       { id: 'standing', title: 'Standing sessions', rows: standing.sort(byCost),
         note: 'long-lived, and not judged on delivery — they answer and route rather than ship' },
     ].filter((g) => g.rows.length),
     quiet: quiet.sort(byCost),
+    jobsRead: model.sources?.jobs?.present !== false,
+    unjudgedRows: rows.some((r) => r.impact?.unjudged),
     unattributed: model.unattributed ?? null,
     droppedDeaths: model.droppedDeaths ?? 0,
     usage: model.usage ?? null,
@@ -138,6 +179,11 @@ function impactCell(row, kind = kindOf(row)) {
   const i = row.impact;
   if (row.status.status === 'not launched') {
     return '<span class="im-none">no session ever ran under this id</span>';
+  }
+  if (i.unjudged) {
+    // The verdict this cell usually carries requires a record to have been read
+    // and found silent about this agent. An absent record is not that finding.
+    return '<span class="im-none">not judged — no delivery record yet</span>';
   }
   if (i.empty) {
     // Three different silences, and rendering them as one sentence is how the page
@@ -210,13 +256,40 @@ const group = (g) => `<section class="ag-g">
 const tile = (label, big, sub) => `<div class="hl-t"><span class="hl-k">${esc(label)}</span><span class="hl-v">${big}</span><span class="hl-s">${sub}</span></div>`;
 
 /** The three numbers the page exists to show, at the top where they belong. */
+/** `$1,234.56 spent`, or the reason there is no figure — never `$0.00 spent`. */
+const spentSub = (h) => {
+  if (h.costRead) return `${esc(money(h.cost))} spent${h.unpriced ? ` · ${h.unpriced} not yet priced` : ''}`;
+  return h.artifactRead
+    ? 'spend not measured — the usage artifact holds no figure for any of these agents yet'
+    : 'spend not measured — no priced usage artifact';
+};
+
+/** The delivery tile's big number, and the sentence under it. */
+const movedBig = (h) => (h.judged ? `${h.delivered}` : UNMEASURED);
+const movedSub = (h) => {
+  if (!h.judged) return 'no delivery record yet — impact not measured';
+  if (h.nothing) return `${h.nothing} produced nothing`;
+  // `delivered === 0` with `nothing === 0` used to fall through to the
+  // congratulation, so a page with nothing credited to anyone read "every one
+  // delivered".
+  return h.delivered ? 'every one delivered' : 'no agent has been credited with anything yet';
+};
+
+/** The standing tile: an empty group has no cost, rather than a cost of zero. */
+const standingText = (h) => (h.standing
+  ? esc(h.standingCostRead ? money(h.standingCost) : UNMEASURED)
+  : UNMEASURED);
+const standingSub = (h) => (h.standing
+  ? 'concierge and officer, not judged on delivery'
+  : 'no standing session on this machine yet');
+
 function headline(h) {
   const u = h.unattributed;
   return `<div class="hl">
-  ${tile('Workers today', `${h.workers}`, `${esc(money(h.cost))} spent`)}
-  ${tile('Moved something', `${h.delivered}`, h.nothing ? `${h.nothing} produced nothing` : 'every one delivered')}
-  ${tile('Standing sessions', esc(money(h.standingCost)), 'concierge and officer, not judged on delivery')}
-  ${u ? tile('Before worker ids', esc(money(u.cost)), `${plural(u.agents, 'agent')}, none traceable`) : ''}
+  ${tile('Workers today', `${h.workers}`, spentSub(h))}
+  ${tile('Moved something', movedBig(h), movedSub(h))}
+  ${tile('Standing sessions', standingText(h), standingSub(h))}
+  ${u ? tile('Before worker ids', esc(h.artifactRead ? money(u.cost) : UNMEASURED), `${plural(u.agents, 'agent')}, none traceable`) : ''}
 </div>`;
 }
 
@@ -230,7 +303,7 @@ function headline(h) {
  */
 export function briefParts(model) {
   if (!model || !(model.rows ?? []).length) {
-    return { empty: '<p class="ag-empty">No agent has run since the worker ledger was adopted.</p>' };
+    return { empty: `<p class="ag-empty">${esc(emptyRoster(model))}</p>` };
   }
   const v = groupRoster(model);
   const h = v.headline;
@@ -239,18 +312,20 @@ export function briefParts(model) {
   const delivered = v.groups.find((x) => x.id === 'delivered')?.rows.length ?? 0;
   const nothing = v.groups.find((x) => x.id === 'nothing')?.rows.length ?? 0;
   const standing = v.groups.find((x) => x.id === 'standing')?.rows.length ?? 0;
+  const unjudged = v.groups.find((x) => x.id === 'unjudged')?.rows.length ?? 0;
   const counts = [
     delivered ? `${delivered} delivered` : null,
     nothing ? `${nothing} produced nothing` : null,
+    unjudged ? `${unjudged} not judged` : null,
     standing ? `${standing} standing` : null,
     v.quiet.length ? `${plural(v.quiet.length, 'quiet agent')}` : null,
   ].filter(Boolean).join(' · ');
   return {
     headline: `<div class="hl">
-  ${tile('Workers today', `${h.workers}`, `${esc(money(h.cost))} spent`)}
-  ${tile('Moved something', `${h.delivered}`, h.nothing ? `${h.nothing} produced nothing` : 'every one delivered')}
+  ${tile('Workers today', `${h.workers}`, spentSub(h))}
+  ${tile('Moved something', movedBig(h), movedSub(h))}
 </div>
-<p class="hl-clause">Standing sessions ${esc(money(h.standingCost))} — concierge and officer, not judged on delivery.${u ? ` Before worker ids: ${plural(u.agents, 'agent')}, ${esc(money(u.cost))} — in the full record.` : ''}</p>`,
+<p class="hl-clause">Standing sessions ${standingText(h)} — ${standingSub(h)}.${u ? ` Before worker ids: ${plural(u.agents, 'agent')}, ${esc(h.artifactRead ? money(u.cost) : UNMEASURED)} — in the full record.` : ''}</p>`,
     live: g('live'),
     bad: g('bad'),
     countsLine: `<p class="ag-more">${esc(counts)} — <a href="/session/log">the full record →</a> <span class="ag-morewhy">every agent as a table, every delivery verdict, every Navigator call</span></p>`,
@@ -290,6 +365,7 @@ const foot = (v) => `<details class="ag-foot">
     <li>Workers that ran before the ledger are grouped as workers, not as unidentified agents: the id marks when the convention landed, not what kind of agent something is.</li>
     <li>Status is the job record joined to its append-only timeline. Where the two disagree the timeline wins, because a state file can say done over a session that fell over.</li>
     <li>Impact is the Navigator delivery record, checked against GitHub — never the job records' own child list, which is empty for nearly half of measured jobs.</li>
+    ${v.unjudgedRows ? '<li>No delivery record has been written on this machine yet, so no row above has been judged. That is not a finding that nobody delivered — it is the absence of the file the finding would come from.</li>' : ''}
     ${v.droppedDeaths ? `<li>${plural(v.droppedDeaths, 'earlier agent')} that also ended badly are not shown; the list of deaths is capped at ${DEAD_SHOWN}.</li>` : ''}
     ${v.epochDay ? `<li>Scope: agents active since the ledger was adopted on ${esc(v.epochDay)}.</li>` : ''}
   </ul>
@@ -298,14 +374,16 @@ const foot = (v) => `<details class="ag-foot">
 /** The roster page. */
 export function rosterHtml(model) {
   if (!model || !(model.rows ?? []).length) {
-    return '<p class="ag-empty">No agent has run since the worker ledger was adopted.</p>';
+    return `<p class="ag-empty">${esc(emptyRoster(model))}</p>`;
   }
   const v = groupRoster(model);
   const u = v.unattributed;
   return `${headline(v.headline)}
 ${v.groups.map(group).join('\n')}
 ${v.quiet.length ? `<details class="ag-fold">
-  <summary>${plural(v.quiet.length, 'agent')} with no session of its own <span class="ag-gnote">probes, and ids nothing ever ran under</span></summary>
+  <summary>${plural(v.quiet.length, 'agent')} with no job record on this machine <span class="ag-gnote">${esc(v.jobsRead === false
+    ? 'claimed, but ~/.claude/jobs is not here to match them against'
+    : 'probes, and ids nothing ever ran under')}</span></summary>
   ${v.quiet.map((r) => agentRow(r)).join('\n')}
 </details>` : ''}
 ${u ? `<details class="ag-fold">

@@ -124,7 +124,11 @@ def read_entries(ws, day=None):
     """The rendered record, parsed back into verdict and call lines for one day."""
     md = record_path(ws)
     if not md.exists():
-        return {"verdicts": [], "calls": []}
+        # `armed` is what tells the renderer apart from a day with no entries. The
+        # tool's own `report()` has always said "This is not the same as a clean
+        # day; it means nothing has been written" - that sentence never reached the
+        # state file, because "not armed" exits 0 (jwildfire/obot.roadmap#223).
+        return {"verdicts": [], "calls": [], "armed": False}
     day = day or _today()
     verdicts, calls = [], []
     for raw in md.read_text(encoding="utf-8").splitlines():
@@ -132,7 +136,7 @@ def read_entries(ws, day=None):
         if not line.startswith("- ") or day not in line:
             continue
         (calls if " · call " in line else verdicts).append(line[2:])
-    return {"verdicts": verdicts, "calls": calls}
+    return {"verdicts": verdicts, "calls": calls, "armed": True}
 
 
 def render(ws, day=None):
@@ -144,6 +148,14 @@ def render(ws, day=None):
     day = day or _today()
     e = read_entries(ws, day)
     out = ["## Delivery - %s" % day, ""]
+    if not e.get("armed", True):
+        # One sentence in place of both verdicts: neither "no closeouts today" nor
+        # "no call has been made on your behalf" is a claim this machine can make.
+        out.append(
+            "- **NO RECORD** - `%s` does not exist on this machine, so nothing is "
+            "being recorded. This is not a quiet day; it is an unwritten one. The "
+            "Navigator session creates it on its first closeout." % record_path(ws))
+        return "\n".join(out) + "\n"
     if not e["verdicts"]:
         out.append("- no closeouts recorded yet today")
     for v in e["verdicts"]:

@@ -41,7 +41,8 @@ Outputs: live → `<workspace>/.claude/session-hub/live.html` (open in Chrome fr
 ## Serving the live view (`--serve`)
 
 `--serve` publishes the rendered file on **loopback HTTP** — `http://127.0.0.1:7325/live.html`,
-or the next free port — and writes the endpoint to `.claude/session-hub/serve.json`:
+or the next free port — and, when it is the machine's dashboard, writes the endpoint to
+`.claude/session-hub/serve.json`:
 
 ```json
 { "port": 7325, "pid": 42717, "url": "http://127.0.0.1:7325/live.html", "startedAt": "…" }
@@ -57,8 +58,32 @@ dashboard. An `http://` URL always lands in the default browser. The status line
 The server is deliberately small and closed: loopback bind only (never `0.0.0.0` — the
 live view carries session names, agent intents and scratchpad lines), `GET`/`HEAD` only,
 no directory listings, no path escapes out of `.claude/session-hub/`, and `no-store` so a
-regenerated view is never cached. `serve.json` is removed on exit; a killed process leaves
-it behind, which is why readers check the pid.
+regenerated view is never cached.
+
+### The marker is a claim, and a second instance declines it
+
+`serve.json` says one thing: *this is the machine's dashboard, here*. Five second
+instances took that claim from a healthy server on 2026-08-16 and deleted it on the way
+out — every one of them an agent doing the right thing, running a test server while
+changing the dashboard — leaving @jwildfire's status line on a dead link for half an hour
+([#142](https://github.com/jwildfire/obot.agent/issues/142)). The rules that ended it live
+in [`ops-dashboard/lib/serve-marker.mjs`](../ops-dashboard/lib/serve-marker.mjs), shared by
+both servers:
+
+- an explicit **non-default `--port`** names a test server, which never claims the marker;
+- a server that **did not get the port it asked for** is not the dashboard either;
+- a **live** marker held by another process is never overwritten;
+- an instance removes only the marker it **owns** — recorded pid *and* recorded port;
+- a reader is told **`stale`** rather than handed a URL that no longer answers.
+
+Declining is announced on stdout, so a test server says what it did not do. Read the
+marker through the tool rather than the file, because the file alone cannot tell you
+whether the server it names is still running:
+
+```bash
+node obot.agent/tools/serve-marker           # state: none | unreadable | stale | live
+node obot.agent/tools/serve-marker --url     # the URL, only when live (exit 1 otherwise)
+```
 
 It records one thing besides serving: **when the live view was last actually opened**, so
 surfaces built for @jwildfire's absence can answer *what changed since I last looked*

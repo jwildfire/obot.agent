@@ -35,8 +35,12 @@ sleep 1 && open -a "Google Chrome" "http://127.0.0.1:7326/"
 ```
 
 If the port rolled forward (7326 was taken), the chosen URL is the first line of
-`.claude/ops/serve.log` — and `.claude/session-hub/serve.json` carries the bound port,
-which is also where the status line looks.
+`.claude/ops/serve.log`. It will **not** be in `.claude/session-hub/serve.json`: a server
+that did not get the dashboard's port is not the dashboard, so it declines the marker and
+says so in the log ([obot.agent#142](https://github.com/jwildfire/obot.agent/issues/142)).
+Same for a deliberate `--port 7399` test server — serve it, poke it, kill it; the status
+line never moves. Ask `node obot.agent/tools/serve-marker` what the marker actually says
+(`none` / `unreadable` / `stale` / `live`) rather than reading the file.
 
 The session tab needs the session hub's watch loop running to have anything to show
 (`/session-dashboard` starts it); without one, the tab says so and names the command.

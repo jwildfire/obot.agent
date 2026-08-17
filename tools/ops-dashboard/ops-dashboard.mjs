@@ -30,8 +30,10 @@
 //
 //   --workspace <dir>  workspace root (default: cwd)
 //   --hub <dir>        obot.roadmap clone (default: <workspace>/obot.roadmap)
-//   --port <n>         loopback port (default 7326; rolls forward if taken, and the
-//                      bound port is what lands in the status line's serve marker)
+//   --port <n>         loopback port (default 7326; rolls forward if taken). Naming a
+//                      port other than the default marks this as a test server: it
+//                      serves normally but never claims the serve marker, so it cannot
+//                      take the status line away from the real dashboard (#142)
 //   --serve            run the server (without it, render once to stdout)
 //   --open             print the URL when the server is up
 import fs from 'node:fs';
@@ -52,6 +54,7 @@ import { runVerify, readChecks } from './lib/iq.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
 import { captureCode, codeState, fetchHub, resolveHub } from './lib/provenance.mjs';
+import { markerPath, holdServeMarker } from './lib/serve-marker.mjs';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 7326;
@@ -77,12 +80,15 @@ const WATCH_CMD = 'node obot.agent/tools/session-hub/session-hub.mjs --watch';
 const SURFACE_ALIASES = { '/index.html': '/', '/session': '/live.html' };
 
 export function parseArgs(argv) {
-  const a = { port: DEFAULT_PORT, serve: false, open: false };
+  // `claimMarker` is the whole of the primary fix for #142: a server told an
+  // explicit non-default port is a test server, and a test server is never the
+  // machine's dashboard, so it declines the marker instead of taking it.
+  const a = { port: DEFAULT_PORT, serve: false, open: false, claimMarker: true };
   for (let i = 0; i < argv.length; i++) {
     const f = argv[i];
     if (f === '--workspace') a.workspace = argv[++i];
     else if (f === '--hub') a.hub = argv[++i];
-    else if (f === '--port') a.port = Number(argv[++i]) || DEFAULT_PORT;
+    else if (f === '--port') { a.port = Number(argv[++i]) || DEFAULT_PORT; a.claimMarker = a.port === DEFAULT_PORT; }
     else if (f === '--serve') a.serve = true;
     else if (f === '--open') a.open = true;
     else if (f === '--help' || f === '-h') a.help = true;
@@ -122,25 +128,15 @@ export function sessionLivePath(workspace) {
  * points here and `/live.html` lands on the session tab — the link keeps resolving
  * without the status line knowing anything changed.
  *
- * Same contract as session-hub's own `serveHub`: `{port, pid, url, startedAt}`, and it
- * is removed on exit only when the pid still matches, so a server that outlives this
- * one keeps its own marker.
+ * Claiming it is conditional, and declining is the normal outcome for a second
+ * instance: the rules and the reasons live in `lib/serve-marker.mjs` (#142). The
+ * return value says which happened, so the caller can print it rather than leaving
+ * a silent no-op.
  */
-export function writeServeMarker(workspace, { port, url }) {
-  const dir = path.join(workspace, ...SESSION_DIR);
-  fs.mkdirSync(dir, { recursive: true });
-  const marker = path.join(dir, 'serve.json');
-  fs.writeFileSync(marker, `${JSON.stringify({
-    port, pid: process.pid, url, startedAt: new Date().toISOString(), site: 'ops-dashboard',
-  }, null, 2)}\n`);
-  const cleanup = () => {
-    try {
-      if (JSON.parse(fs.readFileSync(marker, 'utf8')).pid === process.pid) fs.unlinkSync(marker);
-    } catch { /* already gone, or another server's marker — leave it */ }
-  };
-  process.on('exit', cleanup);
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(0); });
-  return marker;
+export function writeServeMarker(workspace, { port, url, requestedPort, claim = true }) {
+  return holdServeMarker(markerPath(workspace), {
+    port, url, site: 'ops-dashboard', requestedPort, claim,
+  });
 }
 
 /**
@@ -175,11 +171,18 @@ export function hubSource(args) {
   }
 }
 
+/** The sweep script, when this machine has one. Null is a state, not a path. */
+export function sweepScript(workspace) {
+  const rq = path.join(workspace, 'obot.agent', 'scripts', 'reviews-queue');
+  return fs.existsSync(rq) ? rq : null;
+}
+
 async function page(args, lastLook = null) {
   const hub = hubSource(args);
-  const queue = await collectQueue(args.workspace, hub.root, {
-    agent: path.join(args.workspace, 'obot.agent', 'scripts', 'reviews-queue'),
-  });
+  // A path that does not exist is not a collector. Handing one to the sweep meant
+  // every render fired a spawn that failed with ENOENT and left the page promising
+  // a sweep that could not start (jwildfire/obot.roadmap#223).
+  const queue = await collectQueue(args.workspace, hub.root, { agent: sweepScript(args.workspace) });
   // The last recorded pass/fail per item, so an installation qualification opens
   // showing whether it has ever been proved rather than starting blank.
   const checks = readChecks(args.workspace);
@@ -326,16 +329,19 @@ export function serve(args) {
           try {
             delivery = parseDeliveryJournal(fs.readFileSync(path.join(args.workspace, ...SESSION_DIR, 'delivery.journal'), 'utf8'));
           } catch { /* no journal yet — the tables say so */ }
+          // The what-changed feed moved here with the outcome groups when the tab
+          // became a table (jwildfire/obot.agent#154). A feed that cannot assemble
+          // costs the feed, never the page.
+          let feed = [];
+          try {
+            feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
+          } catch { /* no feed — the record renders without it */ }
           return send(200, 'text/html; charset=utf-8', sessionLogShell({
-            roster, delivery, lastLook: before,
+            roster, delivery, feed, lastLook: before,
             missing: sessionLivePath(args.workspace) ? null : WATCH_CMD,
           }));
         }
-        let feed = [];
-        try {
-          feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
-        } catch { /* a feed that cannot assemble costs the feed, never the page */ }
-        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, feed, lastLook: before }));
+        return send(200, 'text/html; charset=utf-8', sessionShell({ roster, lastLook: before }));
       }
       if (p === '/session/frame') {
         const live = sessionLivePath(args.workspace);
@@ -377,8 +383,18 @@ export function serve(args) {
       }
 
       if (p === '/queue.json') {
-        const q = await collectQueue(args.workspace, hubSource(args).root);
-        return send(200, 'application/json', JSON.stringify({ items: q.items }, null, 2));
+        const q = await collectQueue(args.workspace, hubSource(args).root, { agent: sweepScript(args.workspace) });
+        // The provenance travels with the data. `{"items": []}` was the whole
+        // answer, so a machine reader was told the queue is empty when the truth
+        // was that none of its three sources could be opened.
+        return send(200, 'application/json', JSON.stringify({
+          items: q.items,
+          sources: {
+            rcs: { read: !q.rcs?.error, why: q.rcs?.error ?? null },
+            decisions: { read: !q.decisions?.error, why: q.decisions?.error ?? null },
+            config: { read: !q.config?.error, why: q.config?.error ?? null },
+          },
+        }, null, 2));
       }
       return send(404, 'text/plain', 'not found');
     } catch (e) {
@@ -397,8 +413,12 @@ export function serve(args) {
       server.listen(port, HOST, () => {
         const bound = server.address().port;
         const url = `http://${HOST}:${bound}/`;
-        writeServeMarker(args.workspace, { port: bound, url: `${url}live.html` });
-        resolve({ server, url });
+        // `requestedPort` is what we asked for: binding something else means the port
+        // this machine's dashboard lives on was already taken, so this is not it.
+        const marker = writeServeMarker(args.workspace, {
+          port: bound, url: `${url}live.html`, requestedPort: args.port, claim: args.claimMarker !== false,
+        });
+        resolve({ server, url, marker });
       });
     };
     listen(args.port, 20);
@@ -411,7 +431,10 @@ if (invoked) {
   if (args.help) {
     console.log('ops-dashboard — the Operations Dashboard (local only). See the header of this file.');
   } else if (args.serve) {
-    const { url } = await serve(args);
+    const { url, marker } = await serve(args);
+    // Before the URL, so a reader who sees one line sees the important one: this
+    // server is not what the status line points at.
+    if (!marker.claimed) console.log(`ops-dashboard: not claiming the serve marker — ${marker.reason}`);
     console.log(`ops-dashboard: ${url}`);
     if (args.open) console.log(url);
   } else {

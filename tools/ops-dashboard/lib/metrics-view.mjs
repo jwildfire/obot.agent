@@ -349,12 +349,18 @@ export function buildMetricsModel(cache, now = new Date(), filters = {}) {
     // "not attributable", and printed the decisions rows unfiltered beneath tiles that
     // had refused to answer at all — one page contradicting itself twice under one
     // filter, which is worse than either panel alone would have been.
+    //
+    // `unread` is the other half of the same discipline and is not the same flag:
+    // `blocked` says the filter cannot answer this series, `unread` says the
+    // decisions record could not be opened at all — a hub clone that is not there
+    // counts nothing, and five zeros read as a year in which he decided nothing.
     { group: 'Shipped', label: 'releases published', counts: windowCounts(releases, now, (r) => r.publishedAt), items: releases, blocked: releasesBlocked },
-    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date, day), epoch: filed.map((d) => d.date).sort()[0] ?? null, blocked: decisionsBlocked },
-    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date, day), epoch: decided.map((d) => d.date).sort()[0] ?? null, blocked: decisionsBlocked },
+    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date, day), epoch: filed.map((d) => d.date).sort()[0] ?? null, blocked: decisionsBlocked, unread: !cache.decisions },
+    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date, day), epoch: decided.map((d) => d.date).sort()[0] ?? null, blocked: decisionsBlocked, unread: !cache.decisions },
   ];
   return {
     ageMin,
+    decisionsRead: !!cache.decisions,
     stale: ageMin === null || ageMin > METRICS_STALE_MIN,
     repoCount: allRepos.length,
     period, repo, goal, tiles, rows,
@@ -402,10 +408,17 @@ export function metricsHtml(model, { hubUrl = 'https://jwildfire.github.io/obot.
     const label = r.items
       ? `<details><summary>${esc(r.label)}</summary><ul class="mrel">${releaseList(r.items)}</ul></details>`
       : esc(r.label);
+    // Two different refusals, and the order matters: `blocked` is about the filter
+    // the reader chose and replaces the whole row, `unread` is about a file nobody
+    // could open and replaces the figures. A blocked row has no counts to call
+    // unread, so it is answered first.
     if (r.blocked) {
       return `${groupCell}<tr class="mmuted"><td class="mlabel">${label}</td><td class="mcell mna" colspan="${WINDOWS.length}">not attributable &mdash; ${esc(r.blocked)}</td></tr>`;
     }
-    return `${groupCell}<tr${r.muted ? ' class="mmuted"' : ''}><td class="mlabel">${label}</td>${WINDOWS.map((w) => `<td class="mcell">${num(r.counts[w])}</td>`).join('')}</tr>`;
+    const cells = r.unread
+      ? WINDOWS.map(() => '<td class="mcell munread" title="the decisions record could not be read on this machine">—</td>').join('')
+      : WINDOWS.map((w) => `<td class="mcell">${num(r.counts[w])}</td>`).join('');
+    return `${groupCell}<tr${r.muted ? ' class="mmuted"' : ''}><td class="mlabel">${label}</td>${cells}</tr>`;
   }).join('\n');
   const decidedEpoch = model.rows.find((r) => r.label === 'decided by him')?.epoch;
   const filedEpoch = model.rows.find((r) => r.label === 'filed for him')?.epoch;
@@ -422,7 +435,9 @@ export function metricsHtml(model, { hubUrl = 'https://jwildfire.github.io/obot.
   ];
   return `<h2 class="nav-h">Release metrics</h2>
 ${filterBar(model)}
-<p class="mprov">Counted from GitHub across ${model.repoCount} project repos, and from the decisions record, ${esc(humanMin(model.ageMin))} · <a href="${esc(hubUrl)}/decisions/" target="_blank" rel="noopener">decisions log</a></p>
+<p class="mprov">${model.repoCount
+    ? `Counted from GitHub across ${model.repoCount} project repos${model.decisionsRead ? ', and from the decisions record' : ' — the decisions record could not be read'}, ${esc(humanMin(model.ageMin))}`
+    : 'No repos were counted — the sweep found no repo list to count across'} · <a href="${esc(hubUrl)}/decisions/" target="_blank" rel="noopener">decisions log</a></p>
 ${staleLine}
 ${unknownLine(model)}
 ${coverageLine(model)}
@@ -637,7 +652,7 @@ export function buildFeedModel(events = [], now = new Date()) {
 export function feedHtml(groups) {
   if (!groups.length) {
     return `<h2 class="nav-h">What changed</h2>
-<p class="nav-empty">Nothing recorded yet — events appear here as the sweep sees them.</p>`;
+<p class="nav-empty">Nothing recorded yet — this feed reads the delivery journal, the worker ledger, the job records and the GitHub sweep cache, and none of them has produced an event on this machine.</p>`;
   }
   return `<h2 class="nav-h">What changed</h2>
 ${groups.map((g) => `<h3 class="fday">${esc(g.day)}</h3>

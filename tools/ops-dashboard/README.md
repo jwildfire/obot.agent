@@ -30,7 +30,8 @@ node obot.agent/tools/ops-dashboard/ops-dashboard.mjs           # render once to
 | Route | View |
 |---|---|
 | `/` | the Operations Dashboard — the default view |
-| `/live.html`, `/session` | the agent roster, then the session hub's live view |
+| `/live.html`, `/session` | the Agents table — one row per agent, with a filter sidebar |
+| `/session/log` | the full record: what changed, the roster by outcome, every verdict |
 | `/session/frame` | the session hub's own render, served unchanged |
 | `/navigator` | what the 🧭🤖 Navigator sweep has seen |
 | `/artifact/<slug>/` | a decision artifact from the hub clone |
@@ -294,8 +295,27 @@ watch loop should now run **without** `--serve`:
 node obot.agent/tools/session-hub/session-hub.mjs --watch   # renders live.html; no server
 ```
 
-Two servers both writing that marker is the one way to confuse the status line, and the
-loop no longer needs to serve anything.
+### A second instance cannot take the marker
+
+Two servers both writing that marker was the one way to confuse the status line, and it
+happened five times on 2026-08-16 — every time an agent running a test server while
+changing this dashboard, which is exactly what it should be doing
+([#142](https://github.com/jwildfire/obot.agent/issues/142)). So the marker is now a claim
+that a second instance declines, rather than one it takes:
+
+```bash
+node obot.agent/tools/ops-dashboard/ops-dashboard.mjs --serve --port 7399
+# ops-dashboard: not claiming the serve marker — an explicit --port (7399) names a
+#                test server, not the machine dashboard
+# ops-dashboard: http://127.0.0.1:7399/
+```
+
+Test freely: a non-default `--port` serves the whole site and touches nothing the status
+line reads. The rules, and why each one removes a failure rather than detecting it, are in
+[`lib/serve-marker.mjs`](lib/serve-marker.mjs). Ask [`tools/serve-marker`](../serve-marker)
+what the marker says — it answers `none` / `unreadable` / `stale` / `live`, and hands back
+a URL only for `live`, because a marker left behind by a killed server looks exactly like
+a healthy one.
 
 ## The Navigator tab
 
@@ -316,15 +336,43 @@ Two things it is careful about:
   bullet is the detail of the row above it and renders as a disclosure, which is what
   lets one row carry a summary and the evidence behind it.
 
-## The agent roster
+## The Agents table
 
-`/live.html` opens with one row per agent — the id, the status, the cost and the roadmap
-impact. @jwildfire asked for it in one line on 2026-08-16 (*"I want the opsdb/sessions
-page refactored to show a list of all agents along with thier ID, status, cost and the
-impact they had on the roadmap"*); requirement
-[roadmap #199](https://github.com/jwildfire/obot.roadmap/issues/199), task
-[#138](https://github.com/jwildfire/obot.agent/issues/138). It is assembled in
-`lib/roster.mjs`, fresh on every request, from four files and nothing else:
+`/live.html` is a table with a filter sidebar: one row per agent, carrying the id, the
+status, the cost, the closeout verdict, the roadmap impact and the day it was last
+active. @jwildfire described this view three times, each more concretely, and the third
+is the specification (2026-08-17): *"I want the db session manager view to be a table
+with a sidebar with filters. Each row is an agent. It should share a data feed as the
+price analytics page."* Requirement
+[roadmap #227](https://github.com/jwildfire/obot.roadmap/issues/227), task
+[#154](https://github.com/jwildfire/obot.agent/issues/154). The escalating concreteness
+was the finding: each earlier build improved on the ask instead of meeting it, so this
+one is literal and the pieces of the previous one moved to `/session/log` rather than
+sitting above the table he asked for.
+
+**The filters** are `lib/roster-table.mjs`: status, produced, active period, repo
+touched, closeout verdict, kind. Within a group the boxes are OR; across groups they are
+AND. The counts beside each option are over the whole roster rather than the current
+selection — a count that changes as you tick boxes cannot tell you what ticking the next
+one would give you, which is the only reason to print it. An option is offered only when
+something has it: a box that can never match teaches the reader that the filter is
+decorative, and after that an empty result is indistinguishable from a broken one.
+
+**At 390px** the sidebar is the same `<details>` element it is on a desktop — open
+beside the table there, collapsed to one summary bar above it on a phone, with the live
+count (`12 of 38 · $80.22`) already on the bar so it is worth reading closed. That is a
+decision rather than a reflow: a media query that drops a sidebar under the content puts
+a screenful of checkboxes between him and the table. The table stays a table and scrolls
+sideways inside its own box, with the agent column pinned so a row never loses its name
+mid-swipe.
+
+**Sorting** is on every column header. First click gives the end of the column he came
+for — biggest number, most recent day, top of the alphabet — and the pre-ledger bucket
+sorts last by default whatever it cost, because it is 147 agents added together rather
+than an agent.
+
+The model is `lib/roster.mjs`, unchanged and assembled fresh on every request, from four
+files and nothing else:
 
 | Column | Source |
 |---|---|
@@ -361,6 +409,12 @@ The row is the agent, not the session: sessions are a count on the row and subag
 (`W0042.1`) roll into their parent, since impact is judged per worker. Two disclosures
 are printed on the page rather than left to be discovered — that the figures are list
 price rather than a bill, and that ids are forward-only from 2026-08-16.
+
+**The shared feed is the point, and it is met by not touching it.** The requirement's
+load-bearing line is that this page and the hub's analytics page price from the same
+artifact. They do: the table's unfiltered total reads the same figure as `usage.json`'s
+own `totals.cost`, to the cent, because nothing here computes a price. Two cost numbers
+that disagree is the registry-versus-index failure again, and this time about money.
 
 ## What happens when he answers a decision
 

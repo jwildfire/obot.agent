@@ -465,6 +465,11 @@ export function collectMetrics({ repos, hub, now = new Date(), exec = gh }) {
   try {
     out.decisions = readDecisions(hub)
   } catch (e) {
+    // Null, not the seeded empty pair. A decisions record that could not be opened
+    // is indistinguishable from one that recorded nothing once it is cached as
+    // `{filed: [], decided: []}`, and the cells are what get read — the "known
+    // gaps" line below the table is a footnote (jwildfire/obot.roadmap#223).
+    out.decisions = null
     out.errors.push(`decisions: ${String(e.message).slice(0, 120)}`)
   }
   return out

@@ -260,3 +260,17 @@ test('the wake section reaches the dashboard with its verdict and its alarm inta
   assert.ok(notes.some((i) => /36 unjudged closeout/.test(i.text)), 'the bound renders')
   assert.ok(wake.items.some((i) => /W0007 closed out/.test(i.text)), 'and so does the pending row')
 })
+
+test('with no job ledger on the machine the channel is unwatched, not clear', () => {
+  // Every detector in this module reads `~/.claude/jobs`. On a machine that has
+  // never run an agent the pending list is empty because nothing was looked at, and
+  // "clear — every worker that stopped has been judged" is the strongest claim on
+  // the surface resting on the weakest evidence (jwildfire/obot.roadmap#223).
+  const unread = wakeSection({ pending: [], jobsRead: false })
+  assert.match(unread, /wake: \*\*NO READING\*\*/)
+  assert.match(unread, /not a clear channel/)
+  assert.doesNotMatch(unread, /wake: clear/)
+
+  // Read and empty is a measurement and keeps the verdict.
+  assert.match(wakeSection({ pending: [] }), /wake: clear/)
+})

@@ -181,7 +181,13 @@ export function lastSeen(workspace, surface, now = new Date()) {
   if (!store.ok) return { state: 'unknown', at: null, ageMs: null, why: store.why };
 
   const at = store.surfaces[surface];
-  if (at === undefined) return { state: 'first', at: null, ageMs: null };
+  // A store that is not on this machine and a surface he has genuinely never opened
+  // are different facts, and this function's own header says the outcomes are kept
+  // apart because they render differently — on this one they did not.
+  // `.claude/ops/last-seen.json` is local-only and never committed, so on a new
+  // machine it is absent while he has read the dashboard daily for weeks, and "first
+  // look" is an assertion about him (jwildfire/obot.roadmap#223).
+  if (at === undefined) return { state: 'first', at: null, ageMs: null, storeMissing: !!store.missing };
 
   const t = typeof at === 'string' ? Date.parse(at) : NaN;
   if (Number.isNaN(t)) return { state: 'unknown', at: null, ageMs: null, why: 'the stamp is not a time' };
@@ -205,7 +211,7 @@ const ago = (ms) => {
 /** The verdict in the words a page should use. Short, because the header is one row. */
 export function phrase(v) {
   if (!v || v.state === 'unknown') return 'last opened: unknown';
-  if (v.state === 'first') return 'first look';
+  if (v.state === 'first') return v.storeMissing ? 'no visit recorded here' : 'first look';
   return `last opened ${ago(v.ageMs)}`;
 }
 

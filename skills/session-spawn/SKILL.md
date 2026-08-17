@@ -122,7 +122,11 @@ Two things stay spawn-specific:
 - **Merging**: never merge without Jeremy's explicit approval (operating
   contract — unchanged). Once a merge IS approved, use the policy-gated lane
   only: `obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>` (add `--check`
-  to dry-run the policy first). It resolves the base branch against
+  to dry-run the policy first) — typed as a **single, undecorated command**. The
+  workspace allowlist matches that string whole; a `bash` prefix, a `./`, a
+  `cd … &&`, a trailing `; echo`, or a `| tail -20` breaks the match and drops
+  the call through to the auto-mode classifier, which refuses roughly one call
+  in thirty at random. It resolves the base branch against
   [`scripts/policy.json`](../../scripts/policy.json), merges as
   obotclaw[bot], and verifies the result. Only the **integration** branch of an
   **`auto`**-profile repo merges on the standard lane; every branch of a

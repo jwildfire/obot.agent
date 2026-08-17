@@ -54,7 +54,13 @@ export function collectJobs({ jobsDir = path.join(os.homedir(), '.claude', 'jobs
   try {
     entries = fs.readdirSync(jobsDir, { withFileTypes: true });
   } catch (err) {
-    return { notice: `jobs directory unreadable (${err.code ?? err.message})` };
+    // ENOENT is the expected day-one state on a machine no agent has run on, not a
+    // fault — "unreadable" reads like a permissions problem and sends the reader
+    // looking for one (jwildfire/obot.roadmap#223). A real read failure keeps the
+    // old wording, because that one IS a fault.
+    return err.code === 'ENOENT'
+      ? { read: false, notice: `no job records yet — ${jobsDir} does not exist; a background agent creates it on its first run` }
+      : { read: false, notice: `jobs directory unreadable (${err.code ?? err.message})` };
   }
   const jobs = [];
   for (const e of entries) {
@@ -68,7 +74,10 @@ export function collectJobs({ jobsDir = path.join(os.homedir(), '.claude', 'jobs
       if (fs.existsSync(file)) jobs.push({ id: e.name, name: `job ${e.name}`, state: 'unknown', detail: '', children: [], tokens: null, result: null, model: null, degraded: 'unparseable state.json' });
     }
   }
-  return { data: jobs };
+  // `read` travels with the data so a renderer can tell "the directory is there and
+  // holds nothing" from "the directory is not there" — the two produce the same
+  // empty array and must not produce the same sentence.
+  return { data: jobs, read: true, empty: jobs.length === 0 };
 }
 
 /** `claude agents --json --cwd <ws>` — interactive sessions + liveness. */
@@ -78,10 +87,10 @@ export function collectAgentsCli({ workspace, exec = execFileSync } = {}) {
       encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'],
     });
     const list = JSON.parse(out);
-    if (!Array.isArray(list)) return { notice: 'claude agents returned non-array' };
-    return { data: list };
+    if (!Array.isArray(list)) return { read: false, notice: 'claude agents returned non-array' };
+    return { data: list, read: true };
   } catch (err) {
-    return { notice: `claude agents unavailable (${err.code ?? 'error'})` };
+    return { read: false, notice: `claude agents unavailable (${err.code ?? 'error'})` };
   }
 }
 
