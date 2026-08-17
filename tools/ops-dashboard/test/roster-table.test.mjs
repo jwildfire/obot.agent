@@ -258,9 +258,15 @@ const text = (s) => String(s).replace(/<[^>]*>/g, '').trim();
 // standing role with no session in the fixture now renders its own row at the top of
 // the table, and `td` takes the first cell it finds. Scoping here rather than
 // unpinning in each fixture keeps these tests about the column they are named for.
+//
+// The marker is REQUIRED rather than optional. A fallback to the whole document would
+// hand these tests back the pinned row the moment the attribute moved — passing
+// wrongly or failing somewhere unrelated — and a helper that silently reverts to the
+// thing it exists to prevent cannot report that it stopped working.
 const agents = (html) => {
   const i = html.indexOf('data-sec="rest"');
-  return i === -1 ? html : html.slice(i);
+  assert.ok(i !== -1, 'the table should carry a rest band to scope these reads to');
+  return html.slice(i);
 };
 
 test('a worker is created when its id was claimed, and the row says which record said so', () => {
