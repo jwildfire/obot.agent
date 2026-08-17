@@ -418,8 +418,13 @@ test('a workspace with none of the four files degrades to a sentence', () => {
   assert.match(rosterMarkdown(model), /## /);
   assert.match(rosterMarkdown(model), /unavailable/i);
   // The page says so rather than rendering an empty roster, which would read as
-  // "no agents ran" when it means "nothing could be read".
-  assert.match(rosterHtml(model), /No agent has run/i);
+  // "no agents ran" when it means "nothing could be read". This assertion used to
+  // read `/No agent has run/` — the very sentence the comment above rules out, and
+  // it passed because nothing distinguished an absent ledger from an empty one
+  // (jwildfire/obot.roadmap#223). The jobs directory here exists and is empty; the
+  // worker ledger does not exist at all, and only the second is worth a sentence.
+  assert.doesNotMatch(rosterHtml(model), /No agent has run/i);
+  assert.match(rosterHtml(model), /No worker ledger on this machine yet/i);
 });
 
 // ---- what the live data caught -------------------------------------------
@@ -728,4 +733,89 @@ test('an empty roster still carries the feed and the record link — CI has no j
   assert.match(html, /No agent has run/);
   assert.match(html, /\/session\/log/);
   assert.match(html, /What changed/);
+});
+
+// ---- a machine with no history -------------------------------------------
+//
+// jwildfire/obot.roadmap#223. Every source the roster joins is absent on the first
+// morning of a new machine, and until now the page answered that by making the
+// numbers up: the cost cells said "cost unavailable — no usage artifact" while the
+// headline above them said "$0.00 spent", and every row landed under "produced
+// nothing" because the delivery record it would have been judged against had never
+// been written. A zero and an unread file look identical, which is the whole reason
+// these pages exist.
+
+const JOBS_ONLY = [{
+  job: 'aaa11122', name: '👯🤖 W0001 nobold', state: 'working', detail: 'day two',
+  startedAt: '2026-08-16T08:00:00Z', updatedAt: '2026-08-16T09:50:00Z', tokens: 1234,
+  timeline: { state: 'working', at: '2026-08-16T09:50:00Z', entries: 3 },
+}];
+
+test('with no usage artifact the headline does not invent a total', () => {
+  const model = buildRoster({
+    workers: parseWorkers(JOURNAL), jobs: JOBS_ONLY,
+    usage: usageIndex(null), delivery: [], now: NOW,
+  });
+  const html = rosterHtml(model);
+  // The cells were already honest. The headline was not, and it is the biggest
+  // type on the page.
+  assert.doesNotMatch(html, /\$0\.00/);
+  assert.match(html, /—/);
+  assert.match(html, /no priced usage artifact|cost unavailable|not been priced/i);
+});
+
+test('with no delivery record no agent is called one that produced nothing', () => {
+  const model = buildRoster({
+    workers: parseWorkers(JOURNAL), jobs: JOBS_ONLY,
+    usage: usageIndex(null), delivery: [], now: NOW,
+    sources: { delivery: { present: false } },
+  });
+  const html = rosterHtml(model);
+  // "Produced nothing" is a verdict. It requires a delivery record to have been
+  // read and found silent about this agent — not for the file to be absent.
+  assert.doesNotMatch(html, /produced nothing/i);
+  assert.doesNotMatch(html, /nothing moved/i);
+  assert.match(html, /no delivery record/i);
+});
+
+test('the model says which of its four sources it actually read', () => {
+  const model = buildRoster({
+    workers: parseWorkers(JOURNAL), jobs: [], usage: usageIndex(null), delivery: [],
+    sources: {
+      jobs: { path: '/home/.claude/jobs', present: false },
+      workers: { path: '/ws/.claude/workers.journal', present: true },
+      usage: { path: '/hub/site/usage/usage.json', present: false },
+      delivery: { path: '/ws/.claude/session-hub/delivery.md', present: false },
+    },
+    now: NOW,
+  });
+  assert.equal(model.sources.workers.present, true);
+  assert.equal(model.sources.jobs.present, false);
+});
+
+test('an absent worker ledger and an empty one say different things', () => {
+  const absent = rosterHtml(buildRoster({
+    workers: parseWorkers(''), jobs: [], usage: usageIndex(null), delivery: [], now: NOW,
+    sources: { workers: { path: '/ws/.claude/workers.journal', present: false } },
+  }));
+  const empty = rosterHtml(buildRoster({
+    workers: parseWorkers(JSON.stringify({ ts: NOW.toISOString(), op: 'seed', epoch: NOW.toISOString() })),
+    jobs: [], usage: usageIndex(null), delivery: [], now: NOW,
+    sources: { workers: { path: '/ws/.claude/workers.journal', present: true } },
+  }));
+  // Absent: nothing can be claimed about what has run. Present-and-empty: the
+  // ledger exists and nobody has claimed an id under it, which IS a measurement.
+  assert.notEqual(absent, empty);
+  assert.doesNotMatch(absent, /No agent has run/);
+  assert.match(absent, /not been (created|started)|no worker ledger/i);
+  assert.match(empty, /No agent has run/);
+});
+
+test('collectRoster on a machine with nothing at all reports every source unread', () => {
+  const ws = tmp();
+  const model = collectRoster({ workspace: ws, hub: path.join(ws, 'obot.roadmap'), jobsDir: path.join(ws, 'no-jobs-here'), now: NOW });
+  assert.deepEqual(model.rows, []);
+  for (const key of ['jobs', 'workers', 'usage', 'delivery']) {
+    assert.equal(model.sources[key].present, false, `${key} should be reported unread`);
+  }
 });

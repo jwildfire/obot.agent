@@ -73,6 +73,15 @@ export const DEAD_SHOWN = 8;
 
 const HUB_WORDS = new Set(['hub', 'goal', 'goals', 'roadmap', 'obot.roadmap']);
 
+// What a caller that does not say is assumed to have read. `assumed` marks it as an
+// assumption rather than an observation, so nothing downstream can quote it as one.
+const DEFAULT_SOURCES = {
+  jobs: { path: null, present: true, assumed: true },
+  workers: { path: null, present: true, assumed: true },
+  usage: { path: null, present: true, assumed: true },
+  delivery: { path: null, present: true, assumed: true },
+};
+
 const money = (n) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const day = (iso) => { const t = Date.parse(iso); return Number.isNaN(t) ? null : new Date(t).toISOString().slice(0, 10); };
@@ -495,8 +504,16 @@ function slugOfName(name) {
  * the night before left no machine-recoverable trace at all) and a partial one
  * rendered as clean rows would assert a completeness it does not have.
  */
-export function buildRoster({ workers, jobs = [], usage = null, delivery = [], now = new Date() }) {
+export function buildRoster({ workers, jobs = [], usage = null, delivery = [], sources = null, now = new Date() }) {
   const epoch = workers?.epoch ?? null;
+  // Which of the four files were actually read. Absent means the whole record is
+  // silent; empty means it was read and had nothing to say. By the time a renderer
+  // holds `delivery: []` it can no longer tell those apart, and every honest
+  // sentence on the page turns on the difference (jwildfire/obot.roadmap#223).
+  // A caller that says nothing is taken at its word — `collectRoster` always
+  // reports for real, and it is the only caller that reads a disk.
+  const src = { ...DEFAULT_SOURCES, ...(sources ?? {}) };
+  const deliveryRead = src.delivery.present !== false;
   const epochDay = epoch ? epoch.slice(0, 10) : null;
 
   const byWorker = new Map();
@@ -530,7 +547,9 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
       tokens: matched.reduce((n, j) => n + (j.tokens ?? 0), 0),
       status,
       cost,
-      impact: impactOf(entries),
+      // `unjudged` rides on the impact so every view gets the distinction without
+      // a new parameter: a silent delivery record is not a verdict of silence.
+      impact: { ...impactOf(entries), unjudged: !deliveryRead },
       subs: [],
     };
   };
@@ -583,6 +602,7 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], n
 
   return {
     rows: [...rows, ...extras],
+    sources: src,
     droppedDeaths: dropped.length,
     unattributed: usage?.unattributed ?? null,
     usage: usage ? {
@@ -716,9 +736,13 @@ export function readJobs(jobsDir) {
  * last ran, not which day it counted.
  */
 export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
-  const jobs = readJobs(jobsDir ?? path.join(os.homedir(), '.claude', 'jobs'));
-  const workers = parseWorkers(readText(path.join(workspace, '.claude', 'workers.journal')));
-  const delivery = parseDelivery(readText(path.join(workspace, '.claude', 'session-hub', 'delivery.md')));
+  const jobsPath = jobsDir ?? path.join(os.homedir(), '.claude', 'jobs');
+  const workersPath = path.join(workspace, '.claude', 'workers.journal');
+  const deliveryPath = path.join(workspace, '.claude', 'session-hub', 'delivery.md');
+
+  const jobs = readJobs(jobsPath);
+  const workers = parseWorkers(readText(workersPath));
+  const delivery = parseDelivery(readText(deliveryPath));
 
   const usageFile = path.join(hub, 'site', 'usage', 'usage.json');
   const raw = readJson(usageFile);
@@ -731,5 +755,15 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date() }) {
   const epochDay = workers.epoch ? workers.epoch.slice(0, 10) : null;
   const usage = usageIndex(stamped, { epochDay, now, current: currentLabels(jobs, epochDay, now) });
 
-  return buildRoster({ workers, jobs, usage, delivery, now });
+  // Observed, not assumed. On a machine that has never run an agent all four of
+  // these are false, and a page that cannot tell that from four empty files is the
+  // one that greets @jwildfire on his first morning with a confident set of zeros.
+  const sources = {
+    jobs: { path: jobsPath, present: fs.existsSync(jobsPath) },
+    workers: { path: workersPath, present: fs.existsSync(workersPath) },
+    usage: { path: usageFile, present: fs.existsSync(usageFile) },
+    delivery: { path: deliveryPath, present: fs.existsSync(deliveryPath) },
+  };
+
+  return buildRoster({ workers, jobs, usage, delivery, sources, now });
 }
