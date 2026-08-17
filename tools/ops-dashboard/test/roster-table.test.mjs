@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 import { buildRoster, usageIndex } from '../lib/roster.mjs';
 import {
-  TABLE_JS, agentsTableHtml, buildFilters, createdOf, facetsOf, modelText, periodCutoffs,
+  TABLE_CSS, TABLE_JS, agentsTableHtml, buildFilters, createdOf, facetsOf, modelText, periodCutoffs,
   reposOf, tableRows, unattributedRow,
 } from '../lib/roster-table.mjs';
 import { sessionShell } from '../lib/render.mjs';
@@ -450,4 +450,30 @@ test('the model column is beside the cost, not at the far end of the table', () 
   const model = { rows: [row({ id: 'W0001', models: ['opus'] })], unattributed: null };
   const heads = [...agentsTableHtml(model, { now: NOW }).matchAll(/data-sort="(\w+)"/g)].map((m) => m[1]);
   assert.equal(heads[heads.indexOf('cost') + 1], 'model');
+});
+
+test('the page script parses as JavaScript', () => {
+  // Paid for while building the created column: a comment inside the script's template
+  // literal contained a backtick, which closed the string early. The module stopped
+  // loading, which every test in this file catches — but the class of failure that
+  // does NOT is an interpolation left in by accident, so parse it here on purpose.
+  assert.doesNotThrow(() => new Function(TABLE_JS));
+  assert.doesNotMatch(TABLE_JS, /\$\{/, 'the page script must not interpolate at render time');
+});
+
+test('on a phone the sort key rides in the pinned column, and says the same date', () => {
+  // Measured at a real 390px viewport: the Created cell is about 475px into the
+  // sideways swipe. Sorting by a column he cannot see reads as no order at all.
+  const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00' })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  assert.match(td(html, 'c-name'), /class="ag-born">created 2026-08-16</);
+  assert.equal(text(td(html, 'c-created')), '2026-08-16');
+  // Hidden on a desktop, where the column itself is on screen: the same date twice in
+  // one row is noise, not redundancy.
+  assert.match(TABLE_CSS, /\.ag-born \{ display:none; \}/);
+});
+
+test('an undated row says so in the pinned column too, rather than going blank', () => {
+  const model = { rows: [row({ id: 'W0001' })], unattributed: null };
+  assert.match(td(agentsTableHtml(model, { now: NOW }), 'c-name'), /ag-born">created unknown</);
 });

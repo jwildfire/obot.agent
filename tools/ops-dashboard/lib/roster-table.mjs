@@ -450,7 +450,7 @@ export function tableRow({ row, f }, index) {
   data-created="${f.createdTs === null ? '' : f.createdTs}" data-createdday="${esc(f.createdDay)}"
   data-model="${esc(f.models.join(' ') || 'unknown')}"
   data-name="${esc(String(name).toLowerCase())}">
-  <td class="c-name"><span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span></td>
+  <td class="c-name"><span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span><span class="ag-born">${f.createdDay ? `created ${esc(f.createdDay)}` : 'created unknown'}</span></td>
   <td class="c-st"><span class="tone-${esc(tone)}">${esc(f.status)}</span></td>
   <td class="c-cost cost-${esc(row.cost.code ?? 'none')}" title="${esc(row.cost.text)}">${esc(row.cost.short ?? '—')}</td>
   <td class="c-model">${modelCell(row, f)}</td>
@@ -657,8 +657,16 @@ export const TABLE_JS = `
         r = cx - cy;
       } else if (key === 'created') {
         // The instant, not the day: two agents claimed nine hours apart share a date,
-        // and an undated row belongs at the far end of either direction.
-        var ax = x.created === '' ? -1 : parseFloat(x.created), ay = y.created === '' ? -1 : parseFloat(y.created);
+        // and sorting on the date alone would leave today arbitrary.
+        var ax = x.created === '' ? null : parseFloat(x.created), ay = y.created === '' ? null : parseFloat(y.created);
+        // An undated row is no more an answer to "which is oldest" than to "which is
+        // newest", so it stays at the bottom whichever way the column points. Returning
+        // here is deliberate: it skips the flip below, which is the only way to pin a
+        // row against the direction of the sort.
+        if (ax === null || ay === null) {
+          return (ax === null ? 1 : 0) - (ay === null ? 1 : 0)
+            || String(x.name).localeCompare(String(y.name));
+        }
         r = ax - ay;
       } else if (key === 'impact') {
         r = (a[0].querySelector('.im-moved') ? 2 : 0) + (a[0].querySelector('.im-closed') ? 1 : 0)
@@ -666,7 +674,13 @@ export const TABLE_JS = `
       } else {
         r = String(x[key] || '').localeCompare(String(y[key] || ''));
       }
-      if (r === 0) r = String(x.name).localeCompare(String(y.name));
+      // The tie-break returns rather than folding into the comparison, so it is not
+      // flipped with the sort. Two workers claimed in the same second tie on every
+      // column that can rank them, and a tie-break that reverses with the direction
+      // made the client disagree with the server about the same column pointed the
+      // same way: W0015 above W0016 on the painted page, below it after one round
+      // trip through the header. The server breaks ties by id ascending; so does this.
+      if (r === 0) return String(x.name).localeCompare(String(y.name));
       return desc ? -r : r;
     });
     pairs.forEach(function (p) { body.appendChild(p[0]); if (p[1]) body.appendChild(p[1]); });
@@ -781,6 +795,15 @@ export const TABLE_CSS = `
                        white-space:normal; overflow:visible; overflow-wrap:anywhere; }
   .at-table .ag-kind { display:block; font-size:0.6rem; letter-spacing:0.06em; text-transform:uppercase;
                        color:var(--faint); }
+
+  /* The sort key, repeated inside the pinned column on a phone only. Measured at a
+     real 390px viewport: the Created cell sits about 475px into the sideways swipe,
+     so a table sorted by a column he cannot see reads as a table in no order at all.
+     On a desktop the column itself is visible and this would be the same date twice. */
+  .at-table .ag-born { display:none; }
+  @media (max-width:59.9375rem) {
+    .at-table .ag-born { display:block; font-family:var(--mono); font-size:0.6rem; color:var(--faint); }
+  }
   .at-table .c-st { white-space:nowrap; font-size:0.68rem; letter-spacing:0.03em; text-transform:uppercase; }
   .at-table .c-cost { font-family:var(--mono); text-align:right; white-space:nowrap;
                       font-variant-numeric:tabular-nums; }
@@ -806,5 +829,13 @@ export const TABLE_CSS = `
   .vd-drift { color:var(--warn); }
   .vd-none { color:var(--faint); }
   .at-table .ev-row td { background:var(--paper); }
+
+  /* The evidence wraps to the screen, not to the table. Inside a box that scrolls
+     sideways the cell is as wide as the table (935px at 390px of viewport), so a
+     sentence in here used to lay itself out past the right edge and had to be swiped
+     to be read — measured, on the row's own provenance line. Sticky at left:0 keeps it
+     in front of him however far the table has been swiped; on a desktop, where the
+     table already fits, both rules are inert. */
+  .at-table .ag-ev { position:sticky; left:0; max-width:calc(100vw - 1.9rem); }
   .at-none { font-size:0.78rem; color:var(--muted); margin:0.7rem 0 0; }
 `;
