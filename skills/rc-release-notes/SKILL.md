@@ -86,8 +86,30 @@ which is what the Operations Dashboard renders under the title in his queue.
 
 One sentence → links → requirements closed → details, per @jwildfire (2026-08-15). The
 full template and its rules live in
-[`docs/rc-framework.md`](../../docs/rc-framework.md#what-an-rc-pr-must-carry). Two things
-this skill owns:
+[`docs/rc-framework.md`](../../docs/rc-framework.md#what-an-rc-pr-must-carry).
+
+**The exec summary is the first line of the body.** Nothing goes above it — no banner,
+no status heading, and not the comment either. The attested-lane rule rides in an HTML
+comment placed directly *below* the sentence:
+
+```markdown
+{One sentence: what this release lets someone do that they could not do before.}
+
+<!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
+     attested lane: scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
+```
+
+GitHub hides the comment wherever it sits; the dashboard's summary rule does not, and it
+takes the first line that is not a heading or a bullet. Put the sentence first and no
+reader downstream has to know about comments at all.
+
+The `## ⛔ Release candidate — …` heading this replaces was retired on 2026-08-17: it told
+@jwildfire a rule about himself, and the attested lane is enforced by `obot-merge`, not by
+a sentence he reads. Anything written on a surface he reads is written for him; agent
+instructions go in agent-facing places ([the framework
+doc](../../docs/rc-framework.md#written-for-him-or-written-for-us)).
+
+Two more things this skill owns:
 
 - **Every RC PR links `NEWS.md`** — mandatory, in the bullet list above the fold, pointing
   at the **file on the RC's head branch** (sections are newest-first, so it opens on the

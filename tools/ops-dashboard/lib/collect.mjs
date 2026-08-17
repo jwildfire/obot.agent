@@ -273,9 +273,34 @@ const MD_LINK_G = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 export function parseRCBody(body) {
   const out = { summary: null, links: [], demo: null, news: null, requirements: [], ask: null, frameable: false };
   const lines = String(body ?? '').split('\n');
+  let inComment = false;
 
   for (const raw of lines) {
-    const line = raw.trim();
+    // HTML comments are stripped before anything else looks at the line. Since
+    // 2026-08-17 the RC body's attested-lane rule lives in one — agent-facing, and
+    // invisible to @jwildfire on GitHub. It is *not* invisible here: this parser reads
+    // raw markdown, `<!--` is neither a heading nor a bullet, and the summary rule below
+    // takes the first line that is neither. Left alone, the comment becomes the row he
+    // reads on his phone. It spans lines, so this tracks the open state rather than
+    // matching a single line, and keeps whatever text sits outside the delimiters.
+    let line = raw;
+    while (line) {
+      if (inComment) {
+        const close = line.indexOf('-->');
+        if (close < 0) { line = ''; break; }
+        inComment = false;
+        line = line.slice(close + 3);
+        continue;
+      }
+      const open = line.indexOf('<!--');
+      if (open < 0) break;
+      inComment = true;
+      const close = line.indexOf('-->', open + 4);
+      if (close < 0) { line = line.slice(0, open); break; }
+      inComment = false;
+      line = line.slice(0, open) + line.slice(close + 3);
+    }
+    line = line.trim();
     if (!line) continue;
 
     // `**See it move:**` and `**The ask:**` are their own thing wherever they appear.
@@ -304,7 +329,9 @@ export function parseRCBody(body) {
     if (seeItMove) continue;
 
     // The exec summary: the first line that is prose — not a heading, not a bullet, not
-    // the ⛔ banner, not the attribution footer.
+    // the attribution footer. Comments are already gone above. The retired `⛔ Release
+    // candidate` banner is still skipped for the RCs that opened before 2026-08-17: the
+    // rule changed, the bodies already on GitHub did not.
     if (!out.summary && !/^[#>|*-]/.test(line) && !/^This PR was drafted/.test(line)
         && !line.startsWith('Closes #') && !line.startsWith('⛔')) {
       out.summary = plain(line);

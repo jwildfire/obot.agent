@@ -19,6 +19,37 @@ scaffolding) still owes. Sessions follow this until #123's design supersedes it.
 Everything else lands without him: increments merge on the standard lane, and
 their record is the nightly executive summary, not his inbox.
 
+## Written for him, or written for us
+
+**Anything written on a surface he reads is written for him.** RC PR bodies,
+decision artifacts, demo pages, dashboard rows, release notes, the nightly
+summary — every word on them is addressed to @jwildfire, and nothing else gets
+to sit there.
+
+Agent-to-agent instructions go in agent-facing places instead:
+[`AGENTS.md`](../AGENTS.md), the docs in this directory, the
+[skills](../skills/), or an **HTML comment in the body** — invisible to him,
+present for the agent reading the PR itself.
+
+The test is one question: *would he do anything differently for having read
+this?* If it is a rule about how agents behave, the answer is no.
+
+- **A rule about him is not for him.** "Merges only on @jwildfire's approval"
+  tells the approver that he is the approver.
+- **A guard that works does not announce itself.** The attested lane is enforced
+  in code — [`scripts/obot-merge`](../scripts/obot-merge) refuses a release-role
+  merge without `--jeremy-approved`, and raw `gh pr merge` is hook-denied. A
+  sentence in a PR body enforces nothing; it just occupies the line above the
+  fold.
+- **Our register is not his reading.** Worker ids, lane names, attestation
+  vocabulary, audit bookkeeping: real, necessary, and ours. This is the same
+  fault as a dashboard page that reads like an audit log.
+
+**Decided 2026-08-17** (@jwildfire: *"just add a rule for the relevant agents and
+maybe an invisible markdown comment"*), on the `⛔ Release candidate` heading that
+used to open every RC body; the rule generalises past that one banner. Anything
+that parses these bodies must skip HTML comments — see the RC body template below.
+
 ## Operational vs clinical control
 
 The governing principle behind what reaches his queue (@jwildfire, 2026-08-15,
@@ -152,9 +183,13 @@ release at its last step over a string.
    live in the requirements list:
 
    ```markdown
-   ## ⛔ Release candidate — merges only on @jwildfire's approval, via the attested lane
-
    {One sentence: what this release lets someone do that they could not do before.}
+
+   <!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
+        attested lane: scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'.
+        Agent-facing note — it is a comment because he does not need to be told a
+        rule about himself. See obot.agent docs/rc-framework.md. -->
+
 
    - **See it move:** [annotated demo]({deployed hub URL})
    - **Release notes:** [NEWS.md]({repo}/blob/{head branch}/NEWS.md) — the `vX.Y.Z
@@ -172,6 +207,26 @@ release at its last step over a string.
    ### Next steps
    ```
 
+   - **The one sentence is the first visible line — nothing goes above it.** No banner,
+     no status heading, no "⛔ Release candidate" lead. That heading was the shape until
+     2026-08-17, when @jwildfire cut it: *"I really don't like this header … shouldn't
+     need that as the first thing on a PR - just add a rule for the relevant agents and
+     maybe an invisible markdown comment."* It told him a rule about himself, it spent
+     the position the exec summary was given, and it announced a guard that is already
+     enforced in code — `obot-merge` refuses a release-role merge without
+     `--jeremy-approved`, and raw merges are hook-denied. The rule lives here and
+     in the HTML comment; see [Written for him, or written for us](#written-for-him-or-written-for-us).
+   - **The comment goes *below* the sentence, not above it.** GitHub hides it either way,
+     so the placement is not about him — it is about everything that reads these bodies.
+     The Operations Dashboard builds his queue row from the first line that is not a
+     heading or a bullet, and `<!--` is neither, so a leading comment becomes the row on
+     his phone. Putting the sentence first means no reader has to know about comments at
+     all: a naive parser, a future consumer and a person skimming raw markdown all get the
+     release sentence. The dashboard strips comments wherever they appear as well — both,
+     because a parser fix only protects the readers we control, and it ships on its own
+     schedule. On 2026-08-17 the running dashboard held the old parser in memory with a
+     twenty-minute cache standing between a leading comment and his screen; the ordering
+     rule is what makes that race impossible rather than merely survived.
    - **The one sentence is the row on his phone.** The Operations Dashboard shows it
      under the title, truncated near 325px on a 390px screen — front-load it, and do not
      open with "This PR".

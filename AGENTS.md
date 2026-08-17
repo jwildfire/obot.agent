@@ -125,6 +125,34 @@ its `Closes #N` keyword → details as needed. That is the five-section obot PR 
 reordered, not a second template, and the `Closes` keywords must stay in it or issues stop
 closing and `obot-merge` refuses the release merge.
 
+**The exec summary is the first line of the body — no banner above it.** The
+attested-lane rule goes in an **HTML comment**, placed *below* the sentence, not a
+heading above it:
+
+```markdown
+{One sentence: what this release lets someone do that they could not do before.}
+
+<!-- Release candidate. Merges only on @jwildfire's explicit approval, via the
+     attested lane: scripts/obot-merge <pr> -R <repo> --jeremy-approved '<where/when>'. -->
+```
+
+Below, because GitHub hides the comment either way but parsers do not: the dashboard
+builds his queue row from the first line that is not a heading or a bullet, and `<!--`
+is neither. Sentence first means nothing downstream has to know comments exist.
+
+The `## ⛔ Release candidate — merges only on @jwildfire's approval, via the attested lane`
+heading is **retired** (@jwildfire, 2026-08-17: *"I really don't like this header …
+shouldn't need that as the first thing on a PR - just add a rule for the relevant agents
+and maybe an invisible markdown comment"*). It told the approver a rule about himself, it
+took the line the exec summary was given, and it announced a guard already enforced in
+code — `obot-merge` refuses a release-role merge without `--jeremy-approved`, and raw
+`gh pr merge` is hook-denied.
+
+**The general rule: anything on a surface he reads is written for him.** Agent-to-agent
+instructions go in agent-facing places — this file, `docs/`, the skills, or an HTML
+comment. See [`docs/rc-framework.md` → Written for him, or written for
+us](docs/rc-framework.md#written-for-him-or-written-for-us).
+
 Full rules, the template, and the `-RCn` edge cases:
 [`docs/rc-framework.md`](docs/rc-framework.md#what-an-rc-pr-must-carry) and
 [`skills/rc-release-notes/SKILL.md`](skills/rc-release-notes/SKILL.md).
