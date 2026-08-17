@@ -211,8 +211,20 @@ export function render(model) {
     .map(([k, v]) => `${v} ${k}`)
     .join(' · ');
 
+  // The report banner outlives the run — it is written to the hub and published —
+  // so a measurement it never made is the most durable lie on this surface. With no
+  // job records and no gh sweep it used to freeze "0 agents, 0 tokens, 0
+  // closures/releases" into a green success line (jwildfire/obot.roadmap#223).
+  const reportMeasured = m.tiles.agents.read !== false && m.tiles.closure !== null;
   const banner = isReport
-    ? `<div class="banner ok"><span class="dot"></span>Session report — frozen at wrapup. ${m.tiles.agents.total} agents, ${fmtTokens(m.tiles.tokens.total)} tokens, ${m.tiles.closure ?? 0} closures/releases.</div>`
+    ? (reportMeasured
+      ? `<div class="banner ok"><span class="dot"></span>Session report — frozen at wrapup. ${m.tiles.agents.total} agents, ${fmtTokens(m.tiles.tokens.total)} tokens, ${m.tiles.closure} closures/releases.</div>`
+      : `<div class="banner"><span class="dot"></span>Session report — frozen at wrapup. ${esc([
+        m.tiles.agents.read === false ? 'agents and tokens' : null,
+        m.tiles.closure === null ? 'closures' : null,
+      ].filter(Boolean).join(' and '))} could not be measured for this session: ${esc([
+        m.notices.jobs, m.notices.agentsCli, m.notices.ghSweep,
+      ].filter(Boolean).join(' · ') || 'the sources were not read')}.</div>`)
     : m.alerts.length
       ? `<div class="banner"><span class="dot"></span>${m.alerts.map((a) => `${esc(a.short ?? a.name)} — ${esc(a.state)}${a.detail ? `: ${esc(a.detail)}` : ''}`).join(' · ')}</div>`
       : '';
@@ -231,12 +243,22 @@ export function render(model) {
       ].join('\n')
     : '';
 
+  // With no scratchpad at all, "no ## Notes section in today's scratchpad"
+  // presupposes a file that does not exist, and the header count is a count over a
+  // file nobody opened. One helper so the three panels cannot drift apart.
+  const scratchLess = !!m.notices.scratchpad;
+  const scratchNote = (section, how) => (scratchLess
+    ? `no scratchpad for ${m.date} yet — the first session-note or session-init creates it`
+    : `no ${section} section in today’s scratchpad yet — ${how}`);
+
   const left = [
     `<section class="panel">
   <div class="panel-head"><h2>Priorities</h2><span class="src">scratchpad · ## Overview — click a row for detail</span></div>
-  <div class="panel-body">${notice(m.notices.scratchpad)}${m.panels.overview ? prioritiesList(m.panels.overview.groups) : ''}</div>
+  <div class="panel-body">${notice(m.notices.scratchpad)}${m.panels.overview
+    ? prioritiesList(m.panels.overview.groups)
+    : (m.notices.scratchpad ? '' : notice('no ## Overview in today’s scratchpad yet — session-init writes the kickoff list there'))}</div>
 </section>`,
-    collapsedPanel('Roadmap activity', 'gh sweep, all events', `${m.tiles.activity ?? 0} events`,
+    collapsedPanel('Roadmap activity', 'gh sweep, all events', m.tiles.activity === null ? 'not swept' : `${m.tiles.activity} events`,
       notice(m.notices.ghSweep) + (m.panels.activity ? activityFeed(m.panels.activity) : '')),
   ].join('\n');
 
@@ -244,14 +266,22 @@ export function render(model) {
     `<section class="panel">
   <div class="panel-head"><h2>Agents</h2><span class="src">state.json + claude agents — P# links to the priority</span></div>
   <div class="panel-body">${notice(m.notices.jobs)}${notice(m.notices.agentsCli)}${
-    m.agents.length ? `<div class="agents">${m.agents.map((a) => agentCard(a, m.mode)).join('\n')}</div>` : '<p class="notice">no sessions in scope</p>'
+    m.agents.length
+      ? `<div class="agents">${m.agents.map((a) => agentCard(a, m.mode)).join('\n')}</div>`
+      : `<p class="notice">${m.tiles.agents.read === false
+        ? 'nothing read — neither the job records nor the session index could be opened, so no agent can be listed'
+        : 'no sessions in scope'}</p>`
   }</div>
 </section>`,
-    m.panels.todo && countItems(m.panels.todo) ? collapsedPanel('Todo', 'scratchpad · ## Todo', `${countItems(m.panels.todo)}`, itemsList(m.panels.todo.groups)) : '',
-    collapsedPanel('Notes', 'scratchpad · ## Notes', `${countItems(m.panels.notes)}`,
-      m.panels.notes ? itemsList(m.panels.notes.groups) : notice('no ## Notes section in today’s scratchpad')),
-    collapsedPanel('Scaffold', 'scratchpad · ## Scaffold', `${countItems(m.panels.scaffold)}`,
-      m.panels.scaffold ? itemsList(m.panels.scaffold.groups) : notice('no ## Scaffold section yet — capture with "scaffold: …"')),
+    // Always rendered. A panel that disappears when it is empty leaves a reader
+    // unable to tell an empty list from a dropped one, and its two neighbours below
+    // stay put in the same state — the inconsistency was the tell.
+    collapsedPanel('Todo', 'scratchpad · ## Todo', scratchLess ? '—' : `${countItems(m.panels.todo)}`,
+      m.panels.todo && countItems(m.panels.todo) ? itemsList(m.panels.todo.groups) : notice(scratchNote('## Todo', 'capture one with "session update: …"'))),
+    collapsedPanel('Notes', 'scratchpad · ## Notes', scratchLess ? '—' : `${countItems(m.panels.notes)}`,
+      m.panels.notes ? itemsList(m.panels.notes.groups) : notice(scratchNote('## Notes', 'capture one with "session note: …"'))),
+    collapsedPanel('Scaffold', 'scratchpad · ## Scaffold', scratchLess ? '—' : `${countItems(m.panels.scaffold)}`,
+      m.panels.scaffold ? itemsList(m.panels.scaffold.groups) : notice(scratchNote('## Scaffold', 'capture one with "scaffold: …"'))),
     collapsedPanel('Next session', 'memory + last diary', '',
       notice(m.notices.nextSession) + nextSessionBody),
   ].filter(Boolean).join('\n');
@@ -282,9 +312,11 @@ ${isReport || chat ? '' : '<meta http-equiv="refresh" content="60">'}
 ${chat ? CHAT_PANEL : ''}
 
 <section class="tiles hub-live" id="hub-tiles">
-  <div class="tile"><span class="label">Priorities</span><span class="value">${m.tiles.priorities.open} <small>open · ${m.tiles.priorities.done} done</small></span><span class="sub">scratchpad kickoff list</span></div>
-  <div class="tile"><span class="label">Agents</span><span class="value">${m.tiles.agents.total}</span><span class="sub">${esc(stateCounts) || '—'}</span></div>
-  <div class="tile"><span class="label">Tokens</span><span class="value">${fmtTokens(m.tiles.tokens.total)}</span><span class="sub">across ${m.tiles.tokens.reporting} reporting sessions</span></div>
+  <div class="tile"><span class="label">Priorities</span><span class="value">${m.tiles.priorities ? `${m.tiles.priorities.open} <small>open · ${m.tiles.priorities.done} done</small>` : '—'}</span><span class="sub">${m.tiles.priorities ? 'scratchpad kickoff list' : esc(`no kickoff list yet — session-init writes it to .claude/session-notes/${m.date}.md`)}</span></div>
+  <div class="tile"><span class="label">Agents</span><span class="value">${m.tiles.agents.total ?? '—'}</span><span class="sub">${esc(m.tiles.agents.read === false
+    ? 'no job records read on this machine'
+    : [stateCounts || '—', m.tiles.agents.cliRead === false ? 'interactive sessions not listed' : null].filter(Boolean).join(' · '))}</span></div>
+  <div class="tile"><span class="label">Tokens</span><span class="value">${fmtTokens(m.tiles.tokens.total)}</span><span class="sub">${esc(m.tiles.tokens.read === false ? 'no session has reported a token count yet' : `across ${m.tiles.tokens.reporting} reporting sessions`)}</span></div>
   <div class="tile"><span class="label">Closure</span><span class="value">${m.tiles.closure ?? '—'}</span><span class="sub">${esc(closureSub)}</span></div>
 </section>
 

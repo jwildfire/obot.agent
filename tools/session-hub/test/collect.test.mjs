@@ -38,9 +38,22 @@ test('normalizeJobState degrades on missing/renamed fields, never throws', () =>
   assert.equal(normalizeJobState('x', 'string').degraded, 'unreadable state.json');
 });
 
-test('collectJobs: unreadable dir → notice, not throw', () => {
-  const r = collectJobs({ jobsDir: '/nonexistent/nowhere' });
-  assert.match(r.notice, /jobs directory unreadable/);
+test('collectJobs: a missing dir is day one, an unreadable one is a fault', () => {
+  // Both degrade to a notice rather than a throw, but they are different states
+  // and were reported with the same word. On a machine no agent has run on,
+  // "unreadable" reads like a permissions problem and sends the reader looking for
+  // one (jwildfire/obot.roadmap#223).
+  const absent = collectJobs({ jobsDir: '/nonexistent/nowhere' });
+  assert.equal(absent.read, false);
+  assert.match(absent.notice, /no job records yet/);
+  assert.match(absent.notice, /does not exist/);
+  assert.doesNotMatch(absent.notice, /unreadable/);
+
+  // A directory that exists and holds nothing is a measurement, and says so.
+  const empty = collectJobs({ jobsDir: fs.mkdtempSync(path.join(os.tmpdir(), 'hubjobs-empty-')) });
+  assert.equal(empty.read, true);
+  assert.equal(empty.empty, true);
+  assert.deepEqual(empty.data, []);
 });
 
 test('collectJobs reads real-shaped state.json files', () => {

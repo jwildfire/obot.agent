@@ -101,7 +101,13 @@ test('degradation notices render instead of crashing', () => {
   const html = render(m);
   assert.ok(html.includes('jobs directory unreadable'));
   assert.ok(html.includes('gh sweep failed'));
-  assert.ok(html.includes('no sessions in scope'));
+  // This used to assert `no sessions in scope` — a conclusion printed directly
+  // beneath two lines saying neither source could be read. The notices are the
+  // honest part; the verdict under them was not (jwildfire/obot.roadmap#223).
+  assert.ok(!html.includes('no sessions in scope'));
+  assert.ok(html.includes('nothing read'));
+  // And no tile may report a count over a file nobody opened.
+  assert.ok(!/<span class="value">0<\/span>/.test(html), 'a tile reported zero from an unread source');
 });
 
 test('report mode: pill flips, no refresh, outcome banner, duration', () => {
