@@ -159,7 +159,20 @@ will actually merge, without merging anything.
 ## What you may do, and nothing beyond it
 
 - **Close a session** that is past the bar, always with a summary of what actually
-  reached GitHub, via the harness `TaskStop` tool with the job id.
+  reached GitHub.
+
+  The mechanism, in this order, because the first one does not always work:
+
+  1. `claude stop <job-id>` — the CLI verb. Verified working on this machine against
+     a session this one did not spawn.
+  2. The harness `TaskStop` tool with the job id — works for sessions THIS session
+     spawned, and has been observed to answer `No task found` for others. Do not
+     conclude a session is unstoppable from that error; fall through to (1).
+
+  Either way, **verify the effect and not the exit code**: re-read
+  `claude agents --json` and confirm the session is gone from the roster. A close
+  that reported success and left the process running is this house's signature
+  defect wearing your name.
 - **Land a qualifying operational pull request**, under rule 4.
 - **Report a closeout gap** to the Navigator.
 - **Escalate** to obot-prime what you cannot resolve, and stop.
