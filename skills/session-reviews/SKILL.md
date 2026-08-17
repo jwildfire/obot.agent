@@ -156,9 +156,15 @@ obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo> --check   # always first
 obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>
 ```
 
-Chain the `--check` / `gh pr ready` / `obot-merge` / mergeability re-read sequence
-into as few calls as the gates allow — this runs inside the reviewer sibling,
-where @jwildfire is waiting on each answer.
+Run each of those two lines **as its own command, exactly as written**. The
+workspace allowlist matches `obot.agent/scripts/obot-merge …` whole, so a `bash`
+prefix, a `./`, a `cd … &&`, a trailing `; echo`, or a `| tail -20` breaks the
+match and drops the call through to the auto-mode classifier, which refuses about
+one call in thirty at random.
+
+Chain the rest of the sequence — `gh pr ready`, the mergeability re-read — into as
+few calls as the gates allow, since @jwildfire is waiting on each answer. The
+`obot-merge` call is the one that must stay on its own.
 
 Two traps, both verified against the live queue (2026-07-29):
 
