@@ -363,3 +363,49 @@ test('trendSeries: an item on the very first instant of the year window is count
   assert.equal(t.buckets[0].n, 1, 'it lands in the short leading bucket, not off the chart')
   assert.equal(t.buckets.reduce((s, b) => s + b.n, 0), 1)
 })
+
+test('collectCloses: a partial GraphQL answer is refused, never read as "closes nothing"', () => {
+  // Measured on 2026-08-17: `gh api graphql` exits 0 when the response carries an
+  // `errors` array, and GitHub can return `errors` alongside partial `data`. Reading
+  // that cost 42 of 146 links across all seven repos and wrote a cache reporting no
+  // errors, no bounds and no gaps.
+  const withErrors = () => JSON.stringify({
+    errors: [{ message: 'Something went wrong while executing your query.' }],
+    data: { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [
+      { number: 1, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: { nodes: [] } },
+    ] } } },
+  })
+  assert.throws(() => collectCloses('jwildfire/a', 0, { exec: withErrors }), /graphql/)
+  // A pull request GitHub declined to answer for is not a pull request that closes
+  // nothing, and the difference is the whole goal filter.
+  const nullField = () => JSON.stringify({
+    data: { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [
+      { number: 1, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: null },
+    ] } } },
+  })
+  assert.throws(() => collectCloses('jwildfire/a', 0, { exec: nullField }), /no closing-link answer/)
+  // A genuine empty answer still means what it says.
+  const empty = () => JSON.stringify({
+    data: { repository: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [
+      { number: 1, createdAt: '2026-08-16T00:00:00Z', closingIssuesReferences: { nodes: [] } },
+    ] } } },
+  })
+  assert.equal(collectCloses('jwildfire/a', 0, { exec: empty }).closes.size, 0)
+})
+
+test('collectMetrics: a repo whose links are unread is NAMED, not drawn as goalless', () => {
+  const cache = collectMetrics({
+    repos: [{ repo: 'jwildfire/a', release: ['main'], integration: 'dev' }],
+    hub: '/nowhere',
+    now: new Date('2026-08-17T12:00:00Z'),
+    exec: (args) => {
+      if ((args[1] ?? '') === 'graphql') return JSON.stringify({ errors: [{ message: 'timeout' }], data: {} })
+      if (String(args[1]).includes('/issues')) return JSON.stringify([])
+      if (String(args[1]).includes('/pulls')) return JSON.stringify([{ number: 3, created_at: '2026-08-16T00:00:00Z', base: { ref: 'dev' } }])
+      return JSON.stringify([])
+    },
+  })
+  assert.deepEqual(cache.noCloses, ['jwildfire/a'])
+  assert.equal(cache.prs.length, 1)
+  assert.equal(cache.prs[0].closes, undefined)
+})

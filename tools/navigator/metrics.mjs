@@ -334,14 +334,30 @@ export function collectCloses(repo, cutoff, { maxPages = 4, exec = gh } = {}) {
   for (let page = 1; page <= maxPages; page++) {
     const args = ['api', 'graphql', '-f', `query=${CLOSES_QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`]
     if (cursor) args.push('-f', `cursor=${cursor}`)
-    const conn = JSON.parse(exec(args))?.data?.repository?.pullRequests
+    const body = JSON.parse(exec(args))
+    // A GraphQL response can carry `errors` ALONGSIDE partial `data`, and `gh` exits 0
+    // when it does — measured, not assumed. Reading that partial answer is how this
+    // silently under-reported 42 of 146 links across all seven repos while writing a
+    // cache whose errors, bounds and gaps were every one of them empty. A degraded
+    // answer is not an answer: it is thrown, so the caller records the repo as
+    // unattributed and the page says so.
+    if (body?.errors?.length) {
+      throw new Error(`graphql: ${String(body.errors[0]?.message ?? 'partial response').slice(0, 80)}`)
+    }
+    const conn = body?.data?.repository?.pullRequests
     if (!conn) break
     let oldest = Infinity
     for (const n of conn.nodes ?? []) {
-      const refs = (n.closingIssuesReferences?.nodes ?? [])
+      oldest = Math.min(oldest, Date.parse(n.createdAt))
+      // `null` here means GitHub declined to answer for this pull request; `{nodes:[]}`
+      // means it genuinely closes nothing. Only the second is an answer, and only the
+      // second may be recorded as one.
+      if (!n.closingIssuesReferences) {
+        throw new Error(`graphql: no closing-link answer for ${repo}#${n.number}`)
+      }
+      const refs = n.closingIssuesReferences.nodes
         .map((r) => `${r.repository?.nameWithOwner ?? repo}#${r.number}`)
       if (refs.length) closes.set(n.number, refs)
-      oldest = Math.min(oldest, Date.parse(n.createdAt))
     }
     if (!conn.pageInfo?.hasNextPage || oldest < cutoff) return { closes, truncated: null }
     cursor = conn.pageInfo.endCursor

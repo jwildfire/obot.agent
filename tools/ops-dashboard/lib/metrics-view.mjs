@@ -360,6 +360,10 @@ export function metricsHtml(model, { hubUrl = 'https://jwildfire.github.io/obot.
   const gaps = [
     ...model.errors.map((e) => `counting failed for ${e}`),
     ...model.bounds.map((b) => `${b.repo} ${b.kind}: history older than ${String(b.oldestFetched ?? '').slice(0, 10)} not counted`),
+    // A repo whose pull-request links could not be read keeps every other number it
+    // has and loses only goal attribution — but silently losing it would show that
+    // repo's PRs as belonging to no goal, which is a claim rather than a gap.
+    ...(model.noCloses ?? []).map((r) => `${r}: pull-request goal links unread, so its PRs are in no goal's counts`),
   ];
   return `<h2 class="nav-h">Release metrics</h2>
 ${filterBar(model)}
