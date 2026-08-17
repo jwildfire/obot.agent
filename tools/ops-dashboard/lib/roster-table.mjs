@@ -78,6 +78,71 @@ export const PERIODS = [
 
 const dayString = (d) => d.toISOString().slice(0, 10);
 
+/**
+ * The day a stamp falls on, from the instant rather than from the characters.
+ *
+ * The two records that date an agent do not write the same clock: the worker ledger
+ * writes local time with its offset (`2026-08-17T07:40:55+01:00`) and the harness
+ * writes UTC (`2026-08-17T06:40:55.129Z`). Slicing the string would print 07:40 next
+ * to 06:40 for one moment, so both go through `Date.parse` and come out as the UTC
+ * day the rest of this page already speaks — `days`, `lastDay` and the period cutoffs
+ * are all UTC days, and a second date semantics in one table is worse than the
+ * hour it would gain.
+ */
+const isoDay = (iso) => {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? '' : dayString(new Date(t));
+};
+
+// Milliseconds are noise in a stamp a human reads; the offset is not, and stays.
+const stamp = (iso) => String(iso).replace(/\.\d+/, '');
+
+/**
+ * When an agent came into existence, and which record says so.
+ *
+ * @jwildfire, 2026-08-17: "Add a 'date created' column." Two records could answer,
+ * and they answer different questions (jwildfire/obot.agent#168):
+ *
+ * - The ledger's claim time is when the agent was created. The id is claimed *before*
+ *   the spawn, by whoever is spawning it, and an id claimed that never launched is a
+ *   real row with a real creation time and no session at all — so the claim is the
+ *   only record that dates every worker.
+ * - The harness's session start is when the agent began *working*, which is a later
+ *   and different fact. It is the only record for the rows that never claimed an id
+ *   at all — standing sessions and probes — so it is the fallback, not the primary.
+ *
+ * The two are minutes apart, which is exactly why this is written down rather than
+ * decided by whichever field was nearer to hand: a column measuring something
+ * adjacent to its own heading is the defect this dashboard already shipped once with
+ * a cost number drawn from a second source.
+ *
+ * `none` when neither record dates the row — a label that appears only in the priced
+ * feed, and the pre-ledger fold. Those read as unknown on the page. The first priced
+ * day is *not* borrowed to stand in for a creation time: it is a plausible date, and
+ * a plausible wrong date is worse than an obvious absent one.
+ */
+export function createdOf(row) {
+  if (row.claimedAt) return { at: row.claimedAt, source: 'claim' };
+  if (row.startedAt) return { at: row.startedAt, source: 'session' };
+  return { at: null, source: 'none' };
+}
+
+/** What dated this row, in a sentence, for the cell's tooltip and its evidence. */
+export function createdText(row) {
+  const { at, source } = createdOf(row);
+  if (source === 'claim') {
+    return `worker id claimed ${stamp(at)}${row.task ? ` for ${row.task}` : ''}`;
+  }
+  if (source === 'session') {
+    return `first session started ${stamp(at)} — this agent never claimed a worker id, so the harness is the only record that dates it`;
+  }
+  if (row.synthetic) {
+    return 'unknown — these agents ran before worker ids existed, and nothing recorded when any one of them started';
+  }
+  const first = (row.days ?? [])[0];
+  return `unknown — no id claim and no session record on this machine${first ? `; the earliest day it was priced on is ${first}, which is not when it started` : ''}`;
+}
+
 /** The cutoff day for each period, resolved once at render so no client does date maths. */
 export function periodCutoffs(now = new Date()) {
   const out = {};
@@ -132,6 +197,7 @@ export function facetsOf(row) {
   }
 
   const verdicts = [...new Set((i.verdicts ?? []).map((v) => v.verdict))];
+  const created = createdOf(row);
   return {
     kind,
     status,
@@ -141,6 +207,13 @@ export function facetsOf(row) {
     days: row.days ?? [],
     lastDay: (row.days ?? []).at(-1) ?? '',
     cost: row.cost?.value ?? null,
+    // The instant sorts and the day is what is shown. Sorting on the day alone would
+    // leave the top of the table arbitrary inside today, which is where half the
+    // roster lives on any night the machine is busy.
+    created: created.at,
+    createdSource: created.source,
+    createdDay: created.at ? isoDay(created.at) : '',
+    createdTs: created.at ? Date.parse(created.at) : null,
   };
 }
 
@@ -182,18 +255,27 @@ export function unattributedRow(u) {
 
 /**
  * The rows the table renders, and the facet of each — the roster in the order it is
- * first painted, which is most expensive first because the question the page exists
- * to answer is whether an agent earned its tokens.
+ * first painted, which is newest created first.
+ *
+ * @jwildfire, 2026-08-17: "show most recently created at the top." It painted most
+ * expensive first until now, on the reasoning that the page's first question is
+ * whether an agent earned its tokens. His is which agent is newest, and cost is one
+ * click away in the header, so the default belongs to him.
  */
 export function tableRows(model, { now = new Date() } = {}) {
   const rows = (model.rows ?? []).map((r) => ({ ...r, kind: kindOf(r) }));
   const pre = unattributedRow(model.unattributed);
   if (pre) rows.push(pre);
   const withFacets = rows.map((row) => ({ row, f: facetsOf(row) }));
-  // The pre-ledger bucket sorts last whatever it cost. It is not an agent — it is
-  // 147 of them added together — so ranking it against single agents by money puts
-  // a sum at the top of a table whose first question is which agent spent the most.
+  // Undated rows sort below every dated one rather than above them: an unknown is not
+  // a fresh agent, and newest-first would otherwise open the table on the rows that
+  // know least. -1 stands in for unknown because every real stamp is ~1.7e12.
+  const at = (f) => (f.createdTs === null ? -1 : f.createdTs);
+  // The pre-ledger bucket sorts last whatever it cost and whenever it ran. It is not
+  // an agent — it is 147 of them added together, with activity running to yesterday —
+  // so ranking it with the singles puts a sum above the agents working right now.
   withFacets.sort((a, b) => (a.row.synthetic ? 1 : 0) - (b.row.synthetic ? 1 : 0)
+    || at(b.f) - at(a.f)
     || (b.f.cost ?? -1) - (a.f.cost ?? -1)
     || String(a.row.id ?? a.row.label).localeCompare(String(b.row.id ?? b.row.label)));
   return { rows: withFacets, cutoffs: periodCutoffs(now) };
@@ -273,6 +355,19 @@ function impactCell(row, f) {
   return bits.join('<span class="im-sep"> · </span>');
 }
 
+/**
+ * The created cell: the day, and what dated it in the tooltip.
+ *
+ * A row nothing dates reads `unknown` and shows no date at all, not even the one in
+ * its tooltip — the sentence there says what is actually known and why it is not a
+ * creation time.
+ */
+function createdCell(row, f) {
+  const why = createdText(row);
+  if (!f.created) return `<span class="cr-none" title="${esc(why)}">unknown</span>`;
+  return `<span class="cr-${esc(f.createdSource)}" title="${esc(why)}">${esc(f.createdDay)}</span>`;
+}
+
 const verdictCell = (f) => (f.verdict.includes('unjudged')
   ? '<span class="vd-none" title="no closeout verdict recorded for this agent">—</span>'
   : f.verdict.map((v) => `<span class="vd vd-${esc(v)}">${esc(VERDICT_LABEL[v] ?? v)}</span>`).join(' '));
@@ -294,7 +389,9 @@ function evidence(row) {
     row.cost.span ? `across ${row.cost.span}` : null,
   ].filter(Boolean);
   if (usage.length) li.push(`<li><span class="k">usage</span> ${esc(usage.join(' · '))}</li>`);
-  if (row.claimedAt) li.push(`<li><span class="k">claimed</span> ${esc(row.claimedAt.slice(0, 16).replace('T', ' '))}${row.task ? ` — ${esc(row.task)}` : ''}</li>`);
+  // Which record dated this agent, spelled out where a tooltip cannot reach: the
+  // phone is where he reads this table, and a hover-only provenance is no provenance.
+  li.push(`<li><span class="k">created</span> ${esc(createdText(row))}</li>`);
   for (const s of row.subs) li.push(`<li><span class="k">subagent</span> ${esc(s.id)}${s.slug ? ` ${esc(s.slug)}` : ''} — rolled into this row</li>`);
   for (const t of (row.top ?? [])) li.push(`<li><span class="k">${esc(money(t.cost))}</span> ${esc(t.label)}</li>`);
   return `<ul class="ag-ev">${li.join('')}</ul>`;
@@ -305,7 +402,7 @@ const STATUS_TONE = {
   'not launched': 'null', 'no job record': 'null', subagent: 'null', 'before the ledger': 'null',
 };
 
-const COLS = 6;
+const COLS = 7;
 
 /** One agent: the row, and the evidence row beneath it that opens on a tap. */
 export function tableRow({ row, f }, index) {
@@ -317,12 +414,14 @@ export function tableRow({ row, f }, index) {
   data-status="${esc(f.status)}" data-kind="${esc(f.kind)}" data-produced="${esc(f.produced.join(' '))}"
   data-verdict="${esc(f.verdict.join(' '))}" data-repo="${esc(f.repo.join(' '))}"
   data-last="${esc(f.lastDay)}" data-cost="${f.cost === null ? '' : f.cost}"
+  data-created="${f.createdTs === null ? '' : f.createdTs}" data-createdday="${esc(f.createdDay)}"
   data-name="${esc(String(name).toLowerCase())}">
   <td class="c-name"><span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span></td>
   <td class="c-st"><span class="tone-${esc(tone)}">${esc(f.status)}</span></td>
   <td class="c-cost cost-${esc(row.cost.code ?? 'none')}" title="${esc(row.cost.text)}">${esc(row.cost.short ?? '—')}</td>
   <td class="c-vd">${verdictCell(f)}</td>
   <td class="c-im">${impactCell(row, f)}</td>
+  <td class="c-created">${createdCell(row, f)}</td>
   <td class="c-last">${esc(f.lastDay || '—')}</td>
 </tr>
 <tr class="ev-row" id="${evId}" hidden><td colspan="${COLS}">${evidence(row)}</td></tr>`;
@@ -356,7 +455,19 @@ function sidebar(filters, cutoffs, total, cost) {
 </details>`;
 }
 
-const th = (key, label, cls = '') => `<th${cls ? ` class="${cls}"` : ''} data-sort="${esc(key)}" tabindex="0" role="button" aria-sort="none"><span>${esc(label)}</span></th>`;
+/**
+ * A sortable header.
+ *
+ * `sorted` is the order the rows arrive in, stated in the markup rather than left for
+ * the script to add: the server sorts, so a page whose header claims `none` while the
+ * body is already ordered is lying to a reader who has JavaScript off — and to the
+ * screen reader of one who does not.
+ */
+const th = (key, label, cls = '', { sorted = 'none', title = '' } = {}) => `<th${cls ? ` class="${cls}"` : ''} data-sort="${esc(key)}" tabindex="0" role="button" aria-sort="${esc(sorted)}"${title ? ` title="${esc(title)}"` : ''}><span>${esc(label)}</span></th>`;
+
+// Said on the header itself, not only in the note at the foot: whoever reads a date
+// here should be able to find out what it measures without scrolling past the table.
+const CREATED_TITLE = 'When the agent first appears in the record. Workers are dated by the moment their id was claimed in the ledger, which is before they were spawned; every other row — standing sessions, probes — never claimed an id, so it is dated by its first session start. Each cell names its own source; a row neither record dates reads unknown.';
 
 const foot = (model) => `<details class="ag-foot">
   <summary>About these numbers</summary>
@@ -367,6 +478,8 @@ const foot = (model) => `<details class="ag-foot">
     <li>Cost comes from the same priced feed as the hub's analytics page — <code>obot.roadmap/scripts/build_usage_data.py</code>. This page never prices anything itself, so the two cannot disagree.</li>
     <li>${esc(PRICE_NOTE)}</li>
     <li>${esc(ID_NOTE)}</li>
+    <li>Created is when the agent first appears in the record, and the table opens on it, newest first. A worker is dated by the moment its id was claimed in the ledger — the claim happens before the spawn, and it is the only record that dates an id that was claimed and never launched. Every other row never claimed an id, so it is dated by its first session start from the harness instead. Each cell says which in its tooltip and in the evidence under the row, and a row neither record dates reads unknown rather than borrowing the first day it was priced on.</li>
+    <li>Days here are UTC days, as everywhere else on this page — the two records disagree about the clock (the ledger writes local time, the harness writes UTC), so both are read as instants and shown on one calendar. The exact stamp, offset and all, is in each cell's tooltip.</li>
     <li>Status is the job record joined to its append-only timeline. Where the two disagree the timeline wins, because a state file can say done over a session that fell over.</li>
     <li>Impact is the Navigator delivery record, checked against GitHub — never the job records' own child list, which is empty for nearly half of measured jobs.</li>
     <li>Filter counts are over the whole roster, not over the current selection, so they say what ticking a box would give you.</li>
@@ -396,6 +509,7 @@ ${sidebar(filters, cutoffs, rows.length, cost)}
         ${th('cost', 'Cost', 'c-cost')}
         ${th('verdict', 'Verdict', 'c-vd')}
         ${th('impact', 'Roadmap impact', 'c-im')}
+        ${th('created', 'Created', 'c-created', { sorted: 'descending', title: CREATED_TITLE })}
         ${th('last', 'Last active', 'c-last')}
       </tr></thead>
       <tbody>
@@ -414,7 +528,7 @@ ${rows.map((r, i) => tableRow(r, i)).join('\n')}
 // The page's own behaviour: filter, sort, expand. Inline and dependency-free, like
 // every other script on this server — the dashboard has no build step and a page
 // that needs one stops being servable from a file on his machine.
-const TABLE_JS = `
+export const TABLE_JS = `
 (function () {
   var root = document.getElementById('agents');
   if (!root) return;
@@ -484,7 +598,9 @@ const TABLE_JS = `
   });
 
   // Sort. The pair moves together or the evidence ends up under someone else's row.
-  var dir = {};
+  // Seeded with the order the server already painted, so the first click on Created
+  // reverses it instead of re-applying what is on the screen.
+  var dir = { created: 'desc' };
   function sortBy(key) {
     // First click on a column shows the end of it he came for: the biggest number,
     // the most recent day, and — for a name — the top of the alphabet.
@@ -497,6 +613,11 @@ const TABLE_JS = `
       if (key === 'cost') {
         var cx = x.cost === '' ? -1 : parseFloat(x.cost), cy = y.cost === '' ? -1 : parseFloat(y.cost);
         r = cx - cy;
+      } else if (key === 'created') {
+        // The instant, not the day: two agents claimed nine hours apart share a date,
+        // and an undated row belongs at the far end of either direction.
+        var ax = x.created === '' ? -1 : parseFloat(x.created), ay = y.created === '' ? -1 : parseFloat(y.created);
+        r = ax - ay;
       } else if (key === 'impact') {
         r = (a[0].querySelector('.im-moved') ? 2 : 0) + (a[0].querySelector('.im-closed') ? 1 : 0)
           - (b[0].querySelector('.im-moved') ? 2 : 0) - (b[0].querySelector('.im-closed') ? 1 : 0);
@@ -623,7 +744,12 @@ export const TABLE_CSS = `
                       font-variant-numeric:tabular-nums; }
   .at-table .c-vd { white-space:nowrap; font-size:0.68rem; }
   .at-table .c-im { min-width:14rem; color:var(--muted); line-height:1.35; }
-  .at-table .c-last { font-family:var(--mono); font-size:0.68rem; color:var(--muted); white-space:nowrap; }
+  .at-table .c-created, .at-table .c-last { font-family:var(--mono); font-size:0.68rem; color:var(--muted);
+                                           white-space:nowrap; }
+  /* The two dates read as a pair, so the sort column is the brighter of them and the
+     one the eye lands on when the table opens. */
+  .at-table .c-created { color:var(--ink); }
+  .cr-none { color:var(--faint); font-family:var(--sans, inherit); font-style:italic; }
   .vd { font-size:0.66rem; letter-spacing:0.04em; text-transform:uppercase; }
   .vd-confirmed { color:var(--good); }
   .vd-drift { color:var(--warn); }

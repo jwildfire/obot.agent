@@ -11,7 +11,8 @@ import assert from 'node:assert/strict';
 
 import { buildRoster, usageIndex } from '../lib/roster.mjs';
 import {
-  agentsTableHtml, buildFilters, facetsOf, periodCutoffs, reposOf, tableRows, unattributedRow,
+  TABLE_JS, agentsTableHtml, buildFilters, createdOf, facetsOf, periodCutoffs, reposOf,
+  tableRows, unattributedRow,
 } from '../lib/roster-table.mjs';
 import { sessionShell } from '../lib/render.mjs';
 
@@ -232,4 +233,160 @@ test('the Agents tab is the table, and the outcome groups are gone from it', () 
   assert.doesNotMatch(html, /Running now/);
   assert.doesNotMatch(html, /Produced nothing<\/h3>/);
   assert.match(html, /\/session\/log/);
+});
+
+// ---- created, and newest first (jwildfire/obot.agent#168) -------------------
+//
+// @jwildfire: "Add a 'date created' column. show most recently created at the top."
+//
+// The failure these hold shut is a date column that quietly measures something
+// adjacent to what its header says. Two records date an agent and they are not the
+// same clock: the ledger writes local time with an offset (`...T07:40:55+01:00`) and
+// the harness writes UTC (`...T08:15:22.581Z`). A column that string-slices both
+// prints two clocks under one heading and nothing errors.
+
+const td = (html, cls) => {
+  const m = new RegExp(`<td class="${cls}"[^>]*>([\\s\\S]*?)</td>`).exec(html);
+  return m ? m[1] : null;
+};
+const text = (s) => String(s).replace(/<[^>]*>/g, '').trim();
+
+test('a worker is created when its id was claimed, and the row says which record said so', () => {
+  // The claim comes first and it is the act that creates the agent: the id is claimed
+  // before the spawn, and an id claimed that never launched still has a creation time
+  // while having no session at all.
+  const c = createdOf(row({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00', startedAt: '2026-08-16T07:41:10.500Z' }));
+  assert.equal(c.source, 'claim');
+  assert.equal(c.at, '2026-08-16T07:40:55+01:00');
+});
+
+test('an agent that never claimed an id is created when its first session started', () => {
+  // Standing sessions and probes never claim. Dating them by a claim they do not have
+  // would leave two-fifths of the table blank.
+  const c = createdOf(row({ label: '\u{1F3A9}\u{1F916} obot-prime', startedAt: '2026-08-15T09:00:00.000Z' }));
+  assert.equal(c.source, 'session');
+  assert.equal(c.at, '2026-08-15T09:00:00.000Z');
+});
+
+test('an agent neither record dates is created "none" — never a plausible stand-in', () => {
+  const c = createdOf(row({ label: 'some-label', days: ['2026-08-01', '2026-08-02'] }));
+  assert.equal(c.source, 'none');
+  assert.equal(c.at, null);
+});
+
+test('the created day is derived from the instant, not sliced off the string', () => {
+  // 00:30 on the 16th at +01:00 is 23:30 UTC on the 15th. Slicing the string would
+  // print the 16th here and the UTC day in the column beside it, which is how one
+  // heading comes to cover two clocks.
+  const f = facetsOf(row({ id: 'W0001', claimedAt: '2026-08-16T00:30:00+01:00' }));
+  assert.equal(f.createdDay, '2026-08-15');
+  assert.equal(f.createdTs, Date.parse('2026-08-16T00:30:00+01:00'));
+});
+
+test('the table is sorted newest created first', () => {
+  const model = {
+    rows: [
+      row({ id: 'W0001', claimedAt: '2026-08-16T07:00:00+01:00' }),
+      row({ id: 'W0002', claimedAt: '2026-08-17T09:30:00+01:00' }),
+      row({ id: 'W0003', claimedAt: '2026-08-17T06:15:00+01:00' }),
+    ],
+    unattributed: null,
+  };
+  const { rows } = tableRows(model, { now: NOW });
+  assert.deepEqual(rows.map((r) => r.row.id), ['W0002', 'W0003', 'W0001']);
+});
+
+test('newest first orders within a day too, not just between days', () => {
+  // Half a night's workers share one date. If the column only sorted by day, the top
+  // of the table would look ordered while being arbitrary inside today.
+  const model = {
+    rows: [
+      row({ id: 'W0010', claimedAt: '2026-08-17T05:00:00+01:00' }),
+      row({ id: 'W0011', claimedAt: '2026-08-17T22:00:00+01:00' }),
+    ],
+    unattributed: null,
+  };
+  const { rows } = tableRows(model, { now: NOW });
+  assert.deepEqual(rows.map((r) => r.row.id), ['W0011', 'W0010']);
+});
+
+test('an agent with no created date sorts below every dated one', () => {
+  const model = {
+    rows: [
+      row({ id: 'W0020', label: 'undated' }),
+      row({ id: 'W0021', claimedAt: '2026-07-20T09:00:00+01:00' }),
+    ],
+    unattributed: null,
+  };
+  const { rows } = tableRows(model, { now: NOW });
+  assert.deepEqual(rows.map((r) => r.row.id), ['W0021', 'W0020']);
+});
+
+test('newest first does not float the collapsed pre-ledger row above live work', () => {
+  // It is 147 agents added together and its activity runs to yesterday. Sorted with
+  // the singles it would sit above the agents that are running now.
+  const model = {
+    rows: [row({ id: 'W0001', claimedAt: '2026-07-20T09:00:00+01:00', status: { status: 'running', note: '' } })],
+    unattributed: { agents: 147, cost: 4985.31, calls: 0, first: '2026-07-09', last: '2026-08-16', days: ['2026-08-16'], top: [] },
+  };
+  const { rows } = tableRows(model, { now: NOW });
+  assert.equal(rows.at(-1).row.synthetic, true);
+  assert.equal(rows[0].row.id, 'W0001');
+});
+
+test('the pre-ledger row reads unknown, with no date anywhere in what it shows', () => {
+  // A plausible wrong date is worse than an obvious absent one: these agents ran
+  // before ids existed, so nothing recorded when any one of them started.
+  const model = {
+    rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:00:00+01:00' })],
+    unattributed: { agents: 147, cost: 4985.31, calls: 0, first: '2026-07-09', last: '2026-08-16', days: ['2026-08-16'], top: [] },
+  };
+  const html = agentsTableHtml(model, { now: NOW });
+  const rowsHtml = html.split('<tr class="ar"');
+  const pre = rowsHtml.at(-1);
+  assert.equal(text(td(pre, 'c-created')), 'unknown');
+  assert.doesNotMatch(text(td(pre, 'c-created')), /2026-07-09|2026-08/);
+  assert.match(pre, /data-created=""/);
+});
+
+test('the created cell carries the day, and the stamp it came from verbatim', () => {
+  // Verbatim, offset included. Reformatting a local stamp into UTC — or the reverse —
+  // is the same defect as the column mixing clocks, one row at a time.
+  const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00' })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  assert.equal(text(td(html, 'c-created')), '2026-08-16');
+  assert.match(html, /data-created="\d{10,}"/);
+  assert.match(html, /title="[^"]*claimed 2026-08-16T07:40:55\+01:00/);
+});
+
+test('the evidence row names the record that dated the agent, for the screen with no hover', () => {
+  // A tooltip is unreachable on a phone, and the phone is where he reads this.
+  const model = { rows: [row({ label: '\u{1F3A9}\u{1F916} obot-prime', startedAt: '2026-08-15T09:00:00.000Z' })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  assert.match(html, /<span class="k">created<\/span>[^<]*first session started 2026-08-15T09:00:00Z/);
+});
+
+test('the page states its own sort order in the markup, before any script runs', () => {
+  const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:00:00+01:00' })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  assert.match(html, /<th[^>]*data-sort="created"[^>]*aria-sort="descending"/);
+  assert.equal((html.match(/aria-sort="descending"/g) ?? []).length, 1);
+});
+
+test('the evidence colspan covers every column there is', () => {
+  // A column added without the colspan leaves the evidence row one cell short and the
+  // table's last column collapses under it.
+  const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:00:00+01:00' })], unattributed: null };
+  const html = agentsTableHtml(model, { now: NOW });
+  const heads = (html.match(/<th[^>]*data-sort=/g) ?? []).length;
+  assert.ok(heads >= 7, `expected the created column among the headers, saw ${heads}`);
+  assert.match(html, new RegExp(`colspan="${heads}"`));
+});
+
+test('filtering never reorders the table, so the sort survives it', () => {
+  // The regression this exists for is a filter that rebuilds the tbody: the rows come
+  // back in document order and the sort silently reverts, which looks like it worked.
+  const apply = /function apply\(\)[\s\S]*?\n  }\n/.exec(TABLE_JS);
+  assert.ok(apply, 'the filter function should be findable in the page script');
+  assert.doesNotMatch(apply[0], /appendChild|insertBefore|\.sort\(/);
 });
