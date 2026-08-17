@@ -56,8 +56,11 @@ export function buildMetricsModel(cache, now = new Date()) {
     { group: 'PRs opened', label: 'standard lane', counts: windowCounts(lane('standard'), now) },
     { group: 'PRs opened', label: 'stacked (feature branch)', counts: windowCounts(lane('stacked'), now), muted: true },
     { group: 'Shipped', label: 'releases published', counts: windowCounts(releases, now, (r) => r.publishedAt), items: releases },
-    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date, day), epoch: filed.map((d) => d.date).sort()[0] ?? null },
-    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date, day), epoch: decided.map((d) => d.date).sort()[0] ?? null },
+    // `unread` rather than a row of zeros when the decisions record could not be
+    // opened at all — a hub clone that is not there counts nothing, and five zeros
+    // read as a year in which he decided nothing.
+    { group: 'Decisions', label: 'filed for him', counts: windowCounts(filed, now, (d) => d.date, day), epoch: filed.map((d) => d.date).sort()[0] ?? null, unread: !cache.decisions },
+    { group: 'Decisions', label: 'decided by him', counts: windowCounts(decided, now, (d) => d.date, day), epoch: decided.map((d) => d.date).sort()[0] ?? null, unread: !cache.decisions },
   ];
   return {
     ageMin,
@@ -88,7 +91,10 @@ export function metricsHtml(model, { hubUrl = 'https://jwildfire.github.io/obot.
     const label = r.items
       ? `<details><summary>${esc(r.label)}</summary><ul class="mrel">${releaseList(r.items)}</ul></details>`
       : esc(r.label);
-    return `${groupCell}<tr${r.muted ? ' class="mmuted"' : ''}><td class="mlabel">${label}</td>${WINDOWS.map((w) => `<td class="mcell">${num(r.counts[w])}</td>`).join('')}</tr>`;
+    const cells = r.unread
+      ? WINDOWS.map(() => '<td class="mcell munread" title="the decisions record could not be read on this machine">—</td>').join('')
+      : WINDOWS.map((w) => `<td class="mcell">${num(r.counts[w])}</td>`).join('');
+    return `${groupCell}<tr${r.muted ? ' class="mmuted"' : ''}><td class="mlabel">${label}</td>${cells}</tr>`;
   }).join('\n');
   const decidedEpoch = model.rows.find((r) => r.label === 'decided by him')?.epoch;
   const filedEpoch = model.rows.find((r) => r.label === 'filed for him')?.epoch;

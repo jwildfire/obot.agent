@@ -209,10 +209,17 @@ const backfill = (r, hub) => {
   return { ...r, decisionId: d.id, decisionIdSource: 'registry (backfilled on read)', decisionIdError: null };
 };
 
+// An answer list from a store that does not exist. Marked on the array itself so
+// every existing caller keeps treating it as the empty list it is, while the one
+// caller that renders a verdict about it can tell the difference
+// (jwildfire/obot.roadmap#223).
+export const STORELESS = Symbol.for('obot.answers.storeless');
+const storeless = () => Object.defineProperty([], STORELESS, { value: true });
+
 /** Every answer ever recorded, newest first. Nothing is ever removed. */
 export function readAnswers(workspace, { hub = null } = {}) {
   let names = [];
-  try { names = fs.readdirSync(answersDir(workspace)).filter((n) => n.endsWith('.json')); } catch { return []; }
+  try { names = fs.readdirSync(answersDir(workspace)).filter((n) => n.endsWith('.json')); } catch { return storeless(); }
   return names
     .map((n) => { try { return backfill(normalize(JSON.parse(fs.readFileSync(path.join(answersDir(workspace), n), 'utf8'))), hub); } catch { return null; } })
     .filter(Boolean)
@@ -241,9 +248,16 @@ export function currentAnswers(workspace, { hub = null } = {}) {
   return [...byArtifact.values()];
 }
 
+/** Has this machine ever had an answer store? Absent is not the same as empty. */
+export const answersStoreExists = (workspace) => fs.existsSync(answersDir(workspace));
+
 /** What he has decided that no agent has applied. The bounded read. */
 export function pendingAnswers(workspace, { hub = null } = {}) {
-  return currentAnswers(workspace, { hub }).filter((a) => a.status !== APPLIED);
+  const out = currentAnswers(workspace, { hub }).filter((a) => a.status !== APPLIED);
+  // `filter` drops the marker `readAnswers` sets, and this is the list the
+  // Navigator's section renders a verdict about, so it is re-read from disk here
+  // rather than carried through three array copies.
+  return answersStoreExists(workspace) ? out : Object.defineProperty(out, STORELESS, { value: true });
 }
 
 const ageMin = (at, now = new Date()) => Math.max(0, Math.round((now.getTime() - Date.parse(at)) / 60000));
@@ -307,7 +321,9 @@ export function deliverAnswers(workspace, { hub = null, now = new Date() } = {})
 export function answersSection(pending, { now = new Date() } = {}) {
   const lines = ['## Decision answers — recorded by @jwildfire, awaiting an agent', ''];
   if (!pending.length) {
-    lines.push('- none — every answer he has recorded has been applied');
+    lines.push(pending[STORELESS]
+      ? '- no answer store on this machine yet — nothing has been recorded, so nothing can be pending. It appears the first time you answer a decision on the dashboard.'
+      : '- none — every answer he has recorded has been applied');
     return `${lines.join('\n')}\n`;
   }
   for (const a of pending) {

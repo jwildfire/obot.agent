@@ -619,7 +619,12 @@ export const ledgerNotes = (state, { full = false } = {}) => (state?.notes ?? []
  * landed, and presenting a dead observer's content as current is the failure mode. */
 const sweepHead = (state, missing) => {
   if (missing || !state) {
-    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code>.</p>`;
+    // The remedy has to work on the machine that is reading it. On a new one the
+    // LaunchAgent has never been installed, so `launchctl kickstart` answers
+    // `Could not find service "com.obot.navigator-sweep"` — the absence was stated
+    // honestly and the half that says how to fill it was wrong, which is the half
+    // this requirement cares about most (jwildfire/obot.roadmap#223).
+    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes once installed: <code>bash obot.agent/tools/navigator/install-launchd</code>, then <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code> to nudge it.</p>`;
   }
   if (state.stale) {
     return `<p class="dead"><strong>The observer is dead</strong> — last swept ${esc(state.sweptAt ?? 'never')}${state.ageMin === null ? '' : ` (${state.ageMin} min ago, cadence ${state.cadenceMin}m)`}. What follows is <strong>not current</strong>. Restart: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`;

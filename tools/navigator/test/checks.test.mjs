@@ -230,3 +230,23 @@ test('a stale audit is emphasised in the section; a fresh one is a plain line', 
   assert.match(fresh, /nightly audit: last run/)
   assert.doesNotMatch(fresh, /\*\*nightly audit/)
 })
+
+test('nothing read is not a clean roadmap', () => {
+  // jwildfire/obot.roadmap#223. On a machine where every `gh` call fails and there
+  // is no hub clone, all three finding lists are empty because no source could be
+  // opened — and the headline read "roadmap discipline: clean", two lines above its
+  // own "an absent audit reads as a clean one". Callers summarise by the first line.
+  const md = checksSection({
+    orphans: [], registry: [], closeouts: [],
+    errors: ['jwildfire/safety.viz: gh api failed', 'decisions: ENOENT'],
+  })
+  assert.match(md.split('\n')[2], /NOT CHECKED/)
+  assert.match(md, /No finding here means no reading, not a clean roadmap/)
+  assert.doesNotMatch(md, /discipline: clean/)
+})
+
+test('every source read and nothing found is still clean', () => {
+  const md = checksSection({ orphans: [], registry: [], closeouts: [], errors: [] })
+  assert.match(md.split('\n')[2], /roadmap discipline: clean/)
+  assert.doesNotMatch(md, /NOT CHECKED/)
+})
