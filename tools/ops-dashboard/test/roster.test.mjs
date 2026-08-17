@@ -12,8 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  buildRoster, collectRoster, currentLabels, impactOf, parseDelivery, parseWorkers,
-  refUrl, rosterMarkdown, statusOf, timelineClose, usageIndex,
+  buildRoster, collectRoster, currentLabels, impactOf, modelFlag, parseDelivery, parseWorkers,
+  readJobs, refUrl, rosterMarkdown, statusOf, timelineClose, usageIndex,
 } from '../lib/roster.mjs';
 import {
   agentRow, groupRoster, kindOf, rosterHtml,
@@ -822,4 +822,65 @@ test('collectRoster on a machine with nothing at all reports every source unread
   for (const key of ['jobs', 'workers', 'usage', 'delivery']) {
     assert.equal(model.sources[key].present, false, `${key} should be reported unread`);
   }
+});
+
+// ---- which model ran it (jwildfire/obot.agent#168) --------------------------
+//
+// @jwildfire: "also show me the model in the table." The priced usage artifact
+// cannot answer it — its cells carry no model and its `models` breakdown is
+// portfolio-wide — but the harness job record can: every session is launched with
+// an explicit `--model` and the flag is kept in `respawnFlags`. Measured on this
+// machine: 95 of 95 job records carry one, and on every sampled session the flag
+// agrees with the model that actually served the transcript's turns (`opus` →
+// `claude-opus-5`, `fable` → `claude-fable-5`).
+//
+// So the column is the launch flag, read as the launch flag, and nothing is
+// derived from cost or behaviour to fill a gap.
+
+test('the model comes off the job record launch flag, verbatim', () => {
+  assert.equal(modelFlag(['--permission-mode', 'auto', '--model', 'fable']), 'fable');
+  assert.equal(modelFlag(['--model', 'opus', '-n', 'name']), 'opus');
+});
+
+test('a job record with no model flag yields no model rather than a default', () => {
+  // A session launched with no flag inherits its parent's model, and the record
+  // does not say what that was. Naming a likely one here would put a model beside
+  // a cost figure on no evidence, and those two are read against each other.
+  assert.equal(modelFlag([]), null);
+  assert.equal(modelFlag(['--model']), null);
+  assert.equal(modelFlag(null), null);
+});
+
+test('readJobs carries the model through from state.json', () => {
+  const jobs = tmp();
+  const jd = path.join(jobs, 'aaa');
+  fs.mkdirSync(jd, { recursive: true });
+  fs.writeFileSync(path.join(jd, 'state.json'), JSON.stringify({
+    name: '👯🤖 W0001 2026-08-16 nobold', state: 'done',
+    createdAt: '2026-08-16T05:42:51.129Z', updatedAt: '2026-08-16T06:02:16.908Z',
+    respawnFlags: ['--permission-mode', 'auto', '--model', 'opus'],
+  }));
+  assert.equal(readJobs(jobs)[0].model, 'opus');
+});
+
+test('a row names every model its sessions ran under, and a resumed agent can have two', () => {
+  const m = buildRoster({
+    workers: parseWorkers(JOURNAL),
+    jobs: [
+      { name: '👯🤖 W0001 2026-08-16 nobold', state: 'done', model: 'fable', startedAt: '2026-08-16T05:42:00.000Z', updatedAt: '2026-08-16T06:00:00.000Z', timeline: null },
+      { name: '👯🤖 W0001 2026-08-16 nobold', state: 'done', model: 'opus', startedAt: '2026-08-16T09:00:00.000Z', updatedAt: '2026-08-16T09:30:00.000Z', timeline: null },
+    ],
+    usage: usageIndex(null),
+    delivery: [],
+    now: NOW,
+  });
+  const w1 = m.rows.find((r) => r.id === 'W0001');
+  assert.deepEqual(w1.models, ['fable', 'opus']);
+});
+
+test('an id that never launched has no model, and the roster says nothing about it', () => {
+  const m = buildRoster({
+    workers: parseWorkers(JOURNAL), jobs: [], usage: usageIndex(null), delivery: [], now: NOW,
+  });
+  for (const r of m.rows) assert.deepEqual(r.models, []);
 });

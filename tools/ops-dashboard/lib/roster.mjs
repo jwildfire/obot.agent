@@ -89,6 +89,31 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const day = (iso) => { const t = Date.parse(iso); return Number.isNaN(t) ? null : new Date(t).toISOString().slice(0, 10); };
 const clock = (iso) => { const t = Date.parse(iso); return Number.isNaN(t) ? '' : new Date(t).toISOString().slice(11, 16); };
 
+/**
+ * The model a session was launched with, from the harness's own record of its launch.
+ *
+ * @jwildfire, 2026-08-17: "also show me the model in the table." The priced usage
+ * artifact cannot answer this — its cells carry no model at all and its `models`
+ * breakdown is portfolio-wide — but every session here is launched with an explicit
+ * `--model`, and the harness keeps the launch flags. Measured on this machine: 95 of
+ * 95 job records carry one, and on every session sampled against its transcript the
+ * flag agrees with the model that actually served the turns (`opus` →
+ * `claude-opus-5`, `fable` → `claude-fable-5`).
+ *
+ * Read as what it is — the flag, verbatim, with no version resolved onto it and no
+ * default supplied when it is missing. A session launched without the flag inherits
+ * its parent's model and the record does not say what that was; naming a likely one
+ * would put a model beside a cost figure on no evidence, and those two columns exist
+ * to be read against each other.
+ */
+export function modelFlag(flags) {
+  if (!Array.isArray(flags)) return null;
+  const i = flags.indexOf('--model');
+  if (i === -1) return null;
+  const v = flags[i + 1];
+  return typeof v === 'string' && v && !v.startsWith('-') ? v : null;
+}
+
 function minutesSince(iso, now) {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
@@ -574,6 +599,10 @@ export function buildRoster({ workers, jobs = [], usage = null, delivery = [], s
       days,
       sessions: matched.length,
       tokens: matched.reduce((n, j) => n + (j.tokens ?? 0), 0),
+      // Every model this agent's sessions were launched with. Plural because a
+      // resumed worker is one agent that may have run under two, and collapsing that
+      // to one would hide the resume that changed the model mid-task.
+      models: [...new Set(matched.map((j) => j.model).filter(Boolean))].sort(),
       status,
       cost,
       // `unjudged` rides on the impact so every view gets the distinction without
@@ -778,6 +807,7 @@ export function readJobs(jobsDir) {
       tokens: s.tokens ?? 0,
       startedAt: s.createdAt ?? s.startedAt ?? null,
       updatedAt: s.updatedAt ?? null,
+      model: modelFlag(s.respawnFlags),
       firstTerminalAt: s.firstTerminalAt ?? null,
       timeline: timelineClose(readText(path.join(dir, 'timeline.jsonl'))),
     });
