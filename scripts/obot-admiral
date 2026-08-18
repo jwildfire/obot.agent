@@ -38,6 +38,23 @@
 // Env: OBOT_WORKSPACE, OBOT_JOBS_DIR, and the OBOT_ADMIRAL_* thresholds documented in
 // tools/navigator/admiral.mjs.
 //
+// OBOT_ADMIRAL_SPAWN=0 DECIDES WITHOUT LAUNCHING, and it exists because this
+// launcher's own unit suite used to launch for real (obot.agent#188). Several of its
+// cases run with no dry-run flag so the launch branch is reachable, and it was
+// reached: two runs on the evening of 2026-08-17 left four genuine
+// `claude --bg -n '⚓🤖 obot-admiral'` sessions in the machine's real job ledger,
+// one of which was pinned into the admiral's slot on the Agents tab as RUNNING while
+// nothing was running. `--check` was not the answer, because the cases exist to
+// prove what happens when the launcher DOES decide to launch, and a case that stops
+// short of that branch proves the branch is never tested. So the branch runs in
+// full — the brief is written, the decision is recorded — and only the spawn is
+// withheld.
+//
+// It is armed by default, and a run that has been disarmed says so in ALL CAPS on
+// the dashboard. A switch that quietly turned the admiral off would be the same
+// failure as one that launched it forever, and it would look exactly like a quiet
+// fleet — the shape this whole file is written against.
+//
 // THE HARD CEILING IS ARMED BY DEFAULT; OBOT_ADMIRAL_KILL=0 disarms it. The Navigator
 // decided this on 2026-08-17 and the reasoning is worth keeping: a kill that ships
 // disarmed is documentation, and the failure it prevents is the one the requirement
@@ -54,9 +71,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ADMIRAL_NAME, ADMIRAL_TTL_MIN, brief, admiralSection, holdLine, hostWasAway,
-         isAdmiral, judgedWorkers, launchLine, operationalRepos, overrun,
-         parseAdmiralLog, readJobs, shouldLaunch, triggers } from '../tools/navigator/admiral.mjs'
+import { ADMIRAL_NAME, ADMIRAL_TTL_MIN, brief, admiralSection, foreignRoleSessions,
+         holdLine, hostWasAway, isAdmiral, judgedWorkers, launchLine, operationalRepos,
+         overrun, parseAdmiralLog, readJobs, shouldLaunch, stubLine,
+         triggers } from '../tools/navigator/admiral.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(HERE, '..')
@@ -66,6 +84,10 @@ const JOBS_DIR = process.env.OBOT_JOBS_DIR || join(process.env.HOME, '.claude', 
 // readable is the one that must NOT report a quiet fleet, and a branch that cannot
 // be reached from a test is a branch nobody has ever seen run.
 const POLICY = process.env.OBOT_ADMIRAL_POLICY || join(REPO_ROOT, 'scripts', 'policy.json')
+// Armed unless explicitly disarmed. `!== '0'` rather than a truthiness test, for the
+// same reason OBOT_ADMIRAL_KILL uses it: an empty or absent variable must mean the
+// default, and the default here is that the launcher launches.
+const SPAWN = process.env.OBOT_ADMIRAL_SPAWN !== '0'
 const HUB_DIR = join(WS, '.claude/session-hub')
 // The launch log, and a one-release read of the name it had before obot.agent#182.
 //
@@ -194,23 +216,26 @@ function main() {
   const journal = safeRead(DELIVERY_JOURNAL)
   const judgedReadable = existsSync(DELIVERY_JOURNAL) && journal.trim().length > 0
   const judged = judgedWorkers(journal)
-  const trigger = triggers({ jobs, prs, policy, judged, judgedReadable, now, hostWasAway: away })
+  const trigger = triggers({ jobs, prs, policy, judged, judgedReadable, now, hostWasAway: away, workspace: WS })
+  // Sessions carrying a role's name that ran somewhere other than this workspace.
+  // Named in the section rather than silently skipped by everything below.
+  const foreign = foreignRoleSessions(jobs, { workspace: WS })
   if (!judgedReadable) errors.push(`delivery journal not readable at ${DELIVERY_JOURNAL}`)
   // A repo that failed to list contributes no candidates, and saying the queue is
   // empty when it could not be read is the wrong direction to fail in. Named, so the
   // section is never read as complete.
   if (errors.length) trigger.unread = errors
 
-  const overruns = overrun(jobs, { now })
+  const overruns = overrun(jobs, { now, workspace: WS })
   // Legacy read: only when the new log does not exist at all, never merged with it.
   const log = parseAdmiralLog(existsSync(ADMIRAL_LOG) ? safeRead(ADMIRAL_LOG) : safeRead(LEGACY_ADMIRAL_LOG))
 
   if (MODE === 'json') {
-    process.stdout.write(JSON.stringify({ trigger, overruns, away, unread: errors }, null, 2) + '\n')
+    process.stdout.write(JSON.stringify({ trigger, overruns, away, unread: errors, foreign }, null, 2) + '\n')
     return
   }
 
-  const decision = shouldLaunch({ trigger, jobs, log, now, hostWasAway: away })
+  const decision = shouldLaunch({ trigger, jobs, log, now, hostWasAway: away, workspace: WS })
   // The section renders the decision as "held: <why>". In a dry run that would read
   // as a real refusal, so the reason says what it actually is — the section is the
   // artefact a reader trusts, and it must never describe an action that did not
@@ -219,6 +244,7 @@ function main() {
     decision.why = `DRY RUN, nothing launched — would ${decision.launch ? 'LAUNCH' : 'hold'}: ${decision.why}`
   }
   let launched = null
+  let stubbed = null
 
   // An overrunning admiral is handled before anything else: it is also the thing
   // holding the singleton, so a report that mentions it after the hold reads as if
@@ -226,7 +252,7 @@ function main() {
   for (const o of overruns) {
     say(o.line)
     if (MODE === 'run' && o.hard && process.env.OBOT_ADMIRAL_KILL !== '0') {
-      const killed = killAdmiral(o.job, jobs)
+      const killed = killAdmiral(o.job)
       appendFileSync(ADMIRAL_LOG, `${now.toISOString()} HOLD - — killed overrunning admiral ${o.job}: ${killed}\n`)
       say(`killed overrunning admiral ${o.job}: ${killed}`)
       o.killed = killed
@@ -237,7 +263,15 @@ function main() {
     const b = brief({ trigger, now })
     writeFileSync(BRIEF, JSON.stringify(b, null, 2))
     const cmd = launchCommand(BRIEF)
-    try {
+    if (!SPAWN) {
+      // Everything above this line ran. What is withheld is one call, and the record
+      // says which one and why — including the command, so a reader can see that the
+      // decision was complete and only the effect was declined.
+      stubbed = `OBOT_ADMIRAL_SPAWN=0 — the launch was DECIDED and not made: ${decision.why}`
+      appendFileSync(ADMIRAL_LOG, `${stubLine(now.toISOString(), trigger.signature, decision.why)}\n`)
+      say(`SPAWN DISARMED — would have launched: ${decision.why}`)
+      say(`would have run: ${cmd.join(' ')}`)
+    } else try {
       // Detached: the sweep runs under launchd on a five-minute leash and must not
       // wait on an agent. stdio ignored for the same reason — a child writing to a
       // dead pipe would take the sweep down with it.
@@ -268,7 +302,7 @@ function main() {
                          : trigger.fired ? `held — ${decision.why}` : 'no condition holds — nothing launched')
   }
 
-  let section = admiralSection({ trigger, decision, overruns, launched })
+  let section = admiralSection({ trigger, decision, overruns, launched, stubbed, foreign })
   if (errors.length) {
     section = section.replace(/\n$/, '') + '\n' +
       errors.map((e) => `  unread: ${e}`).join('\n') + '\n'
@@ -283,13 +317,21 @@ function main() {
  * job record does not carry one. SIGTERM rather than SIGKILL so the session gets to
  * flush; an admiral that ignores it is reported again on the next run, which is a
  * finding rather than an escalation.
+ *
+ * ON THE SESSION ID AND NOTHING ELSE (obot.agent#188). This used to fall back to
+ * matching a row whose NAME equalled the job's, which reads as harmless while
+ * exactly one session can carry that name — and the premise failed the first time
+ * anything else wore it. With four fixture admirals in the ledger, a ceiling firing
+ * on one of them would have joined on `⚓🤖 obot-admiral` and sent SIGTERM to
+ * whichever session `claude agents` listed first, which could be the real one. A
+ * name is a claim; the job directory IS the session id's prefix, so the id join is
+ * the one that cannot be worn by something else. When it finds nothing the overrun
+ * is reported and nothing is killed, which is the right direction to fail in.
  */
-function killAdmiral(jobId, jobs) {
+function killAdmiral(jobId) {
   try {
     const list = JSON.parse(execFileSync('claude', ['agents', '--json'], { encoding: 'utf8', timeout: 20000 }))
-    const job = jobs.find((j) => j.id === jobId)
-    const row = list.find((r) => String(r.sessionId).startsWith(jobId) ||
-                                 (job && String(r.name) === String(job.name)))
+    const row = list.find((r) => String(r.sessionId).startsWith(jobId))
     if (!row?.pid) return 'no pid found — reported only'
     process.kill(row.pid, 'SIGTERM')
     return `SIGTERM to pid ${row.pid}`

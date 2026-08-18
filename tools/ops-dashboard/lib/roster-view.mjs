@@ -79,15 +79,29 @@ export const STANDING_TAGS = ROLE_TAGS;
 
 const startsWithAny = (s, tags) => tags.some((t) => String(s ?? '').startsWith(t));
 
-/** Which standing role a row is, or null when it is not one. */
-export const standingRoleOf = (row) => roleOf(row?.label);
+/**
+ * Which standing role a row is, or null when it is not one.
+ *
+ * `foreignRole` is the model's answer to "did this session run in this workspace",
+ * decided once in roster.mjs where the job record is (obot.agent#188). A session
+ * carrying a role's name from a `mkdtemp` workspace is not that role — asking the
+ * name alone is how a test fixture came to be pinned into the admiral's slot reading
+ * RUNNING on an evening when no admiral existed. Read here rather than re-derived
+ * per view: the views hold no job record, and two views answering the same question
+ * from different data is the shape of failure this whole page keeps finding.
+ */
+export const standingRoleOf = (row) => (row?.foreignRole ? null : roleOf(row?.label));
 
 /**
  * What kind of agent this row is — which decides how it is judged, not where it
  * sorts. `worker` covers both the id era and the workers that ran before it.
  */
 export function kindOf(row) {
-  if (startsWithAny(row.label, STANDING_TAGS)) return 'standing';
+  // Through `standingRoleOf` rather than the tag list directly, so the workspace
+  // guard applies to grouping as well as to pinning. A fixture grouped under
+  // "Standing sessions" would be exempted from delivery judgement on the strength of
+  // a name it merely wore.
+  if (standingRoleOf(row)) return 'standing';
   if (row.id || startsWithAny(row.label, WORKER_TAGS)) return 'worker';
   return 'other';
 }

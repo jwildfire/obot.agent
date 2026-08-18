@@ -473,7 +473,11 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
   const now = new Date()
   const away = hostWasAway(prevSweptIso, now)
   const judged = judgedWorkers(safeRead(DELIVERY_JOURNAL))
-  const detections = pendingWakes(jobs, { now, judged, hostWasAway: away })
+  // `workspace` is what separates this workspace's roles from a session that merely
+  // carries a role's name (obot.agent#188). Four fixture admirals in `mkdtemp`
+  // workspaces produced four WAITING detections on this channel, which is exactly
+  // the kind of noise that teaches a reader to stop reading it.
+  const detections = pendingWakes(jobs, { now, judged, hostWasAway: away, workspace: WS })
   const idle = idleDetection(jobs, { now, backlog, backlogCapped, pendingCount: detections.length, hostWasAway: away })
   const all = idle ? [...detections, idle] : detections
 

@@ -9,6 +9,28 @@
 // OBOT_JOBS_DIR and OBOT_WORKSPACE are honoured throughout so the rules can be
 // proved against fabricated fleets rather than asserted. A singleton check that has
 // never been exercised is exactly the kind of capability that looks armed and is not.
+//
+// THIS SUITE USED TO CREATE REAL SESSIONS (obot.agent#188). Several cases below run
+// the launcher with no dry-run flag, so `MODE` stays `run` and the launch branch is
+// reachable — and it was reached, four times on the evening of 2026-08-17, each time
+// producing a genuine `claude --bg -n '⚓🤖 obot-admiral'` in the machine's real job
+// ledger. Every consumer that asks "is this the admiral" asked it of the NAME, so a
+// fixture was pinned into the admiral's slot on the Agents tab as RUNNING, two of
+// them put **ADMIRAL KILLED ON A BREACHED BUDGET** on @jwildfire's dashboard, the
+// singleton held every real launch behind them, and the wake raised four WAITING
+// detections. Two agents diagnosed a runaway launcher off that row.
+//
+// So the cases keep their coverage and lose the side effect, two ways at once:
+//
+//   OBOT_ADMIRAL_SPAWN=0 in `run()` — the launcher takes the whole launch branch,
+//     writes the brief, records the decision, and does not spawn. This is the
+//     documented switch, and `guards` below holds every case to it.
+//   A stub `claude` and `gh` on PATH — so a case that somehow reached a spawn could
+//     still not create a session, could not aim a SIGTERM at a real pid, and cannot
+//     make the trigger depend on whatever is open on GitHub this minute.
+//
+// The second matters as much as the first: a rule the suite must remember to obey is
+// a rule the next case will forget.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -17,8 +39,11 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { launches, openPR, settle, stubHarness } from './harness-stub.mjs'
+
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const LAUNCHER = join(REPO, 'scripts', 'obot-admiral')
+const STUB = stubHarness()
 
 const jobsDir = (jobs) => {
   const root = mkdtempSync(join(tmpdir(), 'admiraljobs-'))
@@ -35,13 +60,48 @@ const workspace = () => {
   return root
 }
 
-const run = (args = [], { jobs = {}, ws = workspace(), env = {} } = {}) => ({
-  ws,
-  r: spawnSync(LAUNCHER, args, {
-    env: { ...process.env, OBOT_JOBS_DIR: jobsDir(jobs), OBOT_WORKSPACE: ws, ...env },
-    encoding: 'utf8',
-    timeout: 120000,
-  }),
+// The environment every case runs in. Held in one place and asserted on by
+// `the suite cannot create a session, whatever a case forgets` below, so a case
+// added later inherits the guarantee rather than having to remember it.
+const SAFE_ENV = {
+  // The launcher decides, records, and does not spawn.
+  OBOT_ADMIRAL_SPAWN: '0',
+  // And could not reach the real binaries if it tried.
+  PATH: `${STUB.bin}:${process.env.PATH}`,
+  // The open-PR condition is a fixture like everything else. Left live, every
+  // assertion that the trigger did NOT fire was one idle operational pull request
+  // away from failing, on a repo this suite does not control.
+  FAKE_PR_LIST: '[]',
+}
+
+const run = (args = [], { jobs = {}, ws = workspace(), env = {}, prs = null } = {}) => {
+  const log = STUB.nextLog()
+  return {
+    ws,
+    log,
+    r: spawnSync(LAUNCHER, args, {
+      env: {
+        ...process.env,
+        ...SAFE_ENV,
+        OBOT_STUB_LOG: log,
+        OBOT_JOBS_DIR: jobsDir(jobs),
+        OBOT_WORKSPACE: ws,
+        ...(prs ? { FAKE_PR_LIST: JSON.stringify(prs) } : {}),
+        ...env,
+      },
+      encoding: 'utf8',
+      timeout: 120000,
+    }),
+  }
+}
+
+// A worker whose block has held far past the acting bar — the cheapest condition
+// that makes the trigger fire, and the one the launch cases below are built on.
+const stuckWorker = (id = 'j1') => ({
+  [id]: {
+    name: '👯🤖 W0099 x', state: 'blocked', tempo: 'blocked',
+    needs: 'a ruling', updatedAt: '2020-01-01T00:00:00Z',
+  },
 })
 
 // The launch log under the name it carries since obot.agent#182. Left pointing at
@@ -192,4 +252,194 @@ test('the hard ceiling is ARMED by default and OBOT_ADMIRAL_KILL=0 disarms it', 
   assert.match(armed.r.stderr, /killed overrunning admiral mgr1/)
   const disarmed = run([], { jobs: mgr, env: { OBOT_ADMIRAL_KILL: '0' } })
   assert.doesNotMatch(disarmed.r.stderr, /killed overrunning admiral/)
+})
+
+// ---- the spawn switch: the launch branch, without the launch -----------------
+
+test('the launch branch is REACHED and nothing is spawned', () => {
+  // The property the suite could not previously hold, because holding it meant
+  // reaching the branch that creates a session. With the switch the branch runs in
+  // full — brief written, decision recorded — and the spawn is the only thing
+  // missing. A test that avoided the branch instead would prove the opposite of
+  // what is wanted: that the launch path is never exercised.
+  const { ws, r, log } = run([], { jobs: stuckWorker() })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stderr, /SPAWN DISARMED/, 'it says it did not launch')
+  assert.equal(launches(log).length, 0, 'no background session was started')
+  assert.equal(r.stderr.includes('--bg'), true, 'and it still says what it would have run')
+  assert.equal(existsSync(join(ws, '.claude/session-hub/cache/admiral-brief.json')), true,
+    'the brief is still written — the decision ran in full')
+})
+
+test('a disarmed launch is an ALARM on his page, never a quiet hold', () => {
+  // An env var that silently turned the launcher off would be the worst possible
+  // shape of this fix: the section would read as a launcher that considered the
+  // fleet and declined, which is exactly what a working one says. So it is spelled
+  // to match the dashboard's alarm regex — ALL-CAPS, no punctuation between the
+  // asterisks, keyed on DOWN (tools/ops-dashboard/lib/navigator.mjs).
+  const { r } = run([], { jobs: stuckWorker() })
+  assert.match(r.stdout, /\*\*ADMIRAL LAUNCH DOWN\*\*/)
+  assert.match(r.stdout, /OBOT_ADMIRAL_SPAWN=0/, 'and it names the reason, not just the symptom')
+})
+
+test('a stubbed launch does not arm the relaunch floor', () => {
+  // The floors are read back out of the log, so a stub that wrote LAUNCH would hold
+  // the next REAL launch for an hour on the strength of a launch that never
+  // happened. STUB is its own word for that reason, and `parseAdmiralLog` reads
+  // LAUNCH and HOLD only.
+  const { ws, r } = run([], { jobs: stuckWorker() })
+  assert.equal(r.status, 0, r.stderr)
+  const log = readFileSync(admiralLog(ws), 'utf8')
+  assert.match(log, /^\S+ STUB /m)
+  assert.doesNotMatch(log, /^\S+ LAUNCH /m, 'nothing launched, so nothing may say LAUNCH')
+})
+
+test('the suite cannot create a session, whatever a case forgets', async () => {
+  // The guard. `run()` is the only door into the launcher in this file, and this
+  // holds it shut: both halves are set for every case, so a case added later
+  // inherits them without knowing they exist.
+  assert.equal(SAFE_ENV.OBOT_ADMIRAL_SPAWN, '0', 'the launcher is disarmed')
+  assert.ok(SAFE_ENV.PATH.startsWith(STUB.bin), 'and the real claude is not on PATH first')
+  const { log } = run(['--check'], { jobs: stuckWorker() })
+  assert.deepEqual(await settle(log), [], 'and nothing appeared once the dust settled')
+})
+
+test('with the switch unset the launcher WOULD spawn — the disarm is not the default', async () => {
+  // The other direction, and the one that decides whether any of this is load
+  // bearing. A switch that was quietly on in production would disable the admiral
+  // exactly as thoroughly as a runaway one launches it, and the failure would look
+  // like a quiet fleet. Safe to run here only because `claude` on PATH is the stub.
+  const { r, log } = run([], { jobs: stuckWorker(), env: { OBOT_ADMIRAL_SPAWN: '' } })
+  assert.equal(r.status, 0, r.stderr)
+  // The spawn is DETACHED, so its record arrives after the launcher has exited —
+  // reading the log straight after `spawnSync` measures the race, not the launch.
+  const got = await settle(log, { want: 1 })
+  assert.equal(got.length, 1, 'the launch branch really does spawn when armed')
+  assert.match(got[0], /--bg .*-n ⚓🤖 obot-admiral/)
+  assert.doesNotMatch(r.stdout, /ADMIRAL LAUNCH DOWN/)
+})
+
+// ---- a session wearing the role's name from somewhere else -------------------
+
+test('a session running outside the workspace does not hold the singleton', () => {
+  // obot.agent#188 itself. Four fixture-spawned admirals sat in the real job ledger
+  // with `cwd` under the system temp directory, and the singleton — which asks the
+  // name — held every real launch behind them. The bar is where a session RAN, not
+  // what it is called, so the next fixture under a different name is caught by the
+  // same rule with nothing added to it.
+  const foreign = new Date().toISOString()
+  const { r } = run([], {
+    jobs: {
+      ...stuckWorker(),
+      mgr1: {
+        name: '⚓🤖 obot-admiral', state: 'working', createdAt: foreign, updatedAt: foreign,
+        cwd: '/var/folders/_9/T/fleetws-skwFFQ',
+      },
+    },
+  })
+  assert.doesNotMatch(r.stdout, /an admiral is already running/)
+  assert.match(r.stderr, /SPAWN DISARMED/, 'it got as far as deciding to launch')
+})
+
+test('and it is never killed on a budget it was never given', () => {
+  // The two false **ADMIRAL KILLED ON A BREACHED BUDGET** headlines that reached his
+  // dashboard on 2026-08-18, and the real SIGTERM that went with one of them.
+  const old = new Date(Date.now() - 90 * 60000).toISOString()
+  const { r } = run([], {
+    jobs: {
+      mgr1: {
+        name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old,
+        cwd: '/var/folders/_9/T/fleetws-skwFFQ',
+      },
+    },
+  })
+  assert.doesNotMatch(r.stdout, /BREACHED|ADMIRAL KILLED/)
+  assert.doesNotMatch(r.stderr, /SIGTERM/)
+})
+
+test('but the suppression is SAID, because a silent one is the same defect', () => {
+  const { r } = run([], {
+    jobs: {
+      mgr1: {
+        name: '⚓🤖 obot-admiral', state: 'working', createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(), cwd: '/var/folders/_9/T/fleetws-skwFFQ',
+      },
+    },
+  })
+  assert.match(r.stdout, /not this workspace/)
+  assert.match(r.stdout, /fleetws-skwFFQ/, 'and names where it actually ran')
+})
+
+test('a session inside the workspace is the role, exactly as before', () => {
+  // The guard must not be able to make a REAL admiral invisible. Same fixture as the
+  // singleton case above, with the one field that decides it pointed at the
+  // workspace the launcher was given.
+  const ws = workspace()
+  const now = new Date().toISOString()
+  const { r } = run([], {
+    ws,
+    jobs: { ...stuckWorker(), mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: now, updatedAt: now, cwd: ws } },
+  })
+  assert.match(r.stdout, /held: an admiral is already running \(job mgr1/)
+})
+
+// ---- the kill join ----------------------------------------------------------
+
+test('the kill joins on the session id, never on the role name', () => {
+  // The fallback that made this dangerous: `killAdmiral` matched a row in
+  // `claude agents` whose NAME equalled the job's, so with a fixture in the ledger
+  // wearing `⚓🤖 obot-admiral` the ceiling could aim a SIGTERM at the real admiral
+  // instead. The stub returns a live session under that name with a pid this test
+  // would notice being used; the job id matches nothing, so nothing is killed.
+  const old = new Date(Date.now() - 90 * 60000).toISOString()
+  const ws = workspace()
+  const { r } = run([], {
+    ws,
+    jobs: { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old, cwd: ws } },
+    env: {
+      FAKE_AGENTS_JSON: JSON.stringify([
+        { sessionId: '9f9f9f9f-0000-0000-0000-000000000000', name: '⚓🤖 obot-admiral', pid: 999999 },
+      ]),
+    },
+  })
+  assert.match(r.stderr, /killed overrunning admiral mgr1: no pid found/)
+  assert.doesNotMatch(r.stderr, /SIGTERM to pid 999999/, 'a name is not an identity')
+})
+
+test('the kill does fire when the session id actually matches', () => {
+  // The other half, so the join is proved rather than merely narrowed: a real
+  // overrun still gets its SIGTERM. `process.kill` against a pid this process does
+  // not own throws, and the wrapper reports that — which is the branch reaching the
+  // kill, said out loud.
+  const old = new Date(Date.now() - 90 * 60000).toISOString()
+  const ws = workspace()
+  const { r } = run([], {
+    ws,
+    jobs: { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old, cwd: ws } },
+    env: {
+      FAKE_AGENTS_JSON: JSON.stringify([
+        { sessionId: 'mgr1-0000-0000-0000-000000000000', name: '⚓🤖 obot-admiral', pid: 2147483000 },
+      ]),
+    },
+  })
+  assert.match(r.stderr, /killed overrunning admiral mgr1: (SIGTERM to pid 2147483000|kill failed)/)
+})
+
+// ---- the pull-request condition, now a fixture ------------------------------
+
+test('an idle operational pull request fires the trigger on its own', () => {
+  // Previously unprovable without an idle PR happening to be open on GitHub. It is
+  // the condition most likely to launch an admiral in practice, so it is worth
+  // holding rather than hoping.
+  const { r } = run(['--check'], { jobs: {}, prs: [openPR({ number: 42, minsIdle: 600 })] })
+  // The stub answers for both operational repos, so one fixture PR is two
+  // conditions — which is itself the shape the launcher sees in production.
+  assert.match(r.stdout, /obot\.agent#42 has not moved in \d+m on main/)
+  assert.match(r.stdout, /obot\.roadmap#42 has not moved in \d+m on main/)
+  assert.match(r.stdout, /2 idle operational PR/)
+})
+
+test('a repo that failed to list is named, never counted as empty', () => {
+  const { r } = run(['--check'], { jobs: {}, env: { FAKE_PR_LIST_FAIL: '1' } })
+  assert.match(r.stdout, /unread: jwildfire\/obot\.agent/)
 })

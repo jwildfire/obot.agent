@@ -53,6 +53,12 @@ const KIND_LABEL = {
   worker: 'Worker',
   standing: 'Standing session',
   other: 'Probe or unnamed',
+  // A session carrying a role's name that ran somewhere other than this workspace —
+  // in practice a test fixture in a `mkdtemp` directory (obot.agent#188). Its own
+  // kind rather than folded into "Probe or unnamed", because the question a reader
+  // has when they see the admiral's name twice is answerable in three words, and
+  // because it makes the sidebar able to isolate them.
+  foreign: 'Ran outside this workspace',
   'pre-ledger': 'Before worker ids',
 };
 
@@ -368,7 +374,7 @@ export function reposOf(row) {
  * bucket is how a filtered list starts under-reporting the agents that did the most.
  */
 export function facetsOf(row) {
-  const kind = row.kind ?? kindOf(row);
+  const kind = row.foreignRole ? 'foreign' : (row.kind ?? kindOf(row));
   const status = row.status?.status ?? '';
   const i = row.impact ?? { moved: [], closed: [], mentioned: [], verdicts: [], empty: true };
 
@@ -378,7 +384,10 @@ export function facetsOf(row) {
   if (i.mentioned?.length) produced.push('named');
   if (!produced.length) {
     if (NO_SESSION.has(status)) produced.push('unrun');
-    else if (kind === 'standing') produced.push('notjudged');
+    // A foreign session is judged where it ran, if anywhere. Calling it "produced
+    // nothing" here would be a verdict passed on work this workspace never asked for
+    // — the same early verdict the running-agent case fixed.
+    else if (kind === 'standing' || kind === 'foreign') produced.push('notjudged');
     else produced.push('nothing');
   }
 
@@ -491,8 +500,14 @@ export function restingRows(rows = [], pins = emptyPins()) {
   // a role renamed today gets both a live row under the old tag and a "not running"
   // row under the new one, which is two rows saying opposite things about one role
   // (obot.agent#182).
+  //
+  // And a row that merely WEARS the tag does not count as present (obot.agent#188).
+  // A test fixture in a `mkdtemp` workspace satisfied this check by name, so the
+  // role's own "not running" row was suppressed and the band had no row for it at
+  // all — the gap that `restingRow` exists to prevent, reintroduced by the fix for
+  // the row that caused it.
   const present = (role) => rows.some(
-    (r) => tagsOf(role).some((t) => String(r.label ?? '').startsWith(t)),
+    (r) => !r.foreignRole && tagsOf(role).some((t) => String(r.label ?? '').startsWith(t)),
   );
   return pinnedRoles(pins).filter((role) => !present(role)).map(restingRow);
 }
@@ -698,6 +713,11 @@ function evidence(row, f) {
     li.push(`<li><span class="k">dispatched to</span> ${esc(ledger)} <span class="dim">\u2014 the task on its worker-ledger claim</span></li>`);
   }
   li.push(`<li><span class="k">status</span> ${esc(row.status.note || row.status.status)}</li>`);
+  // The whole answer to "why is the admiral's name on two rows". Said in the row
+  // rather than only in a group heading, because the row is what he taps.
+  if (row.foreignRole) {
+    li.push(`<li><span class="k">ran in</span> ${esc((row.cwds ?? []).join(' · ') || 'a directory the record does not name')} <span class="dim">— outside this workspace, so it is not this workspace's role however it is named</span></li>`);
+  }
   // What ended the session, when the transport ended it rather than the work. It is
   // kept out of the task tag — the agent accounted for nothing, a connection failed —
   // and it is far too useful to drop on the way out.
