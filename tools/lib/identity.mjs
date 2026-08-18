@@ -108,10 +108,16 @@ export function agentMarker({ coAuthors = '', worker = '' } = {}) {
 // person can type but cannot contain these.
 const RECORD = '\x1e'
 const FIELD = '\x1f'
+// The subject goes LAST, and it is the only free-text field. A commit subject can
+// contain anything a person can type, this separator included — and with the subject in
+// the middle, one such byte shifts every field after it, landing a trailer in the wrong
+// slot and reading a real agent commit as clean. Last, it can absorb whatever it holds.
+const FIELDS = 7
 const FORMAT = [
-  '%h', '%ae', '%ce', '%cI', '%s',
+  '%h', '%ae', '%ce', '%cI',
   '%(trailers:key=Co-Authored-By,valueonly,separator=%x2C)',
   '%(trailers:key=Worker,valueonly,separator=%x2C)',
+  '%s',
 ].join('%x1f')
 
 /**
@@ -125,8 +131,18 @@ export function scanCommits(dir, { sinceDays = 14, run = defaultRun } = {}) {
     `--pretty=format:${FORMAT}%x1e`,
   ])
   return out.split(RECORD).map((r) => r.replace(/^\n+/, '')).filter((r) => r.trim()).map((rec) => {
-    const [sha, email, committer, date, subject, coAuthors, worker] = rec.split(FIELD)
-    return { sha, email, committer, date, subject, coAuthors: coAuthors || '', worker: worker || '' }
+    const parts = rec.split(FIELD)
+    // A record that did not parse is UNREADABLE, never clean. Defaulting the trailer
+    // fields to '' would make agentMarker() return null and the commit would drop out
+    // of the scan silently — a failed read wearing the shape of a healthy one, which is
+    // this house's recurring defect and the same door 👯🤖 W0059 fell through on
+    // obot.agent#245 the same night.
+    if (parts.length < FIELDS) return { unreadable: true, raw: rec.slice(0, 80) }
+    const [sha, email, committer, date, coAuthors, worker] = parts
+    return {
+      sha, email, committer, date, coAuthors, worker,
+      subject: parts.slice(FIELDS - 1).join(FIELD),
+    }
   })
 }
 
@@ -141,7 +157,9 @@ function defaultRun(dir, args) {
 export function misattributed(commits) {
   const findings = []
   let merges = 0
+  let unreadable = 0
   for (const c of commits) {
+    if (c.unreadable) { unreadable++; continue }
     if (!agentMarker(c)) continue
     if (linksToBot(c.email)) continue
     // A squash commit GitHub authored when he merged. Nothing on this machine could
@@ -151,7 +169,7 @@ export function misattributed(commits) {
     const { kind, id } = classifyEmail(c.email)
     findings.push({ ...c, why: kind === 'wrong-id' ? `wrong id ${id}` : 'authored as him' })
   }
-  return { findings, merges, scanned: commits.length }
+  return { findings, merges, unreadable, scanned: commits.length }
 }
 
 // The shape of a repo's findings in one clause: how many wear his name, how many wear a
@@ -207,6 +225,10 @@ export function renderIdentity(reports, { stamp = '' } = {}) {
   }
   const merges = read.reduce((t, r) => t + (r.merges || 0), 0)
   if (merges) lines.push('', `${merges} further commit${merges === 1 ? '' : 's'} carry an agent trailer under his name because GitHub authored them when he merged. Not a local mis-attribution, and not counted above.`)
+  // A record the scan could not parse is not a clean commit. It gets the BROKEN
+  // headline, because that is what it is: something went unread.
+  const unreadable = read.reduce((t, r) => t + (r.unreadable || 0), 0)
+  if (unreadable) lines.push('', `- **COMMIT IDENTITY READING BROKEN** ${unreadable} commit record${unreadable === 1 ? '' : 's'} could not be parsed and were not judged. Unknown, not clean.`)
   for (const r of broken) {
     lines.push(`- **COMMIT IDENTITY READING BROKEN** ${r.repo} — ${r.error}. This checkout was not scanned; that is unknown, not clean.`)
   }

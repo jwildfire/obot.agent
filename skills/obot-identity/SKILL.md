@@ -100,6 +100,13 @@ token instead of falling through to his keyring, refuses a remote outside the jw
 org, and refuses `--force` and `--delete`. The SSH remote is deliberately left alone so
 his own pushes stay his.
 
+One consequence worth knowing before it costs you a detour: a branch the wrapper has
+already pushed cannot be rebased and re-pushed through it, because that needs a force.
+Merge the integration branch into your branch instead — which is the right flow here
+anyway, since every PR is squashed. The refusal stays deliberately: an escape hatch on a
+force-push tool gets used once for a good reason and then always
+(🧭🤖 obot-navigator, 2026-08-18).
+
 ### The commit identity is resolved, never typed
 
 **Do not type the user id.** Take it from `tools/lib/identity.mjs`:
