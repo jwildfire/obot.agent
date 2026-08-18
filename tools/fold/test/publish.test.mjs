@@ -10,6 +10,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeEntry, publishEntry } from '../lib/publish.mjs'
+import { BOT_LOGIN, BOT_EMAIL, linksToBot } from '../../lib/identity.mjs'
 
 const repo = () => {
   const d = mkdtempSync(join(tmpdir(), 'hub-'))
@@ -61,6 +62,23 @@ test('an empty token refuses to push rather than falling back to his credential'
   assert.match(r.why, /refusing to push/)
   // obot.agent#207: an empty GH_TOKEN falls through to the ambient keyring and
   // the write is recorded as @jwildfire. One of those happened tonight.
+})
+
+test('the fold commit is authored by the bot, on the address that links to it', () => {
+  // Until 2026-08-18 this commit carried a hand-written id belonging to a real GitHub
+  // user, so every fold rendered the bot's name and linked to nobody. The id is now
+  // resolved from tools/lib/identity.mjs; this is the guard that keeps it there
+  // (obot.agent#241, jwildfire/obot.roadmap#260).
+  const hub = repo()
+  writeEntry(hub, '2026-08-18', '# entry\n')
+  const r = publishEntry(hub, {
+    date: '2026-08-18', paths: ['diary/2026-08-18.md'],
+    mintToken: () => '', message: 'diary',
+  })
+  assert.equal(r.committed, true)
+  const who = execFileSync('git', ['-C', hub, 'log', '-1', '--pretty=%an <%ae>'], { encoding: 'utf8' }).trim()
+  assert.equal(who, `${BOT_LOGIN} <${BOT_EMAIL}>`)
+  assert.equal(linksToBot(BOT_EMAIL), true)
 })
 
 test('a mint that throws leaves the commit and says so', () => {
