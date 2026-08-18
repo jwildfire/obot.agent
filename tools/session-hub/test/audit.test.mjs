@@ -93,7 +93,15 @@ test('the apply lane writes as obotclaw[bot], and says out loud which half canno
   });
   assert.match(p, /GH_TOKEN="\$\(\/ws\/obot\.agent\/scripts\/obot-app-token\)"/);
   assert.match(p, /PROJECT_TOKEN="\$\(gh auth token\)"/);
-  assert.doesNotMatch(p, /GITHUB_TOKEN="\$\(gh auth token\)"/);
+  // GITHUB_TOKEN stays his, and is not an oversight. The apply re-runs the whole audit
+  // before touching anything, and lib/gh.mjs reads on `GITHUB_TOKEN || GH_TOKEN` —
+  // the opposite precedence to the write path. An audit that cannot see the board
+  // skips every board rule and reports live findings as stale, throwing away a
+  // decision @jwildfire actually made, silently.
+  assert.match(p, /GITHUB_TOKEN="\$\(gh auth token\)"/);
+  // What must NOT survive: GITHUB_TOKEN as the only credential, which is what made
+  // every write go out under his name.
+  assert.doesNotMatch(p, /GITHUB_TOKEN="\$\(gh auth token\)" node scripts\/apply_audit_decision/);
   // The judgment half of the lane types its own gh commands, so it is told the wrapper.
   assert.match(p, /\/ws\/obot\.agent\/scripts\/obot-gh/);
 });

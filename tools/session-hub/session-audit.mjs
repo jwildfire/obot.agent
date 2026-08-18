@@ -139,10 +139,21 @@ export function agentPrompt({ entries, hub, runToken, label, workspace }) {
   // GitHub offers is organization-scoped. So PROJECT_TOKEN stays his, and stays
   // spelled out here rather than being folded back into one token that hides which
   // writes are which.
+  //
+  // ALL THREE ARE LOAD-BEARING, and the precedences are deliberately opposite.
+  // apply_audit_decision.mjs takes `GH_TOKEN || GITHUB_TOKEN` for writes, so the app
+  // token wins there. lib/gh.mjs takes `GITHUB_TOKEN || GH_TOKEN` for reads, so his
+  // token wins there — and it has to, because the apply re-runs the whole audit before
+  // it touches anything, and an audit that cannot see the board skips every board rule
+  // and reports live findings as stale. That throws away a decision @jwildfire actually
+  // made, silently. Dropping GITHUB_TOKEN here would look like a tidier fix and would
+  // do exactly that. The GitHub Actions copy of this lane
+  // (.github/workflows/roadmap-audit-apply.yml) has carried all three since it was
+  // written; only this local lane was missing them.
   const root = workspace ?? path.dirname(path.resolve(hub));
   const appToken = path.join(root, 'obot.agent/scripts/obot-app-token');
   const applies = entries.map((e) =>
-    `AUDIT_AGENTIC_PACK="$CLAUDE_JOB_DIR/tmp/audit-agentic.md" GH_TOKEN="$(${appToken})" PROJECT_TOKEN="$(gh auth token)" node scripts/apply_audit_decision.mjs --decision ${e.decision} --findings ${e.findings.join(',')} --by jwildfire --run-id ${runToken}`);
+    `AUDIT_AGENTIC_PACK="$CLAUDE_JOB_DIR/tmp/audit-agentic.md" GH_TOKEN="$(${appToken})" GITHUB_TOKEN="$(gh auth token)" PROJECT_TOKEN="$(gh auth token)" node scripts/apply_audit_decision.mjs --decision ${e.decision} --findings ${e.findings.join(',')} --by jwildfire --run-id ${runToken}`);
   return [
     `You are one local audit apply lane for jwildfire/obot.roadmap. @jwildfire submitted "${label.replace(/"/g, "'")}" from the local hub audit queue; you complete that batch. The payload is finding ids only — what runs is derived from a FRESH audit, never from the page. Other apply agents may be running in parallel: you own your worktree, and main is shared — take rejected pushes calmly.`,
     '',
