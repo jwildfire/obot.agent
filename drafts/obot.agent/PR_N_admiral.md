@@ -36,10 +36,17 @@ And one guard that would have slept through its own event: `pins.test.mjs` exist
 
 ## Evidence
 
-- The launcher runs end to end under the new name, and prints the renamed section: `node scripts/obot-admiral --check`
-- The launch command it would issue: `claude --bg … -n '⚓🤖 obot-admiral' … '/s-admiral …/admiral-brief.json'`
-- The pinned band still resolves to three standing roles, verified in a browser at desktop and at 390px.
-- Full suites green.
+- **The live detector still finds the real corpse.** The job that wedged for eleven hours is still named `🚦🤖 obot-fleet` on disk. Run against this branch, the detector reports `admiral died — API Error: … SSL certificate hostname mismatch`. Run with prior-tag matching removed, it reports nothing at all: `roleOf` returns null, `mustExit` is false, and the job is never watched. That is measured on the real record, not argued.
+- **The launcher runs end to end under the new name.** `node scripts/obot-admiral --check` prints `## Admiral — triggered, acts and exits`, and `--preflight-only` shows the command it would issue: `claude --bg … -n '⚓🤖 obot-admiral' … '/s-admiral …/admiral-brief.json'`.
+- **The pinned band holds three standing roles** — prime, admiral, nav — checked in Chrome at desktop width and at a real 390px viewport, with the old-tag death still present one section below and no horizontal overflow.
+- **732 tests pass** across all five suites. Note for any runbook: `node --test <dir>/` fails on this machine's Node 24.14.0 before running anything; the glob form `node --test <dir>/*.test.mjs` is the one that works, and that is true on `main` as well as here.
+
+## What was checked and deliberately left alone
+
+- Every verbatim quote of yours. "also let me pin agents. pin prime, nav and fleet manager (fleet for short) by default" stays word for word in NEWS.md, `pins.mjs`, the dashboard README and the role registry; the prose around it carries the new name.
+- `drafts/`, which mirrors what was posted to GitHub and would stop matching it.
+- The bare 🚦 in `docs/rc-framework.md`, `skills/session-wrapup`, `skills/session-init` and `tools/session-init/handoff.sh` — that is your release-candidate headline and was never this role's.
+- A test fixture that deliberately keeps the old tag, because it is the regression test for the prior-tag mechanism.
 
 ## Coordination
 
