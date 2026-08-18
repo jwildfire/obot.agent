@@ -155,6 +155,10 @@ test('a variable token that this shell never assigned is refused (#207 tail)', (
   const reason = verdict('GH_TOKEN=$T gh issue edit 1 --add-label bug').reason;
   assert.match(reason, /same Bash call/);
 
+  // Prose is not an assignment. The lookup runs against the quote-stripped text, so
+  // a `T=` inside an echo or a commit message cannot vouch for a token.
+  denied('echo "T=nonsense" && GH_TOKEN=$T gh issue edit 1 -R jwildfire/obot.agent --add-label bug');
+
   // Assigned in the same call — the whole documented form — is admitted.
   deferred('T=$(obot.agent/scripts/obot-app-token) && test -n "$T" && GH_TOKEN=$T gh issue edit 1 -R jwildfire/obot.agent --add-label bug');
   deferred([

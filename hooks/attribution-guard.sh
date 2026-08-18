@@ -419,8 +419,11 @@ for seg, raw_seg, seg_start in SEGMENTS:
         # as @jwildfire - #207 again, reached by following the instructions. So the
         # assignment has to travel with the write, or the variable has to be exported
         # into the environment this hook can see.
+        # Searched in the quote-stripped text, so `echo "T=nonsense"` earlier in the
+        # command is not mistaken for an assignment. A real one survives stripping:
+        # `T=$(mint)` keeps its substitution, and `T="literal"` keeps its `T=`.
         assigned_here = re.search(
-            r"(?:^|[\s;&|(])" + re.escape(var) + r"=", RAW[:seg_start])
+            r"(?:^|[\s;&|(])" + re.escape(var) + r"=", stripped[:seg_start])
         if assigned_here or os.environ.get(var, "").strip():
             continue
         deny(
