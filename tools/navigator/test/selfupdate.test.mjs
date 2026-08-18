@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import {
   CONSUMER_POLICY, QUIET_MS, buildStamp, fastForward, lastLookMs, planFastForward,
   planRestart, previousProcess, readCheckout, recordPath, renderSelfUpdate, restartDashboard,
-  restartEnv, selfUpdate, takeLock,
+  restartEnv, selfUpdate, takeLock, checkoutPosition, brokenRecord,
 } from '../selfupdate.mjs'
 import { parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
 
@@ -227,6 +227,133 @@ test('the newest look across every surface is the one that counts', () => {
   const store = { surfaces: { '/': '2026-08-17T20:00:00Z', '/live.html': '2026-08-17T20:59:00Z' } }
   assert.equal(lastLookMs(store, now), 60000)
   assert.equal(lastLookMs({ surfaces: {} }, now), null, 'an empty store is unknown, never "long ago"')
+})
+
+// ---- what the checkout IS, not only what the update tried (obot.agent#231) ----
+//
+// The section had one fact where it needed two. On a failed update it printed a
+// fixed string — "The checkout is untouched" — synthesised by `safeSelfUpdate`'s
+// catch, which discards the real checkout result and therefore cannot know whether
+// the fast-forward ran. On the night of 2026-08-18 it had: the fast-forward happens
+// BEFORE the throw, so every failed sweep asserted the checkout was untouched while
+// it had just moved. The sentence was not merely misleading, it was false.
+//
+// Worse, a failed update on a current checkout and a failed update on a checkout
+// nineteen commits behind rendered identically, and those are not the same
+// situation. The position is now measured separately from the attempt.
+
+test('the position is measured against the remote, and says how far behind', () => {
+  const { origin, clone } = pair()
+  advance(origin, 'two\n'); advance(origin, 'three\n')
+  git(clone, 'fetch', '-q', 'origin', 'main')
+  const p = checkoutPosition(clone)
+  assert.equal(p.known, true)
+  assert.equal(p.behind, 2)
+  assert.equal(p.ahead, 0)
+  assert.equal(p.branch, 'main')
+})
+
+test('a checkout level with its remote is level, not merely "not behind"', () => {
+  const { clone } = pair()
+  const p = checkoutPosition(clone)
+  assert.equal(p.known, true)
+  assert.equal(p.behind, 0)
+})
+
+test('it NEVER fetches — the number is what this machine last knew', () => {
+  // The constraint that decides the design: this runs on the failure path, where a
+  // fetch may be exactly what did not happen. A position established by fetching
+  // would answer a different question from the one a reader on that path is asking,
+  // and it would hide a broken fetch behind a fresh-looking number.
+  const { origin, clone } = pair()
+  advance(origin, 'two\n'); advance(origin, 'three\n')   // origin moves; the clone is NOT fetched
+  const p = checkoutPosition(clone)
+  assert.equal(p.known, true)
+  assert.equal(p.behind, 0, 'it reports what was last fetched, without going to the network')
+  assert.equal(git(clone, 'rev-parse', 'origin/main'), git(clone, 'rev-parse', 'HEAD'),
+    'and the local ref really had not moved — the case would be vacuous otherwise')
+})
+
+test('an unmeasurable position is unknown, never zero', () => {
+  // Zero would read as "current", which is the one thing an unreadable checkout must
+  // not be able to claim.
+  const p = checkoutPosition(tmp())
+  assert.equal(p.known, false)
+  assert.equal(p.behind, null)
+  assert.match(p.reason, /\S/, 'and it says why')
+})
+
+test('a repo with no remote ref cannot be positioned, and says so', () => {
+  const root = tmp()
+  git(root, 'init', '-q', '-b', 'main')
+  fs.writeFileSync(path.join(root, 'f'), 'x')
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'one')
+  const p = checkoutPosition(root)
+  assert.equal(p.known, false)
+  assert.match(p.reason, /origin\/main/)
+})
+
+// ---- the two situations that used to render identically ----------------------
+
+const brokenAt = (position) => ({
+  at: '2026-08-18T07:00:00Z', sweep: null, consumers: [],
+  checkout: { ok: false, code: 'broken', branch: null, reason: 'the update step failed outright — alive is not defined' },
+  position,
+})
+
+test('a failed update on a CURRENT checkout says the checkout is current', () => {
+  const s = renderSelfUpdate(brokenAt({ known: true, behind: 0, ahead: 0, short: 'f0680a6', branch: 'main' }))
+  assert.match(s, /AUTO UPDATE FAILED/)
+  assert.doesNotMatch(s, /untouched/, 'the catch cannot know that and must not say it')
+  assert.match(s, /level with `origin\/main`/)
+  assert.match(s, /f0680a6/)
+})
+
+test('a failed update on a STALE checkout says how far behind, and reads differently', () => {
+  const stale = renderSelfUpdate(brokenAt({ known: true, behind: 19, ahead: 0, short: 'aaaaaaa', branch: 'main' }))
+  const current = renderSelfUpdate(brokenAt({ known: true, behind: 0, ahead: 0, short: 'f0680a6', branch: 'main' }))
+  assert.match(stale, /19 commits behind `origin\/main`/)
+  assert.doesNotMatch(stale, /untouched/)
+  assert.notEqual(stale, current, 'these are different situations and must not render identically')
+})
+
+test('a failed update whose position could not be measured says exactly that', () => {
+  const s = renderSelfUpdate(brokenAt({ known: false, behind: null, reason: 'the checkout could not be read' }))
+  assert.doesNotMatch(s, /untouched/)
+  assert.match(s, /could not be measured|could not be read/)
+  assert.doesNotMatch(s, /level with|behind/, 'unknown may not borrow either answer')
+})
+
+test('a record written before this change carries no position, and is not guessed at', () => {
+  // A long-running dashboard can read a record older than the code reading it. An
+  // absent field is absent, never zero.
+  const old = brokenAt(undefined)
+  const s = renderSelfUpdate(old)
+  assert.doesNotMatch(s, /untouched/)
+  assert.doesNotMatch(s, /level with|commits behind/)
+})
+
+test('a successful update still states position, from the same measurement', () => {
+  const s = renderSelfUpdate({
+    at: '2026-08-18T07:00:00Z', consumers: [],
+    checkout: { ok: true, code: 'moved', branch: 'main', to: 'f0680a6abc', reason: 'fast-forwarded 2 commits to origin/main' },
+    position: { known: true, behind: 0, ahead: 0, short: 'f0680a6', branch: 'main' },
+  })
+  assert.match(s, /fast-forwarded 2 commits/)
+  assert.doesNotMatch(s, /AUTO UPDATE FAILED/)
+})
+
+test('the broken record the sweep synthesises carries a position it measured itself', () => {
+  // The constraint the Navigator set: whatever is measured must be measurable from
+  // inside the catch, or the failure mode returns in a new spelling. `brokenRecord`
+  // takes the repo root and nothing else, so the catch can always build it.
+  const { clone } = pair()
+  const r = brokenRecord({ root: clone, stamp: 'sweep-1', error: new Error('alive is not defined') })
+  assert.equal(r.checkout.ok, false)
+  assert.match(r.checkout.reason, /alive is not defined/)
+  assert.equal(r.position.known, true)
+  assert.equal(r.position.behind, 0)
+  assert.doesNotMatch(renderSelfUpdate(r), /untouched/)
 })
 
 // ---- the module's OWN uses of `alive` (obot.agent#229, an #223 regression) ----

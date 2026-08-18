@@ -60,7 +60,7 @@ import { refreshMetrics } from './metrics.mjs'
 // the local checkout and a merge to `main` does not move it, so the sweep — already
 // walking past it every five minutes — fast-forwards it and restarts what reads it.
 // Fast-forward only; every refusal is reported and nothing is ever forced.
-import { buildStamp, renderSelfUpdate, selfUpdate } from './selfupdate.mjs'
+import { brokenRecord, buildStamp, renderSelfUpdate, selfUpdate } from './selfupdate.mjs'
 // The wake (hub#212). The sweep already knew a worker had stopped; what it could not
 // do was get the Navigator's attention, so workers stopped and then waited — twenty
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
@@ -610,8 +610,10 @@ const safeSelfUpdate = () => {
   try {
     return selfUpdate({ root: REPO_ROOT, workspace: WS, stamp: SELF, logFile: DASHBOARD_LOG })
   } catch (e) {
-    return { at: new Date().toISOString(), sweep: SELF, consumers: [],
-             checkout: { ok: false, code: 'broken', branch: null, reason: `the update step failed outright — ${String(e.message).slice(0, 140)}` } }
+    // The record is built where the knowledge is (obot.agent#231). This catch used to
+    // synthesise one from nothing, which is how the section came to assert "The
+    // checkout is untouched" on sweeps where the fast-forward had already moved it.
+    return brokenRecord({ root: REPO_ROOT, stamp: SELF, error: e })
   }
 }
 
