@@ -149,6 +149,44 @@ test('scanCommits reads a real repository, because the scheduler runs no fixture
   assert.equal(correct.committer, BOT_EMAIL, 'and the committer too')
 })
 
+test('a commit subject holding the field separator does not shift the trailers', () => {
+  // The subject is the only free-text field and can contain anything a person types,
+  // this separator included. With the subject in the middle, one such byte moved every
+  // field after it — landing the Worker trailer in the wrong slot and reading a real
+  // agent commit as clean. It is last now, so it absorbs whatever it holds.
+  const dir = mkdtempSync(join(tmpdir(), 'identity-sep-'))
+  const git = (args, env) => execFileSync('git', ['-C', dir, ...args], {
+    encoding: 'utf8', env: { ...process.env, ...env },
+  })
+  git(['init', '-q', '-b', 'main'])
+  git(['config', 'user.name', 'Jeremy Wildfire'])
+  git(['config', 'user.email', 'jwildfire@gmail.com'])
+  writeFileSync(join(dir, 'a.txt'), 'a')
+  git(['add', '-A'])
+  git(['commit', '-q', '-m', 'subject with \x1f a separator in it\n\nWorker: W0060'])
+
+  const [c] = scanCommits(dir, { sinceDays: 3650 })
+  assert.equal(c.unreadable, undefined, 'it parses')
+  assert.equal(c.worker, 'W0060', 'the trailer is still in its own field')
+  assert.match(c.subject, /a separator in it/)
+  assert.equal(misattributed([c]).findings.length, 1, 'and it is still caught')
+})
+
+test('a record that did not parse is counted as unread, never skipped as clean', () => {
+  // The shape 👯🤖 W0059 named on obot.agent#245: a failed read producing a default that
+  // a later comparison treats as real. Here the default would have been an empty trailer
+  // field, which makes agentMarker() return null and drops the commit out of the scan
+  // without a trace — a failed read wearing the shape of a healthy one.
+  const short = { unreadable: true, raw: 'truncated record' }
+  const good = { sha: 'aaa', email: 'jwildfire@gmail.com', committer: 'jwildfire@gmail.com', coAuthors: '', worker: 'W0060', subject: 'agent work' }
+  const out = misattributed([short, good])
+  assert.equal(out.unreadable, 1)
+  assert.equal(out.findings.length, 1, 'the readable one is still judged')
+  const md = renderIdentity([{ repo: 'obot.agent', scanned: 2, merges: 0, unreadable: 1, findings: [] }], {})
+  assert.match(md, /COMMIT IDENTITY READING BROKEN/)
+  assert.match(md, /could not be parsed/)
+})
+
 test('scanCommits reports an unreadable directory rather than reading it as clean', () => {
   // ENOENT is the only failure allowed to read as absence, and this is not ENOENT-as-
   // absence: a directory that is not a repository is unknown, not empty.
