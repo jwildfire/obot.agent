@@ -582,16 +582,47 @@ test('a row nothing dates gains no plausible time to go with its unknown day', (
   assert.doesNotMatch(at(html, 'c-last'), /\d\d:\d\d/);
 });
 
-test('a day only the priced feed knows keeps the day and shows no clock', () => {
-  // That feed counts UTC days and keeps no instants. A clock printed against a day it
-  // cannot time would be the two-clock defect wearing the fix's clothes.
-  const o = { id: 'W0001', lastAt: '2026-08-15T12:00:00.000Z', days: ['2026-08-15', '2026-08-16'] };
+test('a priced UTC day never outranks an instant, however it sorts as a string', () => {
+  // Found on the live page rather than reasoned about. The priced feed counts UTC
+  // days; the column beside it counts local ones. Preferring the priced day whenever
+  // it sorted higher as a string put "2026-08-18, no time recorded" against three
+  // sessions that were running as the page rendered, on his evening of the 17th —
+  // the two-clock trap one level up from the cell it was fixed in.
+  const l = lastOf(row({ id: 'W0001', lastAt: '2026-08-18T02:00:00.000Z', days: ['2026-08-18'] }));
+  assert.equal(l.source, 'record');
+  assert.equal(l.day, '2026-08-17');
+  assert.equal(at(agentsTableHtml(one({ id: 'W0001', lastAt: '2026-08-18T02:00:00.000Z', days: ['2026-08-18'] }), { now: NOW }), 'c-last'),
+    at(agentsTableHtml(one({ id: 'W0001', lastAt: '2026-08-18T02:00:00.000Z' }), { now: NOW }), 'c-last'));
+});
+
+test('the priced day is used only when nothing on this machine timed the agent', () => {
+  // Then it is all there is, and it shows a date with no clock rather than a clock
+  // for a moment nothing recorded.
+  const o = { id: 'W0001', lastAt: null, days: ['2026-08-15', '2026-08-16'] };
   const l = lastOf(row(o));
+  assert.equal(l.source, 'priced');
   assert.equal(l.day, '2026-08-16');
   assert.equal(l.at, null);
   const html = agentsTableHtml(one(o), { now: NOW });
   assert.match(at(html, 'c-last'), /2026-08-16/);
   assert.match(at(html, 'c-last'), /no time recorded/);
+});
+
+test('a transport failure is not the agent\'s account of its own work', () => {
+  // Also found on the live page: fleet's row read "closed out: API Error: Unable to
+  // connect to API: SSL certificate hostname mismatch", under a label saying that was
+  // the agent's own account of what it finished. The agent accounted for nothing; a
+  // connection failed, and the status column beside it already read `died`. It stays
+  // on the page, on expand, labelled as the harness rather than the agent.
+  const o = {
+    id: 'W0001',
+    status: { status: 'died', note: 'stopped — ended before it closed out' },
+    ended: 'API Error: Unable to connect to API: SSL certificate hostname mismatch',
+  };
+  assert.equal(taskOf(row(o)), null);
+  const html = agentsTableHtml(one(o), { now: NOW });
+  assert.doesNotMatch(at(html, 'c-task'), /API Error/);
+  assert.match(html, /<li><span class="k">ended on<\/span> API Error[^<]*<span class="dim">— the harness, not the agent/);
 });
 
 // ---- the task tag (jwildfire/obot.agent#179) -------------------------------

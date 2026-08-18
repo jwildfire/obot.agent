@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import {
   buildRoster, collectRoster, currentLabels, impactOf, modelFlag, parseDelivery, parseWorkers,
-  cleanDetail, jobLine, readJobs, refUrl, rosterMarkdown, statusOf, timelineClose, usageIndex,
+  cleanDetail, isHarnessError, jobError, jobLine, readJobs, refUrl, rosterMarkdown, statusOf, timelineClose, usageIndex,
 } from '../lib/roster.mjs';
 import {
   agentRow, groupRoster, kindOf, rosterHtml,
@@ -953,4 +953,35 @@ test('a job whose every line is template text speaks not at all', () => {
   // this column, on the surface he has just started trusting.
   const j = jobLine({ state: 'done', detail: BRIEFING, timeline: { detail: null } });
   assert.equal(j, null);
+});
+
+test('the transport talking about itself is held apart from the agent talking about its work', () => {
+  // Narrow and anchored on purpose: a worker's close-out sentence may well name an
+  // error it found and fixed, and a loose match on the word would take that away.
+  assert.ok(isHarnessError('API Error: Unable to connect to API: SSL certificate hostname mismatch'));
+  assert.ok(isHarnessError("You've hit your session limit · resets 10:20am (Europe/London)"));
+  assert.ok(!isHarnessError('root cause found: session-reviews chaining logic; fix in PR #163, CI green'));
+  assert.ok(!isHarnessError('fixed the API error handling in the wake channel'));
+});
+
+test('a session ended by the transport reports the failure, and claims no work', () => {
+  const job = {
+    state: 'stopped', detail: 'stopped', updatedAt: '2026-08-17T13:52:00.000Z',
+    timeline: {
+      detail: 'checking the trigger condition',
+      detailAt: '2026-08-17T13:50:00.000Z',
+      error: 'API Error: Unable to connect to API: SSL certificate hostname mismatch',
+    },
+  };
+  assert.equal(jobLine(job).text, 'checking the trigger condition');
+  assert.match(jobError(job), /^API Error/);
+});
+
+test('an error is never the last real line, however late it arrives', () => {
+  const t = timelineClose([
+    JSON.stringify({ at: '2026-08-17T13:50:00.000Z', state: 'working', detail: 'checking the trigger condition' }),
+    JSON.stringify({ at: '2026-08-17T13:51:32.000Z', state: 'stopped', detail: 'API Error: Unable to connect to API' }),
+  ].join('\n'));
+  assert.equal(t.detail, 'checking the trigger condition');
+  assert.match(t.error, /^API Error/);
 });

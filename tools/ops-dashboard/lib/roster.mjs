@@ -176,6 +176,34 @@ const TEMPLATE_TEXT = [
   /this is the briefing a lead session hands/i,   // the known offender, by name
 ];
 
+/**
+ * The harness talking about its own transport, rather than the session describing
+ * its work.
+ *
+ * "API Error: Unable to connect to API: SSL certificate hostname mismatch" is a true
+ * sentence and it is not a task. Rendered in the task column under the label "the
+ * agent's own account of what it finished" it was actively false — the agent
+ * accounted for nothing; a connection failed. So these are held apart: they never
+ * become a tag, and they surface on expand as what ended the session, beside a
+ * status column that already reads `died`.
+ *
+ * Anchored at the start of the line, deliberately. A worker's own close-out sentence
+ * may well mention an error it found and fixed, and a loose match on the word would
+ * take that away — which is the same defect in the other direction.
+ */
+const HARNESS_ERROR = [
+  /^API Error\b/i,
+  /^You(?:'|\u2019)?ve hit your (?:session|usage) limit/i,
+  /^Credit balance is too low/i,
+  /^Request timed out/i,
+  /^Connection error/i,
+  /^Prompt is too long/i,
+  /^Invalid API key/i,
+  /^Claude(?: Code)? (?:usage|API) limit/i,
+];
+
+export const isHarnessError = (text) => HARNESS_ERROR.some((re) => re.test(String(text ?? '').trim()));
+
 // Words the harness writes as a detail when it has nothing to say. Rendering one as
 // a task tag would put the status column's own word in a second column.
 const BARE_STATE = new Set(['stopped', 'done', 'working', 'idle', 'running', 'blocked', 'failed', 'error', 'completed', 'none', '']);
@@ -211,6 +239,7 @@ export function timelineClose(text = '') {
   let entries = 0;
   let detail = null;
   let detailAt = null;
+  let error = null;
   for (const line of String(text).split(/\r?\n/)) {
     if (!line.trim()) continue;
     let rec;
@@ -220,9 +249,11 @@ export function timelineClose(text = '') {
     last = String(rec.state);
     at = rec.at ?? at;
     const d = cleanDetail(rec.detail);
-    if (d) { detail = d; detailAt = rec.at ?? at; }
+    if (!d) continue;
+    if (isHarnessError(d)) error = d;
+    else { detail = d; detailAt = rec.at ?? at; }
   }
-  return { last, at, entries, closed: TERMINAL.has(last), detail, detailAt };
+  return { last, at, entries, closed: TERMINAL.has(last), detail, detailAt, error };
 }
 
 /**
@@ -238,10 +269,18 @@ export function timelineClose(text = '') {
 export function jobLine(job) {
   if (!job) return null;
   const fromState = cleanDetail(job.detail);
-  if (fromState) return { text: fromState, at: job.updatedAt ?? null, source: 'job record' };
+  if (fromState && !isHarnessError(fromState)) return { text: fromState, at: job.updatedAt ?? null, source: 'job record' };
   const tl = job.timeline ?? {};
   if (tl.detail) return { text: tl.detail, at: tl.detailAt ?? null, source: 'job timeline' };
   return null;
+}
+
+/** What ended a session, when what ended it was the transport rather than the work. */
+export function jobError(job) {
+  if (!job) return null;
+  const fromState = cleanDetail(job.detail);
+  if (fromState && isHarnessError(fromState)) return fromState;
+  return job.timeline?.error ?? null;
 }
 
 /**
@@ -700,6 +739,9 @@ export function buildRoster({
       // filtering that keeps template text off the page belongs next to the read
       // that produces it (jwildfire/obot.agent#177).
       line: jobLine(job),
+      // Held apart from `line` rather than dropped: the transport failure that ended
+      // a session is worth reading, and the task column is the wrong place to read it.
+      ended: jobError(job),
       // `unjudged` rides on the impact so every view gets the distinction without
       // a new parameter: a silent delivery record is not a verdict of silence.
       impact: { ...impactOf(entries), unjudged: !deliveryRead },

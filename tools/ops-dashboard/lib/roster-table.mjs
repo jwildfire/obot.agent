@@ -219,11 +219,14 @@ export function periodCutoffs(now = new Date()) {
  */
 export function lastOf(row) {
   const ts = row.lastAt ? Date.parse(row.lastAt) : NaN;
-  const stampDay = Number.isNaN(ts) ? '' : dayString(new Date(ts));
+  if (!Number.isNaN(ts)) return { at: row.lastAt, ts, day: dayString(new Date(ts)), source: 'record' };
+  // Only when nothing timed this agent at all. The priced days cannot be compared
+  // with the day above them: they are UTC days and that one is local, so `later` is
+  // not a question those two can answer about each other. Preferring the priced day
+  // whenever it sorted higher as a string is the two-clock trap one level up, and it
+  // shipped for one render — every session running on his evening read as tomorrow,
+  // with no time, while it was still working.
   const pricedDay = (row.days ?? []).at(-1) ?? '';
-  if (stampDay && !(pricedDay && pricedDay > stampDay)) {
-    return { at: row.lastAt, ts, day: stampDay, source: 'record' };
-  }
   if (pricedDay) return { at: null, ts: null, day: pricedDay, source: 'priced' };
   return { at: null, ts: null, day: '', source: 'none' };
 }
@@ -235,7 +238,7 @@ export function lastText(row, zone = localZone()) {
     return `last seen ${localStamp(l.at, zone)} — the newest stamp on this agent across the harness job record and the worker ledger, written as ${stamp(l.at)}`;
   }
   if (l.source === 'priced') {
-    return `last priced on ${l.day}, a UTC day from the shared usage feed — that feed keeps no instants, so this row has a date and no time`;
+    return `last priced on ${l.day}, a UTC day from the shared usage feed — nothing on this machine timed this agent, and that feed keeps no instants, so this row has a date and no clock`;
   }
   if (row.resting) return 'never — this role has no session on this machine at all';
   return 'unknown — no session stamp and no priced day for this agent';
@@ -688,6 +691,10 @@ function evidence(row, f) {
     li.push(`<li><span class="k">dispatched to</span> ${esc(ledger)} <span class="dim">\u2014 the task on its worker-ledger claim</span></li>`);
   }
   li.push(`<li><span class="k">status</span> ${esc(row.status.note || row.status.status)}</li>`);
+  // What ended the session, when the transport ended it rather than the work. It is
+  // kept out of the task tag — the agent accounted for nothing, a connection failed —
+  // and it is far too useful to drop on the way out.
+  if (row.ended) li.push(`<li><span class="k">ended on</span> ${esc(row.ended)} <span class="dim">— the harness, not the agent</span></li>`);
   if (row.cost.value === null || row.cost.code !== 'priced') li.push(`<li><span class="k">cost</span> ${esc(row.cost.text)}</li>`);
   // The demoted impact column keeps its three separate silences down here. They were
   // separated because collapsing them told a lie about two: a standing session has
