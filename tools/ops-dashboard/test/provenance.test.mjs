@@ -8,7 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import {
-  captureCode, codeState, commitInfo, hubDirty, materialiseHub, resolveHub,
+  autoUpdate, captureCode, codeState, commitInfo, hubDirty, materialiseHub, resolveHub,
 } from '../lib/provenance.mjs';
 import { provenanceLine } from '../lib/render.mjs';
 
@@ -153,4 +153,104 @@ test('a hub that is not a repository is read as-is and admits it', () => {
   const r = resolveHub(tmp(), tmp());
   assert.equal(r.source, 'clone');
   assert.match(r.warn, /not a git repository/);
+});
+
+// ── The third half: is anything pulling new code onto this machine at all ──────────
+//
+// jwildfire/obot.roadmap#243. The first two halves report the snapshot; this one
+// reports the mechanism, because the mechanism is the part that fails invisibly. An
+// updater that has quietly stopped looks exactly like one with nothing to do.
+
+const wsWith = (record) => {
+  const ws = tmp();
+  const dir = path.join(ws, '.claude', 'session-hub', 'cache');
+  fs.mkdirSync(dir, { recursive: true });
+  if (record) fs.writeFileSync(path.join(dir, 'selfupdate.json'), JSON.stringify(record));
+  return ws;
+};
+
+const ok = (over = {}) => ({
+  at: new Date().toISOString(),
+  checkout: { ok: true, code: 'current', moved: false, to: 'abc1234deadbeef', reason: 'already at `origin/main`' },
+  consumers: [],
+  ...over,
+});
+
+test('a machine with no updater says so rather than saying nothing', () => {
+  const u = autoUpdate(wsWith(null));
+  assert.equal(u.state, 'absent');
+  assert.match(u.why, /only when somebody restarts it/);
+});
+
+test('an updater that stopped running is a failure of its own, not a quiet success', () => {
+  const old = ok({ at: new Date(Date.now() - 47 * 60000).toISOString() });
+  const u = autoUpdate(wsWith(old));
+  assert.equal(u.state, 'stale');
+  assert.equal(u.ageMin, 47);
+  assert.match(u.why, /has stopped/);
+});
+
+test('a refused fast-forward reaches the page with its reason', () => {
+  const u = autoUpdate(wsWith(ok({
+    checkout: { ok: false, code: 'dirty', reason: 'the checkout has uncommitted changes to 2 tracked files' },
+  })));
+  assert.equal(u.state, 'failed');
+  assert.match(u.why, /uncommitted changes to 2 tracked files/);
+});
+
+test('a checkout that moved while the restart failed is a failure, not a success', () => {
+  const u = autoUpdate(wsWith(ok({
+    checkout: { ok: true, code: 'moved', moved: true, to: 'newsha0', reason: 'fast-forwarded 2 commits' },
+    consumers: [{ id: 'ops-dashboard', act: 'restart', ok: false, reason: 'nothing answered on http://127.0.0.1:7326/' }],
+  })));
+  assert.equal(u.state, 'failed');
+  assert.match(u.why, /ops-dashboard could not be restarted/);
+});
+
+test('a healthy run reports the commit it landed on and when the page restarted', () => {
+  const at = new Date().toISOString();
+  const u = autoUpdate(wsWith(ok({
+    checkout: { ok: true, code: 'moved', moved: true, to: 'abcdef1234567', reason: 'fast-forwarded 1 commit' },
+    consumers: [{ id: 'ops-dashboard', act: 'restart', ok: true, at, reason: 'the dashboard answered' }],
+  })));
+  assert.equal(u.state, 'ok');
+  assert.equal(u.head, 'abcdef1');
+  assert.equal(u.restartedAt, at);
+});
+
+test('a stale build with the sweep armed is told to wait, not told to run pkill', () => {
+  const html = provenanceLine({
+    code: { short: 'abc1234', ageMin: 30, behind: 3 },
+    update: { state: 'ok', ageMin: 1, head: 'def5678', deferred: 'the page was opened 4s ago' },
+  });
+  assert.match(html, /waiting for the page to be idle/);
+  assert.doesNotMatch(html, /pkill/, 'telling him to restart a page that restarts itself is how a true line becomes noise');
+});
+
+test('a stale build with no updater still names the command, and warns', () => {
+  const html = provenanceLine({
+    code: { short: 'abc1234', ageMin: 30, behind: 11 },
+    update: { state: 'absent', why: 'nothing on this machine records an automatic update' },
+  });
+  assert.match(html, /pkill/);
+  assert.match(html, /class="prov warn"/);
+});
+
+test('a failed update warns even when the running code is current', () => {
+  const html = provenanceLine({
+    code: { short: 'abc1234', ageMin: 5, behind: 0 },
+    update: { state: 'failed', why: 'the checkout could not be updated — the checkout has uncommitted changes to 2 tracked files' },
+  });
+  assert.match(html, /class="prov warn"/, 'a checkout that cannot move is a warning even when this process is current');
+  assert.match(html, /uncommitted changes/);
+  assert.doesNotMatch(html, /<strong>/);
+});
+
+test('a current machine says which commit it is current with, on the healthy path too', () => {
+  const html = provenanceLine({
+    code: { short: 'abc1234', ageMin: 5, behind: 0 },
+    update: { state: 'ok', ageMin: 2, head: 'abc1234', restartedAt: null, deferred: null },
+  });
+  assert.match(html, /updates: checked 2m ago; the checkout is current with its remote/);
+  assert.match(html, /class="prov ok"/);
 });

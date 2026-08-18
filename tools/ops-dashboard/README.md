@@ -39,7 +39,8 @@ node obot.agent/tools/ops-dashboard/ops-dashboard.mjs           # render once to
 | Option | Meaning |
 |---|---|
 | `--serve` | run the loopback server (without it, one render to stdout) |
-| `--port <n>` | port, default 7326; rolls forward if taken |
+| `--port <n>` | port, default 7326 (or `$OBOT_DASHBOARD_PORT`); rolls forward if taken |
+| `--exclusive` | bind the requested port or exit 1 instead of rolling forward — what an automatic restart uses, because a replacement that quietly lands on 7327 is a dashboard nobody can find |
 | `--workspace <dir>` | workspace root (default: cwd) |
 | `--hub <dir>` | obot.roadmap clone (default: `<workspace>/obot.roadmap`) |
 | `--open` | print the URL once the server is up |
@@ -106,7 +107,7 @@ it turned the live queue page into a 500 on 2026-08-16. The file name is the sch
 
 ## What the page is made of
 
-The page states two things about itself, on the healthy path as well as the bad one:
+The page states three things about itself, on the healthy path as well as the bad one:
 
 - **The code it is running** — the commit, its age, and whether the checkout has moved
   past it. Captured when the process loads, not read during a request: a long-running
@@ -121,16 +122,67 @@ The page states two things about itself, on the healthy path as well as the bad 
   materialised into the ops cache and the hub's own collector is imported out of it —
   the same code the published log runs, so there is no second parser to drift from it.
 
-His checkout is never moved to get that answer: no pull, no checkout, no stash. A
-background `git fetch` every five minutes updates remote-tracking refs and nothing else,
-and a clone with uncommitted decision edits keeps priority even when behind, because his
-unsaved work outranks a tidier answer.
+- **Whether anything is pulling new code onto this machine at all** — and what the last
+  attempt did. The first two report the snapshot; this one reports the *mechanism*,
+  which is the half that fails invisibly: an updater that quietly stopped looks exactly
+  like one with nothing to do. Read live on every render, from the record the sweep
+  writes at `.claude/session-hub/cache/selfupdate.json`. Absent is a real answer and the
+  commonest one on a machine without the sweep, so it says that rather than nothing.
 
-Both lines print when everything is fine. Twice on 2026-08-16 the running dashboard was
-many merges behind `main` — eleven, the second time — and the hub clone it read was four
-commits behind `origin/main`, which is why a decision he made that morning was still
+His **hub** clone is never moved to get the decisions answer: no pull, no checkout, no
+stash. A background `git fetch` every five minutes updates remote-tracking refs and
+nothing else, and a clone with uncommitted decision edits keeps priority even when
+behind, because his unsaved work outranks a tidier answer. The `obot.agent` checkout is
+the one exception and it is a deliberate one — see below.
+
+All three lines print when everything is fine. Twice on 2026-08-16 the running dashboard
+was many merges behind `main` — eleven, the second time — and the hub clone it read was
+four commits behind `origin/main`, which is why a decision he made that morning was still
 listed as awaiting him. Both sat well inside any sane staleness threshold, so a line that
 only appears when something is late would have caught neither.
+
+### Merging is not deploying, so the checkout tracks `main`
+
+Requirement [jwildfire/obot.roadmap#243](https://github.com/jwildfire/obot.roadmap/issues/243).
+
+Everything on this machine runs from the local checkout, and a merge to `main` does not
+move it. Nothing pulled, so nothing changed, and the failure was silent by construction:
+a server serving old code looks exactly like a server serving new code. The same
+mechanism bit three separate things in two days — the wake channel that merged and had
+no effect, this dashboard serving an eleven-merge-old build twice, and the nightly
+audit's findings file quoted as current at twenty-two hours old.
+
+The five-minute Navigator sweep now fast-forwards the checkout and restarts what reads
+it (`tools/navigator/selfupdate.mjs`). Two calls, made rather than implied:
+
+**Which consumers get restarted.** Restarting one mid-request is worse than serving
+stale for five more minutes, so the tiers are data rather than control flow:
+
+| Tier | What | Why |
+|---|---|---|
+| Restarted | this server, holding the serve marker on the default port | a long-running server whose state is all on disk |
+| Nothing to do | the launchd sweep; the admiral | both re-exec per run and pick up new code themselves |
+| Never restarted, only reported | standing Claude sessions — prime, the Navigator, workers | their state is a conversation; restarting one destroys context nothing can rebuild |
+
+Quiescence is this server's own answer, from `GET /healthz`: how many requests are in
+flight, and how long since the last one finished. The probe is excluded from its own
+accounting, which is the whole mechanism rather than a nicety — a health check that
+counted itself as traffic would reset the idle clock every five minutes and the restart
+would never fire. A build too old to have the endpoint falls back to the last-look
+record; when neither can answer, the restart is refused and says so.
+
+A crashed dashboard is started again on the next sweep, and one he stopped on purpose is
+not: `pkill` sends SIGTERM, the marker's release hook runs, and a released marker reads
+as "nothing is advertising a dashboard". Only a crash leaves a marker behind.
+
+**What happens when the fast-forward is refused.** It reports, and never forces. No
+reset, no stash, no `git pull`, no merge that could conflict, and nothing that touches a
+worktree — workers hold worktrees off this same repository and a dashboard refresh must
+never disturb work in progress. Refused when: the checkout is on another branch, is a
+linked worktree, is mid-merge or mid-rebase, has uncommitted changes to tracked files,
+has diverged, or the remote could not be read. Untracked files never block — the drafts
+folder is permanently full of them. Every refusal reaches this page, and reaches the
+sweep's state file as a `**AUTO UPDATE FAILED**` alarm.
 
 ### The release-candidate panel
 

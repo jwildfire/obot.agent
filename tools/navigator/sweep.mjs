@@ -54,6 +54,12 @@ import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWo
 // it differently. Re-exported so this module's callers and tests are unaffected.
 import { classifyRC, discoverRepos, POLICY_FILE } from './classify.mjs'
 import { refreshMetrics } from './metrics.mjs'
+// The checkout this machine runs from, and the consumers that read it
+// (jwildfire/obot.roadmap#243). Merging is not deploying here: everything runs from
+// the local checkout and a merge to `main` does not move it, so the sweep — already
+// walking past it every five minutes — fast-forwards it and restarts what reads it.
+// Fast-forward only; every refusal is reported and nothing is ever forced.
+import { buildStamp, renderSelfUpdate, selfUpdate } from './selfupdate.mjs'
 // The wake (hub#212). The sweep already knew a worker had stopped; what it could not
 // do was get the Navigator's attention, so workers stopped and then waited — twenty
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
@@ -84,6 +90,18 @@ const LOG = join(WS, '.claude/session-hub/navigator-sweep.log')
 const SCRATCHPAD_LOG = join(REPO_ROOT, 'tools', 'scratchpad-log')
 // The hub clone, for joining an artifact slug to the decision id he quotes.
 const HUB = process.env.OBOT_HUB || join(WS, 'obot.roadmap')
+// This run's own build stamp, captured at load.
+//
+// The sweep is the component every other check trusts and it was the one most likely
+// to be running old code unnoticed, because nothing reported what version of itself it
+// was: the dashboard says what it serves, the audit says how old its findings are, and
+// this said neither. Captured rather than read, and for a sharper reason here than
+// anywhere else — this process fast-forwards the very checkout it is executing from,
+// so seconds later `git rev-parse HEAD` names precisely the code that is NOT running.
+const SELF = buildStamp(REPO_ROOT)
+// Where a restarted dashboard's output goes. Its own file: a replacement that dies on
+// startup has to leave something behind, or "it did not come back" is the whole report.
+const DASHBOARD_LOG = join(WS, '.claude/session-hub/ops-dashboard.log')
 const CADENCE_MIN = 5
 const MAX_EVENTS = 15
 // The snapshot keeps more history than the state file shows: the dashboard's
@@ -147,7 +165,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -202,6 +220,15 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // because reading one without the other is how six stalled sessions and seven open
   // pull requests stayed visible for two days without anything moving.
   if (admiral && admiral.trim()) lines.push(admiral.trimEnd(), '')
+
+  // And directly under the pair: what code produced any of this. It sits third rather
+  // than first because the wake is about somebody waiting and this is about the
+  // machine, but it belongs above the queue for the same reason a build stamp belongs
+  // next to the numbers — everything below was written by the commit this names, and
+  // until 2026-08-17 nothing here named it (jwildfire/obot.roadmap#243).
+  lines.push((selfupdate && selfupdate.trim())
+    ? selfupdate.trimEnd()
+    : '## Checkout — the code this machine is running\n\n**AUTO UPDATE BROKEN** — no update ran this sweep, so nothing here says the checkout is current or that a merge would reach him.', '')
 
   lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
@@ -548,6 +575,18 @@ const safeJobs = () => {
 // admiral section that simply vanished would read as a page with nothing to report.
 // The launcher reads the job ledger itself rather than taking this one, so the
 // null-versus-empty distinction above is not in its path.
+// The update step, which must never be able to take the sweep down with it — and must
+// never fail quietly either. A section that simply vanished would read as a machine
+// that is current, which is the exact failure this step exists to end.
+const safeSelfUpdate = () => {
+  try {
+    return selfUpdate({ root: REPO_ROOT, workspace: WS, stamp: SELF, logFile: DASHBOARD_LOG })
+  } catch (e) {
+    return { at: new Date().toISOString(), sweep: SELF, consumers: [],
+             checkout: { ok: false, code: 'broken', branch: null, reason: `the update step failed outright — ${String(e.message).slice(0, 140)}` } }
+  }
+}
+
 const safeAdmiral = () => {
   try { return runAdmiral() } catch (e) {
     return `## Admiral — triggered, acts and exits\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
@@ -571,6 +610,12 @@ function main() {
   let firstSweep = false
   try { prevWrap = JSON.parse(readFileSync(SNAPSHOT, 'utf8')) } catch { firstSweep = true }
   const jobs = safeJobs()
+  // First, before anything reads the network: move the checkout, and restart what
+  // reads it. First because everything below shells tools out of this same checkout,
+  // so the run should be standing on the code it is about to report — and because a
+  // merge he is waiting on should not sit behind a minute of `gh` calls.
+  const update = safeSelfUpdate()
+  const selfupdate = renderSelfUpdate(update)
 
   let repos
   try {
@@ -590,7 +635,7 @@ function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, admiral: safeAdmiral() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -697,7 +742,7 @@ function main() {
   // The admiral trigger runs last of the readings, after the wake, because an admiral
   // it launches will read the state file this run is about to write.
   const admiral = safeAdmiral()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
@@ -714,7 +759,7 @@ function main() {
   if (wake.delivered.length) {
     scratchpad(`WAKE x${wake.delivered.length} delivered — ${wake.delivered.map(d => `${d.worker} ${d.kind}`).join(', ')}`)
   }
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote}${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()

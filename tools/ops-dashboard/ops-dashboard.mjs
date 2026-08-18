@@ -34,6 +34,9 @@
 //                      port other than the default marks this as a test server: it
 //                      serves normally but never claims the serve marker, so it cannot
 //                      take the status line away from the real dashboard (#142)
+//   --exclusive        bind the requested port or exit 1, instead of rolling forward.
+//                      What an automatic restart uses: a replacement that silently
+//                      lands on the next port is worse than one that failed
 //   --serve            run the server (without it, render once to stdout)
 //   --open             print the URL when the server is up
 import fs from 'node:fs';
@@ -54,11 +57,17 @@ import { runVerify, readChecks } from './lib/iq.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
 import { labelIsPinned, readPins, writePin } from './lib/pins.mjs';
-import { captureCode, codeState, fetchHub, resolveHub } from './lib/provenance.mjs';
+import { autoUpdate, captureCode, codeState, fetchHub, resolveHub } from './lib/provenance.mjs';
 import { markerPath, holdServeMarker } from './lib/serve-marker.mjs';
 
 const HOST = '127.0.0.1';
-const DEFAULT_PORT = 7326;
+// One value for "the port this machine's dashboard lives on", because two things now
+// depend on agreeing about it: this server, which claims the serve marker only on the
+// default port, and the sweep's restarter, which will only ever restart the process
+// holding that marker (tools/navigator/selfupdate.mjs). The override exists so a
+// scratch machine can move both together and rehearse the restart without going
+// anywhere near his — same reason `OBOT_WORKSPACE` exists.
+const DEFAULT_PORT = Number(process.env.OBOT_DASHBOARD_PORT) || 7326;
 
 // The commit this process is running, taken at load rather than at render time — a
 // long-running server's checkout moves on beneath it, so reading HEAD during a request
@@ -84,12 +93,17 @@ export function parseArgs(argv) {
   // `claimMarker` is the whole of the primary fix for #142: a server told an
   // explicit non-default port is a test server, and a test server is never the
   // machine's dashboard, so it declines the marker instead of taking it.
-  const a = { port: DEFAULT_PORT, serve: false, open: false, claimMarker: true };
+  const a = { port: DEFAULT_PORT, serve: false, open: false, claimMarker: true, exclusive: false };
   for (let i = 0; i < argv.length; i++) {
     const f = argv[i];
     if (f === '--workspace') a.workspace = argv[++i];
     else if (f === '--hub') a.hub = argv[++i];
     else if (f === '--port') { a.port = Number(argv[++i]) || DEFAULT_PORT; a.claimMarker = a.port === DEFAULT_PORT; }
+    // Bind the port asked for or fail loudly. The roll-forward is right for a person
+    // starting a second copy by hand and wrong for an automatic restart: a replacement
+    // that quietly lands on 7327 is a dashboard nobody can find and a serve marker
+    // nobody holds — obot.agent#142 arrived at by a different road.
+    else if (f === '--exclusive') a.exclusive = true;
     else if (f === '--serve') a.serve = true;
     else if (f === '--open') a.open = true;
     else if (f === '--help' || f === '-h') a.help = true;
@@ -197,7 +211,10 @@ async function page(args, lastLook = null) {
     },
     answers: currentAnswers(args.workspace, { hub: hub.root }),
     deliverer: delivererState(args.workspace),
-    provenance: { code: codeState(CODE), hub },
+    // Read live, unlike the code stamp: the question is whether the updater ran
+    // recently, and a value captured at load could only ever answer it for the moment
+    // this process started.
+    provenance: { code: codeState(CODE), hub, update: autoUpdate(args.workspace) },
     lastLook,
     workspace: args.workspace,
     hub: args.hub,
@@ -229,9 +246,42 @@ export function serve(args) {
   const ticker = setInterval(pull, HUB_FETCH_MIN * 60000);
   ticker.unref?.();
 
+  // What this server says about itself when something outside asks whether it is safe
+  // to restart. Two numbers and nothing else: how many requests are in flight, and how
+  // long since the last one finished. The restarter in tools/navigator/selfupdate.mjs
+  // will not touch a server that is serving anybody — restarting one mid-request is
+  // worse than serving stale for five more minutes, and that is a judgement it can
+  // only make if this process is willing to say.
+  //
+  // `/healthz` is excluded from its own accounting, and that exclusion is the whole
+  // mechanism rather than a nicety: the probe arrives every five minutes, so a health
+  // check that counted itself as traffic would reset the idle clock on every poll and
+  // the page would be "busy" forever, which is a restart that never happens and a
+  // requirement that silently does nothing.
+  const traffic = { inflight: 0, lastAt: Date.now() };
+
   const server = http.createServer(async (req, res) => {
     const send = (code, type, body) => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
+    const isHealth = req.url.split('?')[0] === '/healthz';
+    if (!isHealth) {
+      traffic.inflight += 1;
+      res.on('close', () => { traffic.inflight = Math.max(0, traffic.inflight - 1); traffic.lastAt = Date.now(); });
+    }
     try {
+      // Answered before anything else and without reading a file: whatever is wrong
+      // with this server's data, the question "are you busy" must still get an answer,
+      // or the restarter falls back to guessing.
+      if (isHealth) {
+        return send(200, 'application/json', JSON.stringify({
+          ok: true,
+          pid: process.pid,
+          port: server.address()?.port ?? null,
+          startedAt: CODE.startedAt,
+          code: CODE.started ? { sha: CODE.started.sha, short: CODE.started.short, at: CODE.started.at } : null,
+          inflight: traffic.inflight,
+          idleMs: Date.now() - traffic.lastAt,
+        }));
+      }
       if (req.method === 'POST' && req.url.split('?')[0] === '/answer') {
         const answer = JSON.parse(await readBody(req));
         let result;
@@ -427,6 +477,10 @@ export function serve(args) {
     const listen = (port, left) => {
       server.once('error', (e) => {
         if (e.code === 'EADDRINUSE' && left > 0) return listen(port + 1, left - 1);
+        if (e.code === 'EADDRINUSE' && args.exclusive) {
+          console.error(`ops-dashboard: port ${port} is still held — not starting. Nothing was moved; whatever holds it is still serving.`);
+          process.exit(1);
+        }
         throw e;
       });
       // Report the bound port, not the requested one — `--port 0` means "any free
@@ -442,7 +496,7 @@ export function serve(args) {
         resolve({ server, url, marker });
       });
     };
-    listen(args.port, 20);
+    listen(args.port, args.exclusive ? 0 : 20);
   });
 }
 

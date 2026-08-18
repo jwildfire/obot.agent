@@ -132,12 +132,20 @@ const ageWords = (min) => {
  * one, and what was missing was a sentence naming the snapshot next to the numbers.
  * Same reasoning as the audit-freshness line in tools/navigator/checks.mjs.
  *
- * The code half can only be reported — a process cannot reload its own modules, so a
- * stale build says "restart me" and names the command. The data half is already fixed
- * by the time this renders: the freshest committed hub state was read, and this says
- * which one that was.
+ * The code half can only be reported from inside the process — it cannot reload its
+ * own modules — but since jwildfire/obot.roadmap#243 something outside it listens: the
+ * five-minute sweep fast-forwards the checkout and restarts this server when it moves.
+ * So there is a third half, and it is the one that fails invisibly. A page serving old
+ * code looks exactly like a page serving new code, and an updater that stopped looks
+ * exactly like one with nothing to do; the update half says which it is, and names the
+ * refusal when the checkout could not be moved. The manual restart command is printed
+ * only when nothing is going to do it automatically — telling him to run `pkill` for a
+ * restart that is already ninety seconds away is how a true line becomes noise.
+ *
+ * The data half is already fixed by the time this renders: the freshest committed hub
+ * state was read, and this says which one that was.
  */
-export const provenanceLine = ({ code = null, hub = null } = {}) => {
+export const provenanceLine = ({ code = null, hub = null, update = null } = {}) => {
   const bits = [];
   let tone = 'ok';
   if (code?.unknown) { bits.push('code: which commit is running could not be read'); tone = 'warn'; }
@@ -154,12 +162,36 @@ export const provenanceLine = ({ code = null, hub = null } = {}) => {
       ? `decisions: <code>${esc(hub.head)}</code> from your hub clone${hub.dirty ? ', with uncommitted edits' : ''}`
       : `decisions: <code>${esc(hub.head)}</code> from <code>${esc(hub.source)}</code> — your clone is ${hub.behind} commit${hub.behind === 1 ? '' : 's'} behind it, so this page is ahead of it`);
   }
+  // The update half. `absent` is the honest answer on a machine where the sweep is not
+  // installed, and it is only a warning when it costs something — a page that is
+  // current has nothing to be warned about.
+  let armed = false;
+  if (update?.state === 'ok') {
+    armed = true;
+    const when = update.ageMin < 1 ? 'just now' : `${update.ageMin}m ago`;
+    bits.push(update.restartedAt
+      ? `updates: checked ${when}; this page was restarted onto <code>${esc(update.head ?? '')}</code> automatically`
+      : update.deferred
+        ? `updates: checked ${when}; a restart onto <code>${esc(update.head ?? '')}</code> is waiting for the page to be idle`
+        : `updates: checked ${when}; the checkout is current with its remote`);
+  } else if (update?.state === 'absent') {
+    bits.push(`updates: ${esc(update.why)}`);
+    if (code?.behind) tone = 'warn';
+  } else if (update) {
+    bits.push(`updates: ${esc(update.why)}`);
+    tone = 'warn';
+  }
+
   if (!bits.length) return '';
   // Kill then relaunch, in that order and never overlapping: a second instance takes
   // the port after this one and steals the serve marker the status line reads,
-  // deleting it when it exits (obot.agent#142).
+  // deleting it when it exits (obot.agent#142). Which is also why this is a command he
+  // runs rather than one this page offers to run for itself — and why it is withheld
+  // when the sweep is armed, since two restarters racing for port 7326 is that same
+  // bug with an extra process.
   return `<p class="prov ${tone}">${bits.join(' &middot; ')}${
-    code?.behind ? ` <span class="prov-fix"><code>${esc(RESTART_CMD)}</code>, then <code>/session-dashboard</code></span>` : ''}</p>`;
+    code?.behind && !armed ? ` <span class="prov-fix"><code>${esc(RESTART_CMD)}</code>, then <code>/session-dashboard</code></span>` : ''}${
+    code?.behind && armed ? ' <span class="prov-fix">no action needed — the sweep restarts this page within five minutes, once nobody is reading it</span>' : ''}</p>`;
 };
 
 export const RESTART_CMD = "pkill -f 'ops-dashboard.mjs --serve'";

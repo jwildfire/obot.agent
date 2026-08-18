@@ -8,17 +8,21 @@
 // is the whole reason D0018 — decided by @jwildfire that morning, recorded in the
 // artifact, the index row and the registry — was still listed as awaiting him.
 //
-// This module answers two questions, and the page prints both whether or not the
-// answer is bad. That is deliberate, and it is the shape `auditFreshness` settled on
+// This module answers three questions, and the page prints all three whether or not
+// the answer is bad. The third arrived with jwildfire/obot.roadmap#243 — is anything
+// pulling new code onto this machine at all — because reporting the snapshot is only
+// half of it: an updater that has quietly stopped looks exactly like one with nothing
+// to do. That is deliberate, and it is the shape `auditFreshness` settled on
 // in tools/navigator/checks.mjs: the 2026-08-16 misreading happened well inside any
 // sane staleness threshold, so a line that only speaks up when something is late would
 // not have caught it. What was missing was a sentence saying which snapshot this is,
 // sitting next to the numbers somebody was about to act on.
 //
-// The code half can only be reported, not fixed: a running process cannot reload its
-// own modules, so a stale build has to say "restart me". The data half is fixed rather
-// than reported, because it can be — the freshest committed hub state is one `git
-// archive` away and reading it needs nobody's permission and no write to his checkout.
+// The code half can only be reported from in here, not fixed: a running process
+// cannot reload its own modules, so a stale build says "restart me" — and since #243
+// something outside it listens. The data half is fixed rather than reported, because
+// it can be — the freshest committed hub state is one `git archive` away and reading
+// it needs nobody's permission and no write to his checkout.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
@@ -196,5 +200,62 @@ export function resolveHub(hub, cacheDir, { fetched = null } = {}) {
   return {
     root: fresh, source: up, head: upstream.short, at: upstream.at, behind, dirty: false,
     fetchedAt: fetched ?? lastFetch(hub), upstream: up, cloneHead: head.short, warn: null,
+  };
+}
+
+/**
+ * The third question this strip answers: is anything pulling new code onto this
+ * machine, and did the last attempt work?
+ *
+ * The first two halves report the snapshot. This one reports the *mechanism* — and it
+ * has to, because the mechanism is the part that fails invisibly. A server serving old
+ * code looks exactly like a server serving new code, and an updater that has silently
+ * stopped looks exactly like one with nothing to do. So the record is read live on
+ * every render (unlike the code stamp, which must be captured), and the two failures
+ * that matter are kept apart: the update ran and refused, or the update stopped
+ * running at all.
+ *
+ * Written by the five-minute sweep — tools/navigator/selfupdate.mjs, requirement
+ * jwildfire/obot.roadmap#243. Absent is a real answer and the commonest one on a
+ * machine where the sweep is not installed, so it says that rather than nothing.
+ */
+export const UPDATE_STALE_MIN = 16;
+
+export function autoUpdate(workspace, now = new Date()) {
+  const file = path.join(workspace, '.claude', 'session-hub', 'cache', 'selfupdate.json');
+  let rec;
+  try {
+    rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    return e.code === 'ENOENT'
+      ? { state: 'absent', why: 'nothing on this machine records an automatic update — new code reaches this page only when somebody restarts it' }
+      : { state: 'unreadable', why: 'the automatic-update record could not be read, so whether new code is reaching this page is unknown' };
+  }
+  const at = Date.parse(rec?.at);
+  if (!Number.isFinite(at)) {
+    return { state: 'unreadable', why: 'the automatic-update record carries no time, so how recently it ran is unknown' };
+  }
+  const ageMin = Math.max(0, Math.round((now.getTime() - at) / 60000));
+  if (ageMin > UPDATE_STALE_MIN) {
+    return { state: 'stale', ageMin, at: rec.at, why: `the last automatic update ran ${ageMin} minutes ago — the five-minute sweep that pulls new code has stopped` };
+  }
+  const checkout = rec.checkout ?? {};
+  if (!checkout.ok) {
+    return { state: 'failed', ageMin, at: rec.at, checkout, why: `the checkout could not be updated — ${checkout.reason ?? 'no reason was recorded'}` };
+  }
+  // A consumer that could not be restarted is the other half of the same failure: the
+  // checkout moved and this page did not, which from the outside is indistinguishable
+  // from an update that never ran.
+  const broken = (rec.consumers ?? []).find((c) => c.ok === false);
+  if (broken) {
+    return { state: 'failed', ageMin, at: rec.at, checkout, why: `${broken.id} could not be restarted — ${broken.reason}` };
+  }
+  const restarted = (rec.consumers ?? []).find((c) => c.act === 'restart' || c.act === 'start');
+  return {
+    state: 'ok', ageMin, at: rec.at, checkout,
+    moved: Boolean(checkout.moved),
+    head: checkout.to ? String(checkout.to).slice(0, 7) : null,
+    restartedAt: restarted?.at ?? null,
+    deferred: (rec.consumers ?? []).find((c) => c.code === 'busy')?.reason ?? null,
   };
 }
