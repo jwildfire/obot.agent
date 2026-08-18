@@ -31,6 +31,16 @@
 // sentence of its body and was counted as linked by two separate readers; GitHub
 // records no parent for it. Only the structural field counts here.
 //
+// FOR AN ISSUE. A merged pull request has no structural parent field at all, and the
+// one signal it does have — `closingIssuesReferences` — is empty on correctly written
+// work here: GitHub records it only for a pull request targeting the default branch,
+// so no release candidate can have one, and the house convention forbids `Closes` on
+// partial work so the issue stays open. Nine merged pull requests were findings on
+// 2026-08-18 and not one carried a closing keyword. So a pull request may also prove
+// its parent with a linking keyword its author wrote — anchored, with the reference
+// next to it, which is what separates a declaration from a mention — and only when
+// the issue it names is itself parented (jwildfire/obot.agent#225).
+//
 // NO SILENT CAPS. The window bounds how far back a run looks, so a first pass does
 // not dump months of history into a five-minute file — and whatever falls outside it
 // is counted and reported, because a truncated list that does not say so reads as
@@ -75,36 +85,196 @@ const accepted = (i) => (i.labels ?? []).includes(ACCEPTED_LABEL)
 const shipped = (i) => (i.kind === 'pr' ? i.state === 'MERGED' : i.state === 'CLOSED')
 
 /**
+ * The keywords an author writes to say a pull request belongs to an issue.
+ *
+ * `Closes`/`Fixes`/`Resolves` are GitHub's own; the rest are what this workspace
+ * actually writes when the issue must stay open, which is most of the time. The set
+ * is the vocabulary measured across the 163 merged pull requests in the seven policy
+ * repos, not a guess.
+ */
+const KEYWORDS = 'clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed)|refs?|references|part of|follows|implements'
+
+// Anchored, and the reference must sit immediately after the keyword. That is the
+// whole discrimination: `Refs #202` is a declaration, `A one-line follow-up to #171`
+// is a sentence, and `Closes nothing on its own; #224 stays closed by #225` is a
+// sentence that starts with a keyword. A list marker or bold wrapper may precede the
+// keyword — release notes write `- Closes #45` — and nothing else may.
+const LINK_LINE = new RegExp(`^\\s{0,3}(?:[-*+]\\s+|>\\s*)?(?:\\*\\*|__|\\*|_)?\\s*(?:${KEYWORDS})(?:\\*\\*|__|\\*|_)?\\s*:?\\s+(.+)$`, 'i')
+
+// `#N` and `owner/repo#N` are the two forms GitHub itself links, plus the URL a
+// markdown link wraps. A bare `roadmap#243` is deliberately not one of them: GitHub
+// renders it as plain text, so treating it as a reference would be inventing a link
+// the author did not make.
+const SELF_REF = /^#(\d+)\b/
+const CROSS_REF = /^([\w.-]+)\/([\w.-]+)#(\d+)\b/
+const URL_REF = /^(?:\[[^\]]*\]\(\s*)?(?:<)?https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(issues|pull)\/(\d+)\b/
+
+/**
+ * The issues a pull request body states it belongs to.
+ *
+ * Never a mention: the keyword anchors the line and the reference sits next to it.
+ * `kind` is `'pr'` only when the reference itself says so — a bare `#171` cannot be
+ * told from an issue by syntax, so it is resolved against what was actually fetched.
+ */
+export function statedIssueRefs(body = '', repo = '') {
+  const [selfOwner, selfName] = String(repo).split('/')
+  const out = []
+  for (const raw of String(body ?? '').split('\n')) {
+    const line = raw.match(LINK_LINE)
+    if (!line) continue
+    const rest = line[1].trim()
+    let m
+    if ((m = rest.match(URL_REF))) out.push({ repo: `${m[1]}/${m[2]}`, number: Number(m[4]), kind: m[3] === 'pull' ? 'pr' : undefined })
+    else if ((m = rest.match(CROSS_REF))) out.push({ repo: `${m[1]}/${m[2]}`, number: Number(m[3]) })
+    else if ((m = rest.match(SELF_REF)) && selfOwner && selfName) out.push({ repo: `${selfOwner}/${selfName}`, number: Number(m[1]) })
+  }
+  return out
+}
+
+const refKey = (r) => `${r.repo}#${r.number}`
+const refLabel = (r) => `${shortRepo(r.repo)}#${r.number}`
+
+/** What was actually fetched, so a stated reference can be checked rather than believed. */
+function localIndex(items) {
+  const m = new Map()
+  for (const i of items) m.set(`${i.repo}#${i.number}`, { kind: i.kind, parent: i.parent ?? null })
+  return m
+}
+
+/**
+ * Whether one shipped item has something in the plan above it, and if not, why not.
+ *
+ * One definition, used by the findings, the bounded count and the accepted count
+ * alike — three numbers computed from three different ideas of "covered" is how a
+ * section starts contradicting itself.
+ */
+function coverage(item, index, resolved) {
+  if (item.parent) return { covered: true }
+  // An issue has a structural parent field and using it is one click. Its body is
+  // never read here, and that asymmetry is the point rather than an oversight.
+  if (item.kind !== 'pr') return { covered: false, why: 'none' }
+  const refs = item.statedRefs ?? []
+  if (!refs.length) return { covered: false, why: 'none' }
+  const seen = refs.map((r) => ({ r, entry: r.kind === 'pr' ? { kind: 'pr' } : (index.get(refKey(r)) ?? resolved.get(refKey(r)) ?? null) }))
+  if (seen.some((s) => s.entry?.kind === 'issue' && s.entry.parent)) return { covered: true }
+  const orphan = seen.find((s) => s.entry?.kind === 'issue' && !s.entry.parent)
+  if (orphan) return { covered: false, why: 'unparented', ref: orphan.r }
+  const unknown = seen.find((s) => !s.entry)
+  if (unknown) return { covered: false, why: 'unresolved', ref: unknown.r }
+  return { covered: false, why: 'pr', ref: seen[0].r }
+}
+
+/**
+ * The row, worded so the reader knows which object to go and repair.
+ *
+ * "merged with no requirement above it" was the only sentence this check could say,
+ * and it said it about work whose requirement was one hop away. Each shape below
+ * names the thing that can actually be fixed, or says plainly that nothing was read.
+ */
+function orphanLine({ item, why, ref: named }) {
+  const verb = item.kind === 'pr' ? 'merged' : 'closed'
+  const tail = `— "${item.title}"`
+  if (why === 'unparented') return `${ref(item)} ${verb} under ${refLabel(named)}, which has no requirement above it either ${tail}`
+  if (why === 'unresolved') return `${ref(item)} ${verb} naming ${refLabel(named)}, which this sweep could not resolve ${tail}`
+  if (why === 'pr') return `${ref(item)} ${verb} naming ${refLabel(named)}, a pull request, which carries no requirement of its own ${tail}`
+  return `${ref(item)} ${verb} with no requirement above it ${tail}`
+}
+
+/**
  * Work that shipped with nothing in the plan above it.
  *
  * `items` are issues and pull requests already fetched, each carrying the structural
  * parent GitHub records (`parent`), never a reference scraped from the body.
  */
-export function orphanedWork(items = [], now = new Date()) {
-  return items
-    .filter(shipped)
-    .filter((i) => !i.parent)
-    .filter((i) => !accepted(i))
-    .filter((i) => inWindow(i.closedAt, now))
-    .map((i) => ({
-      kind: 'orphan',
-      repo: i.repo,
-      number: i.number,
-      line: `${ref(i)} ${i.kind === 'pr' ? 'merged' : 'closed'} with no requirement above it — "${i.title}"`,
-    }))
+export function orphanedWork(items = [], now = new Date(), resolved = new Map()) {
+  const index = localIndex(items)
+  const out = []
+  for (const i of items) {
+    if (!shipped(i) || accepted(i) || !inWindow(i.closedAt, now)) continue
+    const c = coverage(i, index, resolved)
+    if (c.covered) continue
+    out.push({ kind: 'orphan', repo: i.repo, number: i.number, line: orphanLine({ item: i, why: c.why, ref: c.ref }) })
+  }
+  return out
 }
 
 /** How many the window dropped, so the count can be reported rather than hidden. */
-export function orphansOutsideWindow(items = [], now = new Date()) {
-  return items.filter(shipped)
-    .filter((i) => !i.parent)
-    .filter((i) => !accepted(i))
-    .filter((i) => !inWindow(i.closedAt, now)).length
+export function orphansOutsideWindow(items = [], now = new Date(), resolved = new Map()) {
+  const index = localIndex(items)
+  return items.filter((i) => shipped(i) && !accepted(i) && !inWindow(i.closedAt, now))
+    .filter((i) => !coverage(i, index, resolved).covered).length
 }
 
 /** How many the label settled, so the exclusion is reported rather than hidden. */
-export function orphansAccepted(items = []) {
-  return items.filter(shipped).filter((i) => !i.parent).filter(accepted).length
+export function orphansAccepted(items = [], resolved = new Map()) {
+  const index = localIndex(items)
+  return items.filter((i) => shipped(i) && accepted(i))
+    .filter((i) => !coverage(i, index, resolved).covered).length
+}
+
+/**
+ * How many stated references one sweep will look up rather than leave unverified.
+ *
+ * The repo query fetches the 100 open and 50 most-recently-updated closed issues, and
+ * the hub alone has 113 open — so a pull request can name a live requirement the
+ * query simply did not return. One extra call per sweep settles those; this bounds it
+ * so a bad body can never turn the five-minute sweep into a crawler.
+ */
+export const REF_LOOKUP_CAP = 25
+
+/**
+ * The stated references nothing fetched can answer, deduped and bounded.
+ *
+ * Only from pull requests that are findings without them — a pull request already
+ * covered by what was fetched costs no call. What the cap drops is returned, never
+ * swallowed: an unverified reference reported as covered is the failure this whole
+ * check exists to prevent.
+ */
+export function unresolvedRefs(items = [], now = new Date()) {
+  const index = localIndex(items)
+  const wanted = new Map()
+  for (const i of items) {
+    if (i.kind !== 'pr' || !shipped(i) || accepted(i) || !inWindow(i.closedAt, now)) continue
+    const c = coverage(i, index, new Map())
+    if (c.covered) continue
+    for (const r of i.statedRefs ?? []) {
+      if (r.kind === 'pr' || index.has(refKey(r))) continue
+      wanted.set(refKey(r), r)
+    }
+  }
+  const all = [...wanted.values()]
+  return { refs: all.slice(0, REF_LOOKUP_CAP), dropped: Math.max(0, all.length - REF_LOOKUP_CAP) }
+}
+
+const SAFE_NAME = /^[\w.-]+$/
+
+/** One aliased query for every reference that needs settling — one call, not one each. */
+export function refLookupQuery(refs = []) {
+  const parts = refs
+    .filter((r) => r.repo.split('/').length === 2 && r.repo.split('/').every((p) => SAFE_NAME.test(p)) && Number.isInteger(r.number))
+    .map((r, n) => {
+      const [owner, name] = r.repo.split('/')
+      return `  a${n}: repository(owner:"${owner}", name:"${name}") { issueOrPullRequest(number:${r.number}) { __typename ... on Issue { parent { number } } } }`
+    })
+  return parts.length ? `query {\n${parts.join('\n')}\n}` : null
+}
+
+/**
+ * The lookup's answer, keyed the way `coverage` reads it.
+ *
+ * An alias that came back null or missing is left out rather than recorded as an
+ * issue with no parent: not-read and read-and-empty are different answers, and only
+ * one of them is a finding.
+ */
+export function parseRefLookup(refs = [], data = {}) {
+  const out = new Map()
+  refs.forEach((r, n) => {
+    const node = data?.[`a${n}`]?.issueOrPullRequest
+    if (!node) return
+    if (node.__typename === 'Issue') out.set(refKey(r), { kind: 'issue', parent: node.parent ?? null })
+    else out.set(refKey(r), { kind: 'pr', parent: null })
+  })
+  return out
 }
 
 /**
@@ -369,7 +539,7 @@ query($owner:String!, $name:String!) {
       nodes { number title closedAt parent { number } labels(first:20) { nodes { name } } }
     }
     pullRequests(states:MERGED, first:50, orderBy:{field:UPDATED_AT, direction:DESC}) {
-      nodes { number title mergedAt closingIssuesReferences(first:5) { nodes { number } }
+      nodes { number title body mergedAt closingIssuesReferences(first:5) { nodes { number } }
               labels(first:20) { nodes { name } } }
     }
   }
@@ -382,6 +552,12 @@ query($owner:String!, $name:String!) {
  * all: the issue is what carries the link to a requirement, and if that issue is
  * itself unparented it is already reported on its own row. Reporting both would
  * double-count one failure, and a list that inflates is a list that gets muted.
+ *
+ * When GitHub recorded no closing reference — which is most of them here, for the
+ * two reasons at the top of this file — the body's stated references are carried
+ * alongside, and `coverage` decides whether any of them lands on a parented issue.
+ * The body is what makes this the query's largest field by far; it is fetched anyway
+ * because the alternative is a second call per pull request that has one.
  */
 export function shapeRepo(repo, data) {
   const r = data?.repository
@@ -392,10 +568,14 @@ export function shapeRepo(repo, data) {
     closedAt: i.closedAt, parent: i.parent ?? null, title: i.title,
     labels: names(i.labels),
   }))
-  const prs = (r.pullRequests?.nodes ?? []).map((p) => ({
-    repo, number: p.number, kind: 'pr', state: 'MERGED', closedAt: p.mergedAt,
-    parent: (p.closingIssuesReferences?.nodes ?? []).length ? { via: 'closes' } : null,
-    title: p.title, labels: names(p.labels),
-  }))
+  const prs = (r.pullRequests?.nodes ?? []).map((p) => {
+    const closes = (p.closingIssuesReferences?.nodes ?? []).length
+    return {
+      repo, number: p.number, kind: 'pr', state: 'MERGED', closedAt: p.mergedAt,
+      parent: closes ? { via: 'closes' } : null,
+      statedRefs: closes ? [] : statedIssueRefs(p.body, repo),
+      title: p.title, labels: names(p.labels),
+    }
+  })
   return [...issues, ...prs]
 }
