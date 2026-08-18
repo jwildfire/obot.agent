@@ -53,7 +53,11 @@ function parseItem(text) {
 // would have made the one alarm that says the alarms are not being delivered the
 // only one rendering as ordinary text — a fourth instance of the pattern this
 // vocabulary exists to prevent.
-const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED|DOWN|BROKEN)[A-Z0-9 ]*\*\*/;
+// Exported since obot.agent#223: an alarm headline that does not match this renders
+// as ordinary grey text, so the code that WRITES headlines asserts against the real
+// regex rather than a copy of it. A copy is a second source of truth that drifts
+// silently, and what it costs is a finding nobody sees.
+export const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED|DOWN|BROKEN)[A-Z0-9 ]*\*\*/;
 
 // Lines before the first `##` that are structure, not content: the file's own
 // title and the sole-writer/stale-rule paragraph.

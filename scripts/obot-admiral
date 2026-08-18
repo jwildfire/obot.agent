@@ -72,9 +72,10 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { ADMIRAL_NAME, ADMIRAL_TTL_MIN, brief, admiralSection, foreignRoleSessions,
-         holdLine, hostWasAway, isAdmiral, judgedWorkers, launchLine, operationalRepos,
-         overrun, parseAdmiralLog, readJobs, shouldLaunch, stubLine,
-         triggers } from '../tools/navigator/admiral.mjs'
+         holdLine, hostWasAway, isAdmiral, judgedWorkers, killLine, launchLine,
+         operationalRepos, overrun, parseAdmiralLog, priorStopAttempts, readJobs,
+         shouldLaunch, stubLine, triggers } from '../tools/navigator/admiral.mjs'
+import { confirmedStop } from '../tools/lib/killconfirm.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(HERE, '..')
@@ -252,10 +253,15 @@ function main() {
   for (const o of overruns) {
     say(o.line)
     if (MODE === 'run' && o.hard && process.env.OBOT_ADMIRAL_KILL !== '0') {
-      const killed = killAdmiral(o.job)
-      appendFileSync(ADMIRAL_LOG, `${now.toISOString()} HOLD - — killed overrunning admiral ${o.job}: ${killed}\n`)
-      say(`killed overrunning admiral ${o.job}: ${killed}`)
-      o.killed = killed
+      // The outcome supplies its own words, and the record and the console repeat
+      // them rather than wrapping them in a verb of their own. That wrapping is what
+      // the requirement is about: `killed overrunning admiral <id>: no pid found —
+      // reported only` asserted a kill and denied one in the same sentence, and the
+      // half a reader keeps is the first half.
+      const outcome = confirmedStop(o.job, { priorAttempts: priorStopAttempts(log, o.job) })
+      appendFileSync(ADMIRAL_LOG, `${killLine(now.toISOString(), o.job, outcome)}\n`)
+      say(`${outcome.confirmed ? 'STOPPED' : 'STOP UNCONFIRMED for'} overrunning admiral ${o.job}: ${outcome.detail}`)
+      o.kill = outcome
     }
   }
 
@@ -311,34 +317,24 @@ function main() {
 }
 
 /**
- * Terminate an overrunning admiral, armed only by OBOT_ADMIRAL_KILL=1.
+ * WHERE THE KILL WENT (jwildfire/obot.roadmap#251).
  *
- * The pid comes from `claude agents --json`, joined on the session id, because the
- * job record does not carry one. SIGTERM rather than SIGKILL so the session gets to
- * flush; an admiral that ignores it is reported again on the next run, which is a
- * finding rather than an escalation.
+ * `killAdmiral` used to live here: resolve a pid from `claude agents --json`, send
+ * SIGTERM, return a string. It never checked whether anything died. On the night of
+ * 2026-08-18 it recorded session 1cc6cc32 as killed five times in twenty-one minutes
+ * at three different pids, and reported `no pid found — reported only` under the
+ * same word "killed" six times, while four admirals ran past four hours against a
+ * thirty-minute budget.
  *
- * ON THE SESSION ID AND NOTHING ELSE (obot.agent#188). This used to fall back to
- * matching a row whose NAME equalled the job's, which reads as harmless while
- * exactly one session can carry that name — and the premise failed the first time
- * anything else wore it. With four fixture admirals in the ledger, a ceiling firing
- * on one of them would have joined on `⚓🤖 obot-admiral` and sent SIGTERM to
- * whichever session `claude agents` listed first, which could be the real one. A
- * name is a claim; the job directory IS the session id's prefix, so the id join is
- * the one that cannot be worn by something else. When it finds nothing the overrun
- * is reported and nothing is killed, which is the right direction to fail in.
+ * The three pids are the part worth keeping in mind here. They are not a stale
+ * lookup: the pid the ledger gives for a background session is a `claude bg-spare`
+ * claimed from a pool the daemon owns, and when a host dies the daemon claims another
+ * and resumes the session onto it. So a stop has to be confirmed at the SESSION, and
+ * that reasoning is not the admiral's — it belongs to every path here that terminates
+ * anything. It lives in tools/lib/killconfirm.mjs, with the escalation, the identity
+ * check and the wording rule, and this file calls `confirmedStop` like any other
+ * caller would.
  */
-function killAdmiral(jobId) {
-  try {
-    const list = JSON.parse(execFileSync('claude', ['agents', '--json'], { encoding: 'utf8', timeout: 20000 }))
-    const row = list.find((r) => String(r.sessionId).startsWith(jobId))
-    if (!row?.pid) return 'no pid found — reported only'
-    process.kill(row.pid, 'SIGTERM')
-    return `SIGTERM to pid ${row.pid}`
-  } catch (e) {
-    return `kill failed: ${String(e.message).slice(0, 80)}`
-  }
-}
 
 try {
   main()

@@ -43,6 +43,7 @@
 import { isForeignRole } from '../lib/roles.mjs'
 import { classify, hostWasAway, isWorker, judgedWorkers, readJobs, verdictKeys,
          workerIdOf } from './wake.mjs'
+import { prefixedAlarm } from '../lib/killconfirm.mjs'
 
 export { hostWasAway, judgedWorkers, readJobs }
 
@@ -457,12 +458,39 @@ export const holdLine = (at, signature, why) => `${at} HOLD ${signature || '-'} 
  */
 export const stubLine = (at, signature, why) => `${at} STUB ${signature || '-'} — ${why}`
 
-/** Launch and hold entries back out of the log. The signature is a field, never
- *  re-derived from prose — the mistake the ledger work spent a night undoing. */
+/**
+ * A stop attempt, under its own op and its own words (jwildfire/obot.roadmap#251).
+ *
+ * It used to be written as `HOLD - — killed overrunning admiral <id>: <what>`, which
+ * got two things wrong at once. It put a termination into the launch-decision
+ * vocabulary, where `shouldLaunch` reads HOLD lines back — so a kill sat in the file
+ * as a decision about launching, which it is not. And the caller's template supplied
+ * the word "killed" before the kill had said anything, so the branch that reported
+ * `no pid found — reported only` was announced as a kill in the same sentence that
+ * denied one.
+ *
+ * Now the outcome supplies its own words and the op distinguishes the two cases, so
+ * a stop can be read back out of the log — which is what `priorStopAttempts` needs
+ * and what nothing was doing when one session was recorded as killed five times.
+ */
+export const killLine = (at, id, outcome) =>
+  `${at} ${outcome?.confirmed ? 'KILL' : 'KILL-UNCONFIRMED'} ${id || '-'} — ${outcome?.detail ?? 'no outcome recorded'}`
+
+/** How many times this session has already been signalled, from the record.
+ *
+ *  A successful stop is not repeatable, so a second attempt is proof the first one
+ *  failed — and that proof sat unread in `admiral.log` through five attempts on one
+ *  session in twenty-one minutes. */
+export const priorStopAttempts = (log = [], id) =>
+  log.filter((e) => String(e.op).startsWith('KILL') && e.signature === id).length
+
+/** Entries back out of the log. The signature is a field, never re-derived from
+ *  prose — the mistake the ledger work spent a night undoing. On a KILL op the same
+ *  field carries the session id, for the same reason: read as a field or not at all. */
 export function parseAdmiralLog(text = '') {
   const out = []
   for (const raw of String(text).split('\n')) {
-    const m = /^(\S+) (LAUNCH|HOLD) (\S+) — (.*)$/.exec(raw.trim())
+    const m = /^(\S+) (LAUNCH|HOLD|KILL|KILL-UNCONFIRMED) (\S+) — (.*)$/.exec(raw.trim())
     if (m) out.push({ at: m[1], op: m[2], signature: m[3] === '-' ? '' : m[3], line: m[4] })
   }
   return out
@@ -578,8 +606,15 @@ export function admiralSection({ trigger = null, decision = null, overruns = [],
   // asterisks silently breaks the match: "ADMIRAL KILLED, BUDGET BREACHED" contains
   // BREACHED and still renders grey, purely because of the comma. Its test caught
   // exactly that, which is the argument for testing the wording rather than reading it.
+  //
+  // AND ONLY A CONFIRMED STOP GETS THE SUCCESS HEADLINE (jwildfire/obot.roadmap#251).
+  // Two **ADMIRAL KILLED ON A BREACHED BUDGET** lines reached his dashboard on
+  // 2026-08-18 for sessions that went on running for four more hours. The headline is
+  // the half a reader trusts, so it may never be able to overstate what happened: an
+  // unconfirmed stop renders under its own alarm, carrying the outcome's own words.
   for (const o of overruns) {
-    if (o.killed) lines.push(`**ADMIRAL KILLED ON A BREACHED BUDGET** — ${o.line} · ${o.killed}`)
+    if (o.kill?.confirmed) lines.push(`**ADMIRAL KILLED ON A BREACHED BUDGET** — ${o.line} · ${o.kill.detail}`)
+    else if (o.kill) lines.push(`${prefixedAlarm(o.kill, 'ADMIRAL')} — ${o.line} · ${o.kill.detail}`)
     else lines.push(o.hard ? `**ADMIRAL BUDGET BREACHED** — ${o.line}` : `admiral overrun — ${o.line}`)
   }
 
