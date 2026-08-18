@@ -49,7 +49,7 @@ const SKELETON = (stem) =>
  *
  * @param time  'HH:MM', shelled by the caller. Never formatted here.
  */
-export function writeDayBoundary(workspace, { date, time }) {
+export function writeDayBoundary(workspace, { date, time, ifAbsent = false }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) throw new Error(`writeDayBoundary: bad date ${date}`)
   if (!/^\d{1,2}:\d{2}$/.test(time ?? '')) throw new Error(`writeDayBoundary: bad time ${time}`)
 
@@ -66,6 +66,13 @@ export function writeDayBoundary(workspace, { date, time }) {
   // Replace our own previous marker in place if there is one. Anyone else's —
   // an interactive session-init's — is left exactly where it is.
   const mine = lines.findIndex((l) => MARKER_RE.test(l.trim()))
+  if (mine !== -1 && ifAbsent) {
+    // The day turned over once. A fold that fires again in the same window —
+    // which launchd will do after a missed fire — folded nothing new, so moving
+    // the boundary would be churn on a file the lead, every sibling and every
+    // unattended job are also writing to.
+    return { file, created, time: lines[mine].match(/(\d{1,2}:\d{2})/)?.[1] ?? time, replaced: false, kept: true }
+  }
   if (mine !== -1) {
     lines[mine] = marker
     writeFileSync(file, lines.join('\n'))
@@ -74,11 +81,16 @@ export function writeDayBoundary(workspace, { date, time }) {
 
   let i = lines.findIndex((l) => l.trim() === '## Overview')
   if (i === -1) {
-    // A scratchpad whose sections have drifted still gets a boundary: append the
-    // heading rather than dropping the write, because a silent skip here is the
-    // failure being fixed.
-    lines.push('', '## Overview')
-    i = lines.length - 1
+    // A scratchpad whose sections have drifted still gets a boundary — a silent
+    // skip here is the failure being fixed. The heading goes near the TOP, after
+    // the title, and never at the end: appended last it would fall inside the
+    // span of whatever section is currently last, and `## Session log` is
+    // measured by byte length to detect activity. A marker landing in that span
+    // makes the next run see growth that is only its own writing.
+    const title = lines.findIndex((l) => l.startsWith('# '))
+    i = title === -1 ? 0 : title + 1
+    lines.splice(i, 0, '', '## Overview')
+    i += 1
   }
   let j = i + 1
   while (j < lines.length && !lines[j].startsWith('## ')) j++

@@ -98,7 +98,17 @@ test('a genuinely quiet night: verdict quiet, exit 0, and still only those two f
     '.claude/fold/runs.jsonl',
     '.claude/fold/state.json',
     '.claude/session-hub/cache/init-timings.jsonl',
-  ], 'no diary, no page, no push — the watermark advances and nothing else')
+    '.claude/session-notes/2026-08-18.md',
+  ], 'no diary, no page, no push, no hub commit — machinery only')
+
+  // The scratchpad line is the day-boundary marker (obot.agent#201), and it is
+  // deliberately written on a quiet night too: the day turned over whether or not
+  // anything happened in it, and without the marker the dashboard spends tomorrow
+  // scoped to the whole day. It is local, never committed and never published, so
+  // it is machinery rather than the "no filler" the requirement forbids — which
+  // is about what he SEES: no page, no push, no diary entry, no hub commit.
+  const pad = readFileSync(join(w, '.claude/session-notes/2026-08-18.md'), 'utf8')
+  assert.match(pad, /<!-- session-init 2026-08-18 \d{2}:\d{2} \(fold\) -->/)
 
   const runs = readFileSync(join(w, '.claude/fold/runs.jsonl'), 'utf8').trim().split('\n')
   assert.equal(JSON.parse(runs.at(-1)).verdict, 'quiet',

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# install-launchd — install (or reinstall) the morning fold as a macOS
+# LaunchAgent: com.obot.morning-fold, 07:00 local, every day.
+#
+#   tools/fold/install-launchd              install + load
+#   tools/fold/install-launchd --print      emit the plist, touch nothing
+#   tools/fold/install-launchd --uninstall
+#
+# Status:  launchctl print "gui/$UID/com.obot.morning-fold"
+# Rehearse: launchctl kickstart -k "gui/$UID/com.obot.morning-fold"
+# Errors:  /tmp/com.obot.morning-fold.err   <- the only durable record of an
+#          unattended failure; launchd keeps stderr and keeps nothing else.
+#
+# Two things this cannot fix and does not pretend to (obot.roadmap#238 Design):
+#
+#   launchd does NOT defer a calendar fire missed while the machine slept. It
+#   runs once on wake, at an arbitrary hour. The fold is idempotent and folds the
+#   window its watermark defines, never the window its wall clock implies.
+#
+#   This host sleeps. `pmset -g custom` reads sleep 0 on both power sources and
+#   the power log still records real sleeps. Arming a scheduled wake needs
+#   `sudo pmset repeat wake MTWRFSU 06:55:00`, which needs an administrator
+#   prompt at @jwildfire's keyboard — so it is an ask on the briefing, not
+#   something an agent does quietly.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ENTRY="$REPO_ROOT/tools/fold/fold.mjs"
+NODE="${OBOT_FOLD_NODE:-$(command -v node || true)}"
+GH="$(command -v gh || true)"
+LABEL="com.obot.morning-fold"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+
+if [ "${1:-}" = "--uninstall" ]; then
+  launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+  rm -f "$PLIST"
+  echo "uninstalled $LABEL"
+  exit 0
+fi
+
+# The interpreter path is baked into the plist because launchd gives no shell
+# profile. It is verified HERE rather than discovered at 07:00 in three weeks:
+# the installed sweep hardcodes an nvm node path, so a version bump kills that
+# schedule silently while `launchctl list` still shows the label.
+[ -f "$ENTRY" ] || { echo "install-launchd: not found: $ENTRY" >&2; exit 1; }
+[ -n "$NODE" ] && [ -x "$NODE" ] || { echo "install-launchd: not an executable interpreter: ${NODE:-<none on PATH>}" >&2; exit 1; }
+[ -n "$GH" ] || { echo "install-launchd: gh not on PATH — the fold reads GitHub queues" >&2; exit 1; }
+
+PLIST_XML="$("$NODE" -e '
+import("file://" + process.argv[1]).then((m) => {
+  process.stdout.write(m.plist({
+    node: process.argv[2], entry: process.argv[3],
+    pathDirs: [process.argv[4], process.argv[5]],
+  }));
+});' "$REPO_ROOT/tools/fold/lib/schedule.mjs" "$NODE" "$ENTRY" "$(dirname "$NODE")" "$(dirname "$GH")")"
+
+if [ "${1:-}" = "--print" ]; then
+  printf '%s' "$PLIST_XML"
+  exit 0
+fi
+
+mkdir -p "$(dirname "$PLIST")"
+printf '%s' "$PLIST_XML" > "$PLIST"
+
+launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+launchctl bootstrap "gui/$UID" "$PLIST"
+
+echo "installed $LABEL — 07:00 daily via $NODE"
+echo "  rehearse: launchctl kickstart -k gui/$UID/$LABEL"
+echo "  errors:   /tmp/$LABEL.err"
+launchctl print "gui/$UID/$LABEL" 2>/dev/null | grep -E 'state|runs|last exit' | head -3 || true
