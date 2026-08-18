@@ -33,6 +33,7 @@ import {
   collectJobs, collectAgentsCli, collectScratchpad, collectNextSession, collectGhSweep,
 } from './lib/collect.mjs';
 import { buildModel } from './lib/model.mjs';
+import { reportPath } from './lib/report-path.mjs';
 import { render } from './lib/render.mjs';
 import { serveHub, DEFAULT_PORT } from './lib/serve.mjs';
 
@@ -137,14 +138,21 @@ async function main() {
 
   const once = () => {
     const { model, html } = generate({ workspace, hub, slug: args.slug, mode });
+    // A frozen report is never silently overwritten by a different session's
+    // (obot.agent#201). With no day boundary every session of a day resolves to
+    // the same slug, and this line used to destroy the earlier record while
+    // producing a perfectly correct-looking file.
+    let chosen = null;
     const out = path.resolve(
-      args.out ??
-        (mode === 'report'
-          ? path.join(hub, 'reports', 'sessions', `${model.slug}.html`)
-          : path.join(workspace, '.claude', 'session-hub', 'live.html')),
+      mode === 'report'
+        ? (chosen = reportPath({
+            hub, slug: model.slug, boundaryStart: model.boundary.startIso, explicitOut: args.out ?? null,
+          })).path
+        : (args.out ?? path.join(workspace, '.claude', 'session-hub', 'live.html')),
     );
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, html);
+    if (chosen?.why) console.log(`[session-hub] ${chosen.why}`);
     if (args.emitState) {
       const statePath = path.resolve(args.emitState);
       fs.mkdirSync(path.dirname(statePath), { recursive: true });

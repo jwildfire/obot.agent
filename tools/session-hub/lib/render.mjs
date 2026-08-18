@@ -63,6 +63,11 @@ function fmtDuration(a, b) {
 
 const notice = (msg) => (msg ? `<p class="notice">⚠ ${esc(msg)}</p>` : '');
 
+// "since session start" is only true when a boundary was actually resolved. It
+// kept saying so for two weeks while the panels showed since-midnight data, and a
+// label that lies is worse than a missing one — it is what made the break invisible.
+const scopeLabel = (degraded) => (degraded ? 'since local midnight — no boundary today' : 'since session start');
+
 const agentChip = (a) =>
   `<a class="agchip" href="#agent-${esc(a.id)}" style="--c:${agentDot(a.color)}">${esc(a.short)}</a>`;
 
@@ -128,7 +133,7 @@ function agentCard(a, mode) {
 
 /* ---------- accomplishments: releases + requirements, closure first ---------- */
 
-function accomplishmentsPanel(acc, noticeMsg) {
+function accomplishmentsPanel(acc, noticeMsg, degraded) {
   const body = [];
   if (noticeMsg) body.push(notice(noticeMsg));
   if (acc) {
@@ -151,7 +156,7 @@ function accomplishmentsPanel(acc, noticeMsg) {
     }
   }
   return `<section class="panel accomplish">
-  <div class="panel-head"><h2>Accomplishments</h2><span class="src">derived: releases + requirement issues + closures since session start</span></div>
+  <div class="panel-head"><h2>Accomplishments</h2><span class="src">derived: releases + requirement issues + closures ${scopeLabel(degraded)}</span></div>
   <div class="panel-body">${body.join('\n')}</div>
 </section>`;
 }
@@ -184,8 +189,8 @@ function itemsList(groups) {
     .join('\n');
 }
 
-function activityFeed(items) {
-  if (!items?.length) return '<p class="notice">no roadmap activity since session start</p>';
+function activityFeed(items, degraded) {
+  if (!items?.length) return `<p class="notice">no roadmap activity ${scopeLabel(degraded)}</p>`;
   return `<div class="feed">${items
     .map(
       (i) => `<div class="evt"><time>${fmtTime(i.updatedAt)}</time><span class="repo">${esc(i.repo)}</span><span class="txt"><a href="${esc(i.url)}">${esc(i.isPullRequest ? 'PR ' : '')}#${i.number}</a> ${esc(i.title)} — <strong>${esc(i.event)}</strong></span></div>`,
@@ -229,6 +234,14 @@ export function render(model) {
       ? `<div class="banner"><span class="dot"></span>${m.alerts.map((a) => `${esc(a.short ?? a.name)} — ${esc(a.state)}${a.detail ? `: ${esc(a.detail)}` : ''}`).join(' · ')}</div>`
       : '';
 
+  // The boundary degradation is rendered HERE, in the body, and not left to the
+  // footer clause that was its only signal for two weeks (obot.agent#201). It
+  // sits above the panels it describes, because a caveat below the thing it
+  // qualifies is a caveat nobody reads.
+  const boundaryWarn = m.notices.boundary
+    ? `<div class="banner boundary"><span class="dot"></span>${esc(m.notices.boundary)} — the fold writes it each morning (obot.agent#201).</div>`
+    : '';
+
   const acc = m.accomplishments;
   const closureSub = acc
     ? `${acc.mergedPrs.length} merged · ${acc.closedIssues.length} closed · ${acc.releases.length} released`
@@ -259,7 +272,7 @@ export function render(model) {
     : (m.notices.scratchpad ? '' : notice('no ## Overview in today’s scratchpad yet — session-init writes the kickoff list there'))}</div>
 </section>`,
     collapsedPanel('Roadmap activity', 'gh sweep, all events', m.tiles.activity === null ? 'not swept' : `${m.tiles.activity} events`,
-      notice(m.notices.ghSweep) + (m.panels.activity ? activityFeed(m.panels.activity) : '')),
+      notice(m.notices.ghSweep) + (m.panels.activity ? activityFeed(m.panels.activity, m.boundary.degraded) : '')),
   ].join('\n');
 
   const right = [
@@ -295,7 +308,7 @@ ${isReport || chat ? '' : '<meta http-equiv="refresh" content="60">'}
 <title>${isReport ? `Session report ${esc(m.slug)}` : `Session hub — ${esc(m.date)}`} · obot</title>
 <style>${CSS}</style>
 </head>
-<body>
+<body data-session-start="${esc(m.boundary.startIso ?? '')}">
 <div class="wrap">
 <header>
   <div class="eyebrow">obot session hub${isReport ? ' · session report' : ''}</div>
@@ -321,7 +334,8 @@ ${chat ? CHAT_PANEL : ''}
 </section>
 
 <div class="hub-live" id="hub-main">
-${accomplishmentsPanel(acc, acc ? null : m.notices.ghSweep)}
+${boundaryWarn}
+${accomplishmentsPanel(acc, acc ? null : m.notices.ghSweep, m.boundary.degraded)}
 
 <div class="grid">
   <div class="col">${left}</div>
