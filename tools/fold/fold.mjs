@@ -38,6 +38,7 @@ import { landedSince } from './lib/repos.mjs'
 import { parseLanded, composeEntry } from './lib/diary.mjs'
 import { writeEntry, publishEntry } from './lib/publish.mjs'
 import { sweepIdeas } from './lib/ideas.mjs'
+import { rcReadyWithDemo, allGoalsBlocked, composeMorning, writePush, listenerAlive, ghLabels } from './lib/push.mjs'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
@@ -210,6 +211,12 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
       }
     }
 
+    // The only two things allowed to interrupt him, plus the morning line.
+    // Everything here WRITES a payload; delivery belongs to a bridged standing
+    // session running tools/fold/push-listen, and the fold never claims a
+    // delivery it cannot observe.
+    report.pushes = deliver({ workspace, verdict, queue, swept, now })
+
     // The day's record. Gated on ACTIVITY, which is the diary's own gate: a day
     // with work gets an entry even when nothing is waiting on him, because the
     // diary is the keynote's raw material and its value does not depend on his
@@ -239,6 +246,39 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
   }
 
   return { exit: verdict.verdict === 'unknown' ? 3 : 0, report }
+}
+
+function deliver({ workspace, verdict, queue, swept, now }) {
+  const out = { written: [], listener: listenerAlive(workspace, { now }), why: [] }
+  const send = (kind, text, url) => {
+    writePush(workspace, { kind, text, url, now })
+    out.written.push(kind)
+  }
+
+  // 1. A release candidate going ready, with its demo.
+  let lane = {}
+  try {
+    const raw = JSON.parse(readFileSync(join(workspace, '.claude/ops/cache/rcs-lane.json'), 'utf8'))
+    lane = Object.fromEntries((raw.items ?? []).map((i) => [i.key ?? `${i.repo}#${i.number}`, i]))
+  } catch { /* no cache: every RC reports demo owed, which is the honest fallback */ }
+  for (const rc of rcReadyWithDemo(swept.events ?? [], lane)) send('rc-ready', rc.line, rc.url)
+
+  // 2. Every active goal blocked at once — the escalation rc-framework names.
+  try {
+    const registry = JSON.parse(readFileSync(join(REPO_ROOT, 'goals', 'registry.json'), 'utf8'))
+    const g = allGoalsBlocked(registry.goals, (issue) => ghLabels(registry.hub, issue))
+    if (g.unknown) out.why.push(`goals: ${g.why}`)
+    else if (g.all) send('goals-blocked', `Every active goal is blocked (${g.checked}). Nothing can proceed without you.`, null)
+  } catch (e) {
+    out.why.push(`goals: could not read the registry — ${String(e.message).split('\n')[0]}`)
+  }
+
+  // 3. The morning line, on the same gate as the briefing's push.
+  if (verdict.push) {
+    const line = composeMorning({ rcs: queue.rcs.length, decisions: queue.decisions.length, todos: queue.todos.length })
+    if (line) send('morning', line, null)
+  }
+  return out
 }
 
 function writeTheDay({ workspace, hub, now, since, repos, queue, opts }) {
@@ -299,6 +339,14 @@ function render(r) {
   L.push(`  push     ${r.push ? 'YES' : 'no '}  ${r.reasons.push}`)
   if (r.reasons.forced) L.push(`  forced        ${r.reasons.forced}`)
   if (r.boundary) L.push(`  boundary ${r.boundary.kept ? "kept" : "SET "}  day marker at ${r.boundary.time}`)
+  if (r.pushes) {
+    const p = r.pushes
+    L.push(`  push     ${p.written.length ? p.written.join(', ') : 'none  '}  ` +
+           (p.written.length
+             ? (p.listener.alive ? 'written; a listener is armed' : `written, but NO LISTENER — ${p.listener.why}`)
+             : 'nothing met the bar'))
+    for (const w of p.why) L.push(`           ${w}`)
+  }
   if (r.ideas) {
     L.push(`  ideas    ${r.ideas.unknown ? 'UNKNOWN' : r.ideas.count ? `${r.ideas.count} new` : 'none   '}  ${r.ideas.why}`)
   }

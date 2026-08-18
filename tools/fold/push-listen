@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# push-listen — the relay that reaches @jwildfire (obot.agent#205, under
+# jwildfire/obot.roadmap#238).
+#
+# Run from a BRIDGED standing session (obot-prime or the Navigator) as a
+# persistent Monitor:
+#
+#   Monitor(command: "obot.agent/tools/fold/push-listen",
+#           description: "pushes for @jwildfire", persistent: true)
+#
+# Every line it prints becomes one notification inside that session. When the
+# session sees a line beginning PUSH, its job is exactly one thing:
+#
+#   call PushNotification with the text after "PUSH ", and nothing else.
+#
+# WHY THE RELAY EXISTS AT ALL. PushNotification is a harness tool, so the fold —
+# a script — cannot call it. And it only reaches a phone when Remote Control is
+# connected, while every scheduler-spawned session here is deliberately unbridged
+# (the sibling rule of 2026-08-15; dropping the flag alone is a no-op, because the
+# flag and the global setting are peers in one ||). So the construction everyone
+# reaches for first, a cron-spawned sibling that pushes, is precisely the one that
+# fails silently. A session that is ALREADY bridged and already running is the
+# only lane that works without moving an autonomy line.
+#
+# THIS IS NOT THE NAVIGATOR'S WAKE. That channel was built with no path to him on
+# purpose and stays that way. This one carries exactly two event classes and one
+# morning line, and nothing else may be added to it without the same argument
+# being made again.
+#
+# UNVERIFIED END TO END. Nobody has seen this reach a phone. PushNotification
+# deliberately declines when he is at the terminal and reports that it skipped, so
+# a success return proves nothing at all. The only evidence that counts is
+# @jwildfire saying the phone buzzed, on a run he did not start.
+set -uo pipefail
+
+WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+LOG="${OBOT_PUSH_LOG:-$WS/.claude/fold/push.jsonl}"
+BEAT="${OBOT_PUSH_BEAT:-$WS/.claude/fold/push.listener}"
+BEAT_SECONDS="${OBOT_PUSH_BEAT_SECONDS:-20}"
+
+mkdir -p "$(dirname "$LOG")" "$(dirname "$BEAT")"
+[ -f "$LOG" ] || : > "$LOG"
+
+# One beat before anything else, so the next fold sees an armed lane rather than
+# recording that nobody was listening up to twenty seconds too early.
+date -u +%FT%TZ > "$BEAT"
+
+# -n0: start at the end. Replaying the log on every session start would deliver a
+# burst of pushes for mornings already read, which is the single fastest way to
+# teach him to ignore this lane.
+tail -n0 -F "$LOG" 2>/dev/null | while IFS= read -r line; do
+  text="$(printf '%s' "$line" | sed -n 's/.*"text":"\([^"]*\)".*/\1/p')"
+  [ -n "$text" ] && printf 'PUSH %s\n' "$text"
+done &
+TAIL=$!
+trap 'kill "$TAIL" 2>/dev/null' EXIT INT TERM
+
+echo "push lane armed — tailing $LOG (heartbeat $BEAT, every ${BEAT_SECONDS}s). A PUSH line means: call PushNotification with the text after it."
+
+while kill -0 "$TAIL" 2>/dev/null; do
+  date -u +%FT%TZ > "$BEAT"
+  sleep "$BEAT_SECONDS"
+done
+
+echo "push lane CLOSED — the tail died; nothing is reaching @jwildfire"
