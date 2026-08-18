@@ -66,7 +66,11 @@ One queue, three sources:
   read is decided per request — see [What the page is made of](#what-the-page-is-made-of).
 - **Config** — the workspace list at `<workspace>/.claude/blockers.md` and nowhere
   else. **Headlines only**: an item's body describes exactly which control stopped an
-  agent, and there is no reason to render that on a queue row.
+  agent, and there is no reason to render that on a queue row. Most items are captured
+  by hand with `tools/blocker-log`; one class raises itself. A pull request touching a
+  guardrail path is unmergeable by every agent, so `tools/carveout-route` reads
+  `obot-merge --check` on the five-minute sweep and files the item — once per pull
+  request, matched on the pull request rather than the headline (obot.agent#264).
 
 In that order, his (2026-08-15): "RCs first. then decisions, then config items."
 

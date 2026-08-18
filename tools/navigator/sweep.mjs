@@ -75,6 +75,13 @@ import { collectLocal, localSection } from './localwatch.mjs'
 // list and the decision artifacts — and until now nothing re-checked either after the
 // day it was written. One mechanism, because #266 asked for one by name.
 import { readCurrency } from './currency.mjs'
+// Carve-out routing (obot.agent#264, under jwildfire/obot.roadmap#220). A pull request
+// touching a guardrail path can be merged by nobody but @jwildfire, so it belongs in
+// the config bucket — the only one of his three that means "his hands". Nothing put it
+// there until now, and the admiral escalated one every cycle to an audience that could
+// do nothing about it. Only the broken-section wording is imported here; the decision
+// and the write both live in tools/carveout-route.
+import { routingBroken } from './carveout.mjs'
 // The wake (hub#212). The sweep already knew a worker had stopped; what it could not
 // do was get the Navigator's attention, so workers stopped and then waited — twenty
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
@@ -190,7 +197,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null, local = null, identity = null, currency = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -245,6 +252,11 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // because reading one without the other is how six stalled sessions and seven open
   // pull requests stayed visible for two days without anything moving.
   if (admiral && admiral.trim()) lines.push(admiral.trimEnd(), '')
+  // And directly beneath the admiral, the route it now defers to (obot.agent#264).
+  // They belong together: this section is the reason a carve-out pull request stopped
+  // appearing in the one above, and reading the silence without the explanation is
+  // how a working suppression gets mistaken for a broken detector.
+  if (carveout && carveout.trim()) lines.push(carveout.trimEnd(), '')
 
   // And directly under the pair: what code produced any of this. It sits third rather
   // than first because the wake is about somebody waiting and this is about the
@@ -410,6 +422,29 @@ const auditDelivery = () => shellAudit('delivery-log')
  * and returns. Everything the admiral then does is the admiral's, under its own
  * skill contract and its own time budget.
  */
+/**
+ * Carve-out routing (obot.agent#264, under jwildfire/obot.roadmap#220).
+ *
+ * Shelled like the ledger audits and the admiral launcher, and for the same reason:
+ * the tool that owns the decision also owns the writing, so what this file renders
+ * and what was actually filed can never disagree. It bounds its own work — a short
+ * age bar and a per-run ceiling on `obot-merge --check` calls — so the five-minute
+ * cadence is never at the mercy of how many pull requests happen to be open.
+ */
+function runCarveout() {
+  const r = spawnSync(join(REPO_ROOT, 'tools', 'carveout-route'), [], {
+    env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 120000,
+  })
+  if (r.error || r.status === null) {
+    return routingBroken(`the router did not run (${r.error ? String(r.error.message).slice(0, 120) : 'killed'})`)
+  }
+  // The router prints a section on every completed run, so empty output is a run that
+  // did not complete — never a quiet pass. Returning null here would drop the section
+  // off the page entirely, and this is the one spot on it where a carve-out pull
+  // request is supposed to appear.
+  return (r.stdout || '').trim() || routingBroken(`the router printed nothing (exit ${r.status})`)
+}
+
 function runAdmiral() {
   const r = spawnSync(join(REPO_ROOT, 'scripts', 'obot-admiral'), [], {
     env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 120000,
@@ -709,6 +744,10 @@ const safeAdmiral = () => {
     return `## Admiral — triggered, acts and exits\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
   }
 }
+
+const safeCarveout = () => {
+  try { return runCarveout() } catch (e) { return routingBroken(String(e.message)) }
+}
 // A broken wake must not break the sweep, and must not fail quietly either: the
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
@@ -752,7 +791,7 @@ async function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), identity: null, currency: await safeCurrency() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -863,10 +902,14 @@ async function main() {
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
   // The admiral trigger runs last of the readings, after the wake, because an admiral
   // it launches will read the state file this run is about to write.
+  // Routing runs BEFORE the admiral, and the order is load-bearing: a config item
+  // raised this pass is what stops the admiral escalating the same pull request in
+  // the same pass, rather than five minutes later.
+  const carveout = safeCarveout()
   const admiral = safeAdmiral()
   const local = safeLocal(repos)
   const currency = await safeCurrency()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate, local, identity, currency }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
