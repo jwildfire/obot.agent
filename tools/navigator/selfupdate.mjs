@@ -384,7 +384,7 @@ export function restartDashboard({ root, workspace, port = DASHBOARD_PORT, pid, 
     // lands on 7327 is a dashboard nobody can find and a serve marker nobody holds,
     // and it would report as a success here. Better it refuses to start and says so.
     child = spawnFn(process.execPath, [script, '--serve', '--exclusive', '--workspace', workspace], {
-      detached: true, stdio: ['ignore', out, out], cwd: workspace,
+      detached: true, stdio: ['ignore', out, out], cwd: workspace, env: restartEnv(),
     })
     child.unref?.()
   } catch (e) {
@@ -530,6 +530,30 @@ export function writeRecord(workspace, record) {
 }
 
 const openSyncAppend = (file) => openSync(file, 'a')
+
+/**
+ * The environment a replacement is started with.
+ *
+ * The restarter runs under launchd, whose `PATH` is three entries long, while the
+ * dashboard it replaces was started from a shell with fifteen. A replacement that is
+ * quietly less capable than what it replaced is this requirement's own failure wearing
+ * a different hat: the page would render perfectly and its release-candidate refresh
+ * would fail, because `gh` was no longer on the path — and nothing about the page would
+ * look any different. On this machine `gh` happens to sit in a directory launchd does
+ * carry, which is luck rather than a design, and luck is not what should be holding
+ * his dashboard together while he is away.
+ *
+ * Appended rather than prepended: the caller's own resolution order wins, and this only
+ * adds places to look.
+ */
+export function restartEnv(env = process.env) {
+  const extra = ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin',
+                 env.HOME ? join(env.HOME, '.local/bin') : null, '/usr/bin', '/bin', '/usr/sbin', '/sbin']
+  const seen = new Set()
+  const parts = [...String(env.PATH ?? '').split(':'), ...extra]
+    .filter((d) => d && !seen.has(d) && (seen.add(d), true))
+  return { ...env, PATH: parts.join(':') }
+}
 
 /** Minutes, in the vocabulary the rest of the file already uses. */
 const ageWords = (ms) => {

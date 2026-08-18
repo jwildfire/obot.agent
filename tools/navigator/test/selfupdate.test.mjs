@@ -17,7 +17,8 @@ import { execFileSync } from 'node:child_process'
 
 import {
   CONSUMER_POLICY, QUIET_MS, buildStamp, fastForward, lastLookMs, planFastForward,
-  planRestart, readCheckout, recordPath, renderSelfUpdate, restartDashboard, selfUpdate,
+  planRestart, readCheckout, recordPath, renderSelfUpdate, restartDashboard, restartEnv,
+  selfUpdate,
 } from '../selfupdate.mjs'
 import { parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
 
@@ -323,4 +324,31 @@ test('the sessions that are never restarted are named on the page, not left impl
   assert.match(out, /never restarted:/)
   assert.match(out, /conversation/)
   assert.ok(CONSUMER_POLICY.never.length, 'the tier must exist as data, so the page and the code cannot drift')
+})
+
+test('a replacement is not quietly less capable than what it replaced', () => {
+  // launchd gives the sweep a three-entry PATH; the dashboard it restarts was started
+  // from a shell. A page that renders while its `gh` refresh fails looks exactly like
+  // a page that is fine, which is this requirement's own failure in a different hat.
+  const env = restartEnv({ PATH: '/nvm/bin:/usr/bin:/bin', HOME: '/Users/t' })
+  const parts = env.PATH.split(':')
+  assert.equal(parts[0], '/nvm/bin', "the caller's own resolution order must still win")
+  for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', '/Users/t/.local/bin']) {
+    assert.ok(parts.includes(dir), `${dir} must be reachable from a restarted dashboard`)
+  }
+  assert.equal(new Set(parts).size, parts.length, 'a PATH that grows a duplicate every restart is a leak')
+})
+
+test('the replacement is started with that environment, not the sweep bare', () => {
+  const root = tmp()
+  fs.mkdirSync(path.join(root, 'tools', 'ops-dashboard'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'tools', 'ops-dashboard', 'ops-dashboard.mjs'), '// present\n')
+  let opts = null
+  restartDashboard({
+    root, workspace: '/ws', pid: null, isAlive: () => false, sleep: () => {}, waitMs: 500,
+    spawnFn: (_cmd, _args, o) => { opts = o; return { pid: 7, unref: () => {} } },
+    probe: () => ({ status: 200, body: '{}' }),
+  })
+  assert.ok(opts?.env?.PATH, 'the spawn must carry an explicit PATH')
+  assert.ok(opts.env.PATH.includes('/usr/bin'))
 })
