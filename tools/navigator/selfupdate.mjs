@@ -300,9 +300,16 @@ export function planRestart({ marker, health: h, headSha, lastLookMs: lookMs, qu
     return out('skip', 'other-port', `the marked server is on port ${marker.port}, not the dashboard port ${port} — left alone`)
   }
   if (marker.state === 'stale') {
-    // It advertised itself and then stopped. Starting it again is the only reason a
-    // failed restart is survivable while he is away: without this, one bad restart is
-    // two days with no dashboard, and with it the gap is one sweep.
+    // It advertised itself and then died without releasing. Starting it again is the
+    // only reason a failed restart is survivable while he is away: without this, one
+    // bad restart is two days with no dashboard, and with it the gap is one sweep.
+    //
+    // And it cannot resurrect a server he stopped on purpose, which is the thing that
+    // would make it obnoxious. A SIGTERM — what `pkill -f 'ops-dashboard.mjs --serve'`
+    // sends, the command the page itself prints — runs the marker's release hook, so a
+    // deliberate stop leaves no marker and reads as `none` above. Only a crash leaves
+    // one behind. The two cases were never distinguished on purpose; they are
+    // distinguished because the marker already had exactly the right shape.
     return out('start', 'stale-marker', `the dashboard advertised port ${marker.port} and its process (pid ${marker.pid}) is gone — starting it again`)
   }
   if (h && h.code && headSha && h.code.sha === headSha) {
