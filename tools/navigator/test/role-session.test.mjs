@@ -107,3 +107,36 @@ test('roleOfSession reads a row label as readily as a job name', () => {
   assert.equal(roleOfSession({ label: ADMIRAL_NAME, cwd: WS }, { workspace: WS })?.short, 'admiral')
   assert.equal(roleOfSession({ label: ADMIRAL_NAME, cwd: '/tmp/x' }, { workspace: WS }), null)
 })
+
+// ---- the detectors, over the same records -----------------------------------
+
+test('a foreign role session fires no condition, from either side of the trigger', async () => {
+  // The hole the first draft of this guard left, and it is worth a test of its own
+  // because the two paths look like one. `stalledSessions` skips a job when it IS the
+  // admiral — so a session that is NOT the admiral stops being skipped there and
+  // falls through to `classify`, which asks a second time whether the job is a
+  // budgeted role. Answer the question in one place and not the other and the same
+  // fixture comes straight back as a stalled session.
+  const { stalledSessions, triggers } = await import('../admiral.mjs')
+  const old = new Date(Date.now() - 20 * 60 * 60000).toISOString()
+  const jobs = [{
+    id: '1cc6cc32', name: ADMIRAL_NAME, state: 'working', tempo: 'blocked',
+    needs: 'open this session to continue setup', updatedAt: old, firstTerminalAt: null,
+    cwd: '/var/folders/_9/T/fleetws-skwFFQ',
+  }]
+  assert.deepEqual(stalledSessions(jobs, { workspace: WS }), [])
+  assert.equal(triggers({ jobs, workspace: WS }).fired, false)
+  // And the same record in the workspace is still skipped as the admiral it is —
+  // the guard must not turn into a way to make a real admiral into a stalled worker.
+  assert.deepEqual(stalledSessions([{ ...jobs[0], cwd: WS }], { workspace: WS }), [])
+})
+
+test('only a LIVE foreign session is reported — history is the Agents tab\'s job', async () => {
+  const { foreignRoleSessions } = await import('../admiral.mjs')
+  const jobs = [
+    { id: 'live1', name: ADMIRAL_NAME, state: 'working', cwd: '/tmp/ws-a' },
+    { id: 'gone1', name: ADMIRAL_NAME, state: 'stopped', cwd: '/tmp/ws-b' },
+    { id: 'gone2', name: ADMIRAL_NAME, state: 'done', cwd: '/tmp/ws-c' },
+  ]
+  assert.deepEqual(foreignRoleSessions(jobs, { workspace: WS }).map((j) => j.id), ['live1'])
+})

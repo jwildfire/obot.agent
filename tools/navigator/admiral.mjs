@@ -88,7 +88,12 @@ export const isAdmiral = (job, { workspace } = {}) =>
  * says where they actually ran.
  */
 export function foreignRoleSessions(jobs = [], { workspace } = {}) {
-  return jobs.filter((j) => isForeignRole(j, { workspace }))
+  // LIVE ones only, and that bound is the difference between a finding and a
+  // permanent line. A terminal session holds no singleton, breaches no budget and
+  // reaches no wake — it is history, and the Agents tab is where history is read.
+  // Unbounded, this would name every fixture the machine had ever spawned, on every
+  // sweep, for as long as the job ledger keeps them.
+  return jobs.filter((j) => isForeignRole(j, { workspace }) && isLive(j))
 }
 
 /**
@@ -224,7 +229,12 @@ export function stalledSessions(jobs = [], { now = new Date(), hostWasAway: away
   const out = []
   for (const job of jobs) {
     if (isAdmiral(job, { workspace })) continue // it never acts on itself, or on its successor
-    for (const d of classify(job, now)) {
+    // The workspace goes to `classify` too, and leaving it out was a real hole in the
+    // first draft of this guard: a session wearing a role's name is no longer skipped
+    // by the line above — it is not the admiral — so without it here the same fixture
+    // came back through `classify` as a budgeted role and fired the trigger from the
+    // other side of the same function.
+    for (const d of classify(job, now, { workspace })) {
       if (!(d.kind in ACT_MIN)) continue
       const mins = minsSince(d.at, now)
       if (mins === null || mins < ACT_MIN[d.kind]) continue
@@ -570,9 +580,14 @@ export function admiralSection({ trigger = null, decision = null, overruns = [],
   // the wake stopped counting, and a suppression nobody can see is the same defect
   // as the rows it suppressed (obot.agent#188).
   if (foreign.length) {
+    // The last path segment, not the whole path. A system temp directory is fifty
+    // characters of machine noise and one word that identifies the run, and this
+    // line lands on a phone screen — the full path pushes the word that answers the
+    // question off the end of it.
+    const where = (j) => (j.cwd ? `…/${String(j.cwd).split('/').filter(Boolean).pop()}` : 'an unnamed directory')
     lines.push(`not this workspace: ${foreign.length} session(s) carrying a role's name ran elsewhere — ` +
                `ignored by the singleton, the budget and the wake · ` +
-               foreign.slice(0, 3).map((j) => `${j.id} in ${clip(j.cwd, 70)}`).join(' · ') +
+               foreign.slice(0, 3).map((j) => `${j.id} in ${where(j)}`).join(' · ') +
                (foreign.length > 3 ? ` · …and ${foreign.length - 3} more` : ''))
   }
 
