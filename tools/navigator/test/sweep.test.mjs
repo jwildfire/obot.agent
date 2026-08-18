@@ -174,6 +174,27 @@ test('renderState: a gap is shouted, and brings its explanation with it', () => 
   assert.match(md, /A resolved entry MOVES to ## Resolved/)
 })
 
+test('renderState: an absent commit-identity scan reads as unread, never as clean', () => {
+  // Same rule as the ledgers, for the same reason. A wrong bot id renders the RIGHT
+  // name in `git log` and in the GitHub UI, so this section is the only surface the
+  // failure is visible on — a silently missing one is worse here than anywhere else
+  // (obot.agent#241, under jwildfire/obot.roadmap#260).
+  const md = renderState({ snapshot: {}, events: [], meta })
+  assert.match(md, /## Commit identity/)
+  assert.match(md, /COMMIT IDENTITY READING BROKEN/)
+  assert.doesNotMatch(md, /Commit identity: clean/)
+})
+
+test('renderState: the commit-identity section is rendered whole, above the RC queue', () => {
+  const md = renderState({
+    snapshot: {}, events: [], meta,
+    identity: '## Commit identity — agent commits wearing the wrong name\n\n**COMMIT IDENTITY FINDING** obot.roadmap: 2 of 40 commits\n',
+  })
+  assert.match(md, /\*\*COMMIT IDENTITY FINDING\*\* obot\.roadmap: 2 of 40 commits/)
+  // It is a reading of this machine, like the checkout stamp — not part of his queue.
+  assert.ok(md.indexOf('## Commit identity') < md.indexOf('## RC queue'))
+})
+
 test('renderState: no reading says so rather than rendering nothing or a false all-clear', () => {
   const md = renderState({ snapshot: {}, events: [], meta })
   // Rendering nothing avoided the false all-clear and created a worse one: the
@@ -372,5 +393,10 @@ test('EVERY renderState call site passes admiral — including the policy-failur
     const args = call.slice(0, call.indexOf('}'))
     assert.match(args, /\badmiral\b/, `renderState call site ${i + 1} does not pass admiral`)
     assert.match(args, /\bwake\b/, `renderState call site ${i + 1} does not pass wake`)
+    // Same guard, same reason: a call site that forgets `identity` renders a page with
+    // no attribution section and no error (obot.agent#241). The policy-failure site
+    // passes it explicitly as null — which renders the BROKEN verdict, the honest one,
+    // since that path has no repo list to scan.
+    assert.match(args, /\bidentity\b/, `renderState call site ${i + 1} does not pass identity`)
   }
 })
