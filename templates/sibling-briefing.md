@@ -161,7 +161,9 @@ obot.agent/scripts/obot-policy explain jwildfire/{repo}
   page telling him something false for a day and a half.
 - **Run the wrapper undecorated, as a single command** — the allowlist matches
   `obot.agent/scripts/obot-merge …` whole. Swap `--squash` for `--check` to dry-run the
-  policy and milestone gates first, which merges nothing:
+  policy and milestone gates first, which merges nothing. That relative spelling only
+  resolves from the workspace root; from inside a repo it is `no such file or directory`,
+  and the absolute path is allowlisted too:
 
 ```bash
 obot.agent/scripts/obot-merge {pr#} -R jwildfire/{repo} --squash --delete-branch
@@ -203,7 +205,9 @@ GH_TOKEN=$T gh issue comment {n} -R jwildfire/{repo} --body-file {absolute path}
   separately — splitting on `|`, `&&`, `||`, `;` and newline — so a prefix admits the
   segment it heads and nothing after it. The second half of `GH_TOKEN=$T gh … && gh …`
   is denied, and `export GH_TOKEN=…` on its own line covers nothing at all. One write
-  per Bash call always satisfies it.
+  per Bash call always satisfies it — and it also steps around obot.agent#234, where a
+  bare `gh api graphql` read is denied for a mutation written correctly *elsewhere in the
+  same call*, so the segment the guard names is not the one to fix.
 - **Board writes fail for everyone right now** (obot.roadmap#252). The obotclaw App gets
   `FORBIDDEN` on a user-owned ProjectsV2 board, and the only credential that does work is
   the one the guard exists to deny. When your task issue is therefore off the board, say

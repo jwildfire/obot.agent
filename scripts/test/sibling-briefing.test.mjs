@@ -54,6 +54,10 @@ const RULES = [
     what: 'board writes fail for everyone, so the omission is recorded rather than silent',
     needs: [/obot\.roadmap#252/],
   },
+  {
+    what: 'the two spellings that read as a broken tool rather than as a shape you chose',
+    needs: [/no such file or directory/, /obot\.agent#234/],
+  },
 ];
 
 for (const { what, needs } of RULES) {
