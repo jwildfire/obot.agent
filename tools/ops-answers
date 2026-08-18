@@ -12,10 +12,17 @@
 //   superseded he answered again; the record is kept, not deleted
 //
 // Usage (from the workspace root):
-//   node obot.agent/tools/ops-answers pending [--json] [--exit-code]
-//   node obot.agent/tools/ops-answers deliver            # what the sweep calls
-//   node obot.agent/tools/ops-answers apply <id> --evidence <url> [--by <who>]
-//   node obot.agent/tools/ops-answers show <id>
+//   obot.agent/tools/ops-answers pending [--json] [--exit-code]
+//   obot.agent/tools/ops-answers deliver            # what the sweep calls
+//   obot.agent/tools/ops-answers apply <id> --evidence <url> [--by <who>]
+//   obot.agent/tools/ops-answers show <id>
+//
+// Run it as the bare path, from the workspace root. It is executable and carries its
+// own `node` shebang, so a `bash ` prefix cannot work — and the habit of adding one
+// is what broke `obot-merge` for two days (obot.agent#162, #180).
+//
+// <id> is anything this tool prints for an answer: the decision id (`D0014`), the
+// artifact slug, or the record id. All three resolve.
 //
 //   OBOT_WORKSPACE  workspace root (default ~/Documents/obot2)
 //   OBOT_HUB        obot.roadmap clone (default <workspace>/obot.roadmap)
@@ -29,7 +36,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
-  readAnswers, currentAnswers, pendingAnswers, deliverAnswers, markApplied,
+  currentAnswers, pendingAnswers, deliverAnswers, markApplied, resolveAnswerRef,
   answersSection, ageMin, ago, OVERDUE_MIN,
 } from './ops-dashboard/lib/answers.mjs';
 
@@ -73,7 +80,7 @@ function main() {
     } else if (!items.length) {
       process.stdout.write('nothing pending — every answer he has recorded has been applied.\n');
     } else {
-      process.stdout.write(`${items.length} answer(s) he has recorded and nobody has applied:\n\n${items.map(line).join('\n\n')}\n\nApply one, then: ops-answers apply <id> --evidence <url> --by <who>\n`);
+      process.stdout.write(`${items.length} answer(s) he has recorded and nobody has applied:\n\n${items.map(line).join('\n\n')}\n\nApply one, then: ops-answers apply <id> --evidence <url> --by <who>\n  <id> is any id above — the decision id on the first line, the slug, or the record id.\n`);
     }
     if (flag('--exit-code')) {
       const overdue = items.some((a) => ageMin(a.at) > OVERDUE_MIN);
@@ -92,22 +99,46 @@ function main() {
 
   if (cmd === 'section') { process.stdout.write(answersSection(pendingAnswers(WS, { hub: HUB }))); return; }
 
+  // `apply` takes whatever `pending` printed. It used to take the record key alone,
+  // which `pending` never shows, so the documented way to clear an OVERDUE flag
+  // answered the displayed id with "no answer D0014" (obot.agent#180).
   if (cmd === 'apply') {
     const id = positional[0];
     const evidence = value('--evidence');
     if (!id || !evidence) {
       process.stderr.write('usage: ops-answers apply <id> --evidence <url> [--by <who>]\n'
+        + '<id> is anything this tool prints for the answer: the decision id (D0014), the\n'
+        + 'artifact slug, or the record id.\n'
         + 'evidence is required: "applied" means the artifact changed and here is where to see it.\n');
       process.exit(2);
     }
-    const rec = markApplied(WS, id, { by: value('--by') ?? 'an agent', evidence });
+    const found = resolveAnswerRef(WS, id, { hub: HUB });
+    if (!found.record) {
+      // Ambiguity is said out loud with its candidates. Denying the answer exists is
+      // what taught a reader to stop believing the flag.
+      process.stderr.write(`${found.reason}\n`);
+      for (const a of found.candidates) {
+        process.stderr.write(`  ${a.id}  ${a.decisionId ?? a.artifact ?? ''}  [${a.status}]\n`);
+      }
+      process.exit(1);
+    }
+    if (found.alreadyApplied) {
+      process.stdout.write(`already applied ${(found.record.appliedAt || '').slice(0, 16).replace('T', ' ')}`
+        + ` by ${found.record.appliedBy ?? 'someone'} — ${found.record.evidence ?? 'no evidence recorded'}\n`
+        + 're-stamping with the evidence you gave; the earlier stamp stays in its history.\n');
+    }
+    const rec = markApplied(WS, id, { by: value('--by') ?? 'an agent', evidence, hub: HUB });
     process.stdout.write(`${rec.decisionId ?? rec.artifact} applied — ${evidence}\n`);
     return;
   }
 
   if (cmd === 'show') {
-    const rec = readAnswers(WS, { hub: HUB }).find((a) => a.id === positional[0] || a.decisionId === positional[0]);
-    if (!rec) { process.stderr.write(`no answer ${positional[0]}\n`); process.exit(1); }
+    const found = resolveAnswerRef(WS, positional[0], { hub: HUB });
+    const rec = found.record ?? found.candidates[0];
+    if (!rec) { process.stderr.write(`${found.reason}\n`); process.exit(1); }
+    if (found.candidates.length > 1) {
+      process.stderr.write(`${found.reason} — showing the newest\n`);
+    }
     process.stdout.write(`${JSON.stringify(rec, null, 2)}\n`);
     return;
   }

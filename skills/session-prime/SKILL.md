@@ -259,7 +259,7 @@ for flavor, the bundle for facts.**
 
 - On the **first post-compaction turn that touches state** — or whenever
   unsure the working set is grounded — run exactly one bounded read:
-  `bash obot.agent/tools/prime-rehydrate` (every source optional, always
+  `obot.agent/tools/prime-rehydrate` (every source optional, always
   exits 0; the log section is byte-bounded and says when it truncates).
   Pure-lookup turns (conventions, where-does-X-live) skip it.
 - Relaunches pay zero round trips:

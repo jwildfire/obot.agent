@@ -9,9 +9,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  DEATH, IDLE_MIN, MAX_WAKES_PER_RUN, REWAKE_MIN, STALL_MIN, WAKE_WINDOW_HOURS,
-  classify, deliverable, hostWasAway, idleDetection, judgedWorkers, listenerState,
-  outsideWindow, parseWakeLog, pending, verdictKeys, wakeLine, wakeSection, workerIdOf,
+  DEATH, IDLE_MIN, MAX_WAKES_PER_RUN, REWAKE_MIN, STALL_MIN, TRIGGERED_QUIET_MIN,
+  WAKE_WINDOW_HOURS, classify, deliverable, hostWasAway, idleDetection, judgedWorkers,
+  listenerState, outsideWindow, parseWakeLog, pending, verdictKeys, wakeLine,
+  wakeSection, workerIdOf,
 } from '../wake.mjs'
 
 const NOW = new Date('2026-08-17T06:00:00Z')
@@ -69,6 +70,99 @@ test('one job can be in two stop-states at once, and both are real', () => {
     firstTerminalAt: agoMin(180), updatedAt: agoMin(90) }), NOW)
   assert.deepEqual(d.map((x) => x.kind).sort(), ['stopped', 'waiting'])
   assert.notEqual(d[0].key, d[1].key) // different keys → each wakes once, on its own floor
+})
+
+// ---- the roles that must exit, and the ones that may rest (obot.agent#181) ----
+//
+// Transcribed from job 64a7980b on this machine, exactly as the harness left it:
+// launched 12:46:08Z on 2026-08-17, one timeline event at 13:51:32Z reading
+// `state: blocked` with `API Error: Unable to connect to API: SSL certificate
+// hostname mismatch`, and nothing after it until a person stopped it at 00:03:43Z
+// the next day. Ten hours and twelve minutes, on a detector that already knew that
+// shape by heart — it was simply never asked about this session.
+
+const manager = (over = {}) => ({
+  id: '64a7980b', name: '\u{1F6A6}\u{1F916} obot-fleet', state: 'blocked', tempo: 'idle',
+  detail: 'API Error: Unable to connect to API: SSL certificate hostname mismatch',
+  needs: null, updatedAt: agoMin(1), firstTerminalAt: null, ...over,
+})
+
+const standing = (tag, over = {}) => ({
+  id: 'std1', name: `${tag} obot-role`, state: 'blocked', tempo: 'idle', detail: 'idle',
+  needs: null, updatedAt: agoMin(612), firstTerminalAt: null, ...over,
+})
+
+test('a blocked fleet manager is dead, and reads as dead on the first sweep that sees it', () => {
+  const d = classify(manager({ updatedAt: agoMin(5) }), NOW)
+  assert.deepEqual(d.map((x) => x.kind), ['dead'])
+  assert.match(d[0].line, /^fleet died/, 'named by its role — it has no worker id and never will')
+  assert.match(d[0].line, /SSL certificate hostname mismatch/)
+})
+
+test('the ten hours it actually sat there produce one detection, not silence', () => {
+  const d = classify(manager({ updatedAt: agoMin(612) }), NOW)
+  assert.equal(d.length, 1)
+  assert.equal(d[0].kind, 'dead')
+  assert.equal(d[0].key, 'dead:64a7980b')
+})
+
+test('a manager wedged with a message nobody has a pattern for is still not silent', () => {
+  // The `dead` list is signatures taken from records that have already happened. A
+  // wedge carrying a new message must not be invisible because it is new.
+  const unknown = manager({ detail: 'waiting on something nobody has written a pattern for yet' })
+  assert.deepEqual(classify({ ...unknown, updatedAt: agoMin(TRIGGERED_QUIET_MIN - 1) }, NOW), [],
+    'inside its budget it is simply working')
+  const d = classify({ ...unknown, updatedAt: agoMin(TRIGGERED_QUIET_MIN + 1) }, NOW)
+  assert.deepEqual(d.map((x) => x.kind), ['wedged'])
+  assert.match(d[0].line, /will not exit on its own/)
+  assert.ok(REWAKE_MIN.wedged, 'and it has a re-wake floor like every other kind')
+})
+
+test('a manager that exited cleanly is the design working, not a closeout to judge', () => {
+  // Its whole point is that it ends. Asking for a verdict on every exit would put a
+  // standing nag behind a triggered role.
+  for (const state of ['done', 'stopped', 'failed']) {
+    assert.deepEqual(classify(manager({ state, detail: 'acted and exited', firstTerminalAt: agoMin(5) }), NOW), [],
+      `a ${state} manager carries no deliverable of its own`)
+  }
+})
+
+test('a manager waiting on a human says what it is waiting for', () => {
+  const d = classify(manager({ detail: 'awaiting approval', needs: 'approve Bash: obot-merge 158', updatedAt: agoMin(11) }), NOW)
+  assert.deepEqual(d.map((x) => x.kind), ['waiting'])
+  assert.match(d[0].line, /approve Bash/)
+})
+
+test('the exclusion that was correct still holds: a resting role is never a corpse', () => {
+  // The reason the exclusion existed, and it has not changed — prime and the
+  // Navigator wait between wakings, so blocked is their ordinary state.
+  for (const tag of ['\u{1F3A9}\u{1F916}', '\u{1F9ED}\u{1F916}']) {
+    assert.deepEqual(classify(standing(tag), NOW), [], `${tag} blocked and quiet ten hours is resting`)
+    assert.deepEqual(classify(standing(tag, { state: 'done', firstTerminalAt: agoMin(30) }), NOW), [],
+      `${tag} finishing a turn is not a closeout awaiting judgement`)
+    assert.deepEqual(classify(standing(tag, { detail: 'API Error: Connection refused' }), NOW), [],
+      `${tag} is not judged even on a death signature — that stays out of scope`)
+  }
+})
+
+test('one reading per job: a wedge is never stacked on top of a diagnosis', () => {
+  const d = classify(manager({ updatedAt: agoMin(612) }), NOW)
+  assert.equal(d.filter((x) => x.kind === 'wedged').length, 0)
+})
+
+test('a suspended host suppresses the elapsed-time reading for a manager too', () => {
+  const unknown = manager({ detail: 'no signature here', updatedAt: agoMin(612) })
+  assert.deepEqual(classify(unknown, NOW, { hostWasAway: true }), [],
+    'a detector cannot run on a sleeping host, so elapsed time proves nothing')
+})
+
+test('the whole fleet at once: the manager is seen, the standing roles are not', () => {
+  const found = pending([
+    manager({ updatedAt: agoMin(612) }),
+    standing('\u{1F3A9}\u{1F916}', { id: 'p1' }),
+    standing('\u{1F9ED}\u{1F916}', { id: 'n1' }),
+  ], { now: NOW })
+  assert.deepEqual(found.map((d) => d.key), ['dead:64a7980b'])
 })
 
 // ---- suppression: the delivery record is the ledger, not new state ----------

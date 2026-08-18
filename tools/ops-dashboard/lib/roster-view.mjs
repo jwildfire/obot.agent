@@ -37,6 +37,7 @@
 // has no deliverable to judge, so it is shown apart rather than ranked as if it had
 // produced nothing. Grouping on the id would have buried ten real workers, which is
 // the same failure in the other direction.
+import { PINNED_ROLES } from '../../lib/roles.mjs';
 import { esc } from './esc.mjs';
 import { WORKER_TAGS, PRICE_NOTE, ID_NOTE, DEAD_SHOWN, emptyRoster } from './roster.mjs';
 
@@ -51,51 +52,25 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /**
  * The standing roles — the agents that are a ROLE rather than a piece of work.
  *
- * One registry, and the only place a standing role is declared. Everything that has
- * to know what a standing role is reads it from here: the kind a row is judged by,
- * the Kind filter, and which rows the Agents tab pins by default
- * (jwildfire/obot.agent#169). Declaring a fourth role is adding a line here, and it
- * then arrives pinned without anyone remembering to pin it — which is the whole
- * reason this is a registry and not three names spread across three modules.
+ * This list answers ONE question: which rows the Agents tab treats as a role — how
+ * they group, and which ones it pins by default (jwildfire/obot.agent#169). It is
+ * the whole registry on purpose, so a fourth role arrives pinned without anyone
+ * remembering to pin it.
+ *
+ * IT IS NOT THE LIVENESS ANSWER, and it must never be used as one. Fleet is on this
+ * list — @jwildfire asked for it pinned beside prime and the Navigator — and it is
+ * NOT a session for which stopping is the resting state: it is triggered, budgeted,
+ * and a blocked one is dead. Reading pinning as liveness is exactly how a fleet
+ * manager sat blocked for ten hours with nothing looking (obot.agent#181). The
+ * liveness question is `restsWhenIdle` / `mustExit` in tools/lib/roles.mjs, off the
+ * `lifecycle` each role declares in the same registry.
  *
  * Keyed by TAG, because the tag is the one thing every session of a role shares: a
  * role's session name can change, and prime has been restarted more often than
  * anything else on the machine. Named by their own tags rather than by "has no
  * worker id", for the reason in the header.
  */
-export const STANDING_ROLES = [
-  {
-    tag: '\u{1F3A9}\u{1F916}',
-    name: '\u{1F3A9}\u{1F916} obot-prime',
-    short: 'prime',
-    role: 'the concierge',
-    resting: 'no concierge session on this machine — nothing is answering questions',
-  },
-  {
-    tag: '\u{1F9ED}\u{1F916}',
-    name: '\u{1F9ED}\u{1F916} obot-navigator',
-    short: 'nav',
-    role: 'the operating officer',
-    resting: 'no Navigator session on this machine — nothing is sweeping or judging',
-  },
-  {
-    // The fleet manager (obot.agent#167). Short-lived by design: it launches when a
-    // condition fires and exits, so absent is its ordinary state — which is exactly
-    // why it needs a row that says so rather than a gap. The tag and session name
-    // are `MANAGER_TAG` / `MANAGER_NAME` in tools/navigator/fleet.mjs; the guard in
-    // test/pins.test.mjs holds the two in step once that module lands, rather than
-    // importing across tools and coupling the dashboard to the launcher.
-    tag: '\u{1F6A6}\u{1F916}',
-    name: '\u{1F6A6}\u{1F916} obot-fleet',
-    short: 'fleet',
-    role: 'the fleet manager',
-    // 101 characters, and the Agents tab now renders this line as a task tag with a
-    // 100-character ceiling (obot.agent#179) — so it shipped clipped by one word. The
-    // shortened text is 👯🤖 W0038's own, agreed in advance of its rename in #182,
-    // so that rebase carries one line rather than a conflict.
-    resting: 'not running — it launches when a condition fires and exits, so this is its resting state',
-  },
-];
+export const STANDING_ROLES = PINNED_ROLES;
 
 export const STANDING_TAGS = STANDING_ROLES.map((r) => r.tag);
 

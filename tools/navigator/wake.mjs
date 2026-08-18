@@ -31,6 +31,17 @@
 // quiet, and neither is visible in `state`. A worker stuck on a permission prompt
 // reads `working` forever.
 //
+// WHO IS WATCHED. Workers, and any role that must exit inside a budget. Not the
+// roles that rest — prime and the Navigator wait between wakings by design, so
+// `blocked` is their ordinary state, and calling it death every quiet hour would
+// train the reader to ignore the hour it is true.
+//
+// The fleet manager is the second kind and was excluded as if it were the first,
+// because the role registry answered pinning and liveness with one list. It sat
+// blocked from 13:51Z on 2026-08-17 carrying an `API Error` detail this file's own
+// `DEATH` pattern matches on sight, for ten hours, until a person stopped it
+// (obot.agent#181). Nothing here was missing except permission to look.
+//
 // THE WAKE IS NEVER HIS. Everything here reaches 🧭🤖 obot-navigator and nothing
 // reaches @jwildfire — no PushNotification, no issue comment, no Reminder. A worker
 // finishing is precisely the kind of event that should reach an officer and not a
@@ -52,6 +63,11 @@
 // run and the reason is printed. Judging a closeout is not time-since-activity and
 // is unaffected.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
+
+// Which sessions this file is entitled to call dead. The registry declares each
+// role's lifecycle; this file asks the liveness question and never the pinning one
+// (obot.agent#181, tools/lib/roles.mjs).
+import { mustExit, roleOf } from '../lib/roles.mjs'
 
 /** The tags whose sessions are workers. Matches tools/lib/worker_ledger.py. */
 export const WORKER_TAGS = ['\u{1F46F}\u{1F916}', '\u{1F9BE}\u{1F916}'] // 👯🤖 🦾🤖
@@ -79,13 +95,29 @@ export const SUSPEND_GAP_MIN = 15
 export const LISTENER_STALE_MIN = 5
 
 /**
+ * How long a budgeted role may be quiet before quiet itself is the finding.
+ *
+ * A worker going quiet is ambiguous — it may be thinking, and `stalled` needs
+ * `tempo` to disambiguate. A role that must exit inside a thirty-minute budget and
+ * has not moved for thirty minutes is not thinking, whatever its tempo says. This is
+ * the catch-all under the three readings above: the manager that was actually lost
+ * matched `DEATH` and would have been caught by name, but a wedge carrying an
+ * unrecognised message must not be silent purely because nobody has seen that
+ * message yet.
+ *
+ * Held equal to `MANAGER_TTL_MIN` in fleet.mjs by intent rather than by import —
+ * fleet.mjs imports this file, so the dependency cannot run the other way.
+ */
+export const TRIGGERED_QUIET_MIN = 30
+
+/**
  * Per-kind floor between repeat wakes for the same thing.
  *
  * An unjudged closeout keeps nagging, because that is the backlog the whole role
  * exists to clear — it stops when a verdict is recorded, which is the correct
  * silencer. The floors keep that from being a wake every five minutes.
  */
-export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, idle: 45 }
+export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, wedged: 60, idle: 45 }
 
 /** Wakes delivered per run. The overflow is reported, never hidden. */
 export const MAX_WAKES_PER_RUN = 3
@@ -135,7 +167,10 @@ const minsSince = (at, now) => {
   return Number.isNaN(t) ? null : (now.getTime() - t) / 60000
 }
 
-const label = (job) => workerIdOf(job.name) || `job ${job.id}`
+// A role has no worker id and never will, so it is named by the role. `job <id>`
+// alone is what a fleet detection would otherwise read as, which is the least
+// actionable thing a wake can say.
+const label = (job) => workerIdOf(job.name) || roleOf(job.name)?.short || `job ${job.id}`
 
 // A cut sentence must look cut. These lines are notifications: the reader cannot
 // scroll them, so one ending mid-quote reads as a corrupted record rather than a
@@ -152,13 +187,21 @@ const clip = (s, n) => {
  * detections rather than one summarised line.
  */
 export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
-  if (!isWorker(job)) return []
+  // Workers, and roles that must exit inside a budget. A role that RESTS when idle
+  // is skipped — and it is skipped for that reason, never for being on the list of
+  // roles @jwildfire pins, which is the conflation that lost the fleet manager.
+  const budgeted = mustExit(job?.name)
+  if (!isWorker(job) && !budgeted) return []
   const out = []
   const quiet = minsSince(job.updatedAt, now)
   const said = `${job.detail ?? ''} ${job.needs ?? ''}`
   const terminal = ['done', 'stopped', 'failed'].includes(job.state)
 
-  const closedMin = minsSince(job.firstTerminalAt, now)
+  // A budgeted role exiting is it doing its job, not a closeout awaiting judgement:
+  // it carries no deliverable of its own, and the delivery journal it writes into is
+  // the Navigator's to judge. Asking for a verdict on every clean exit would put a
+  // standing nag behind a design whose whole point is that it ends.
+  const closedMin = budgeted ? null : minsSince(job.firstTerminalAt, now)
   if (closedMin !== null && closedMin <= WAKE_WINDOW_HOURS * 60) {
     out.push({
       kind: 'stopped',
@@ -200,6 +243,25 @@ export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
       worker: label(job),
       at: job.updatedAt,
       line: `${label(job)} reads working and has not moved for ${Math.round(quiet)}m — the usual gap between a worker's actions is about twenty seconds · last: ${clip(job.detail, 90)}`,
+    })
+  }
+
+  // The catch-all for a budgeted role, and only for one. The three readings above
+  // are worker readings: they need a known death signature, or a `needs` string, or
+  // `tempo: active`. A manager can be wedged with none of the three — and unlike a
+  // worker, one that is not moving is not merely slow, it is a session that was
+  // supposed to be gone and now never will be. Two states, kept apart: `overrun` in
+  // fleet.mjs catches the manager still RUNNING past its budget, this catches the
+  // one that has STOPPED and will never exit.
+  if (budgeted && !terminal && !out.length && quiet !== null &&
+      quiet >= (hostWasAway ? Infinity : TRIGGERED_QUIET_MIN)) {
+    out.push({
+      kind: 'wedged',
+      key: `wedged:${job.id}`,
+      job: job.id,
+      worker: label(job),
+      at: job.updatedAt,
+      line: `${label(job)} has not moved for ${Math.round(quiet)}m in state ${job.state} and must exit inside ${TRIGGERED_QUIET_MIN}m — it launched on a trigger and will not exit on its own · last: ${clip(job.detail || job.needs || 'no detail', 90)}`,
     })
   }
   return out
@@ -399,9 +461,9 @@ export function listenerState(path, now = new Date(), { stat = statSync } = {}) 
     const age = (now.getTime() - stat(path).mtimeMs) / 60000
     return age <= LISTENER_STALE_MIN
       ? { armed: true, ageMin: age, summary: `wake channel: armed — listener seen ${Math.round(age * 60)}s ago` }
-      : { armed: false, ageMin: age, summary: `**WAKE CHANNEL DOWN** — nothing has listened for ${Math.round(age)}m; wakes are being written and not delivered. Arm it: Monitor \`bash obot.agent/tools/navigator/wake-listen\`, persistent` }
+      : { armed: false, ageMin: age, summary: `**WAKE CHANNEL DOWN** — nothing has listened for ${Math.round(age)}m; wakes are being written and not delivered. Arm it: Monitor \`obot.agent/tools/navigator/wake-listen\`, persistent` }
   } catch {
-    return { armed: false, ageMin: null, summary: '**WAKE CHANNEL DOWN** — no listener has ever run; wakes are being written and not delivered. Arm it: Monitor `bash obot.agent/tools/navigator/wake-listen`, persistent' }
+    return { armed: false, ageMin: null, summary: '**WAKE CHANNEL DOWN** — no listener has ever run; wakes are being written and not delivered. Arm it: Monitor `obot.agent/tools/navigator/wake-listen`, persistent' }
   }
 }
 

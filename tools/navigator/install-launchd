@@ -8,8 +8,8 @@
 # bakes in this script's own repo root plus absolute node/gh paths, so the
 # minimal launchd environment needs no shell profile.
 #
-#   bash tools/navigator/install-launchd            # install + start
-#   bash tools/navigator/install-launchd --uninstall
+#   tools/navigator/install-launchd            # install + start
+#   tools/navigator/install-launchd --uninstall
 #
 # Status:  launchctl print "gui/$UID/com.obot.navigator-sweep" | head
 # Nudge:   launchctl kickstart -k "gui/$UID/com.obot.navigator-sweep"

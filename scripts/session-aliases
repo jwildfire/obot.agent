@@ -76,12 +76,12 @@ render() {
   printf -- 'description: "Short alias for /%s. Both forms load the same skill."\n' "$skill"
   [ -n "$hint" ] && printf -- 'argument-hint: %s\n' "$hint"
   if [ "$skill" = "session-init" ]; then
-    printf -- 'allowed-tools: Bash(bash obot.agent/tools/session-init/handoff.sh)\n'
+    printf -- 'allowed-tools: Bash(obot.agent/tools/session-init/handoff.sh)\n'
   fi
   printf -- '---\n\n'
   if [ "$skill" = "session-init" ]; then
     printf -- '## Tier-0 hand-off bundle (pre-read — paint directly from this, zero tool calls)\n\n'
-    printf -- '!%s\n\n' '`bash obot.agent/tools/session-init/handoff.sh`'
+    printf -- '!%s\n\n' '`obot.agent/tools/session-init/handoff.sh`'
   fi
   printf -- '@.claude/skills/%s/SKILL.md\n' "$skill"
 }

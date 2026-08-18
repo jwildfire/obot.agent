@@ -43,7 +43,7 @@ node obot.agent/tools/session-hub/session-hub.mjs --workspace ~/Documents/obot2 
   { nohup node obot.agent/tools/ops-dashboard/ops-dashboard.mjs --serve --workspace ~/Documents/obot2 \
       >> ~/Documents/obot2/.claude/ops/serve.log 2>&1 & }) && \
 sleep 1 && pgrep -f "session-hub.mjs --watch" && \
-open -a "Google Chrome" "$(node obot.agent/tools/serve-marker --url \
+open -a "Google Chrome" "$(obot.agent/tools/serve-marker --url \
   2>/dev/null || echo "file:///Users/jwildfire/Documents/obot2/.claude/session-hub/live.html")"
 ```
 

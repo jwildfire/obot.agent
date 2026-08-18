@@ -9,9 +9,9 @@
 // a tool ends up confidently reporting the wrong port.
 //
 // Usage:
-//   node obot.agent/tools/serve-marker            # human-readable state
-//   node obot.agent/tools/serve-marker --url      # the URL, only if live (exit 1 otherwise)
-//   node obot.agent/tools/serve-marker --json     # the whole state as JSON
+//   obot.agent/tools/serve-marker            # human-readable state
+//   obot.agent/tools/serve-marker --url      # the URL, only if live (exit 1 otherwise)
+//   obot.agent/tools/serve-marker --json     # the whole state as JSON
 //
 //   --workspace <dir>   workspace root (default: $OBOT_WORKSPACE, else cwd)
 //

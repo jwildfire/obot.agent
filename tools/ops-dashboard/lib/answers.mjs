@@ -265,15 +265,88 @@ export function pendingAnswers(workspace, { hub = null } = {}) {
 const ageMin = (at, now = new Date()) => Math.max(0, Math.round((now.getTime() - Date.parse(at)) / 60000));
 const ago = (min) => (min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`);
 
-export function transition(workspace, id, status, meta = {}, now = new Date(), patch = null) {
-  const record = readAnswers(workspace).find((a) => a.id === id);
-  if (!record) throw new Error(`no answer ${id}`);
+/**
+ * The record one identifier names — including the id `pending` actually printed.
+ *
+ * `pending` leads every row with `D0014`; `apply` matched on the record key alone
+ * (`2026-08-16T21-39-17-310Z-2026-08-15-scheduled-sessions-readiness`), which appears
+ * nowhere in that output and is reachable only through `--json`. So the documented
+ * next step answered the displayed id with `no answer D0014`, which reads as "he never
+ * decided that" rather than "you typed the wrong one of my two names for it". His
+ * D0014 answer sat OVERDUE for 26 hours behind that error, with the work already done
+ * (obot.agent#180).
+ *
+ * An OVERDUE flag that cannot be cleared by the documented next step is worse than no
+ * flag: it is seen, attempted, failed, and then ignored — and the next real one is
+ * ignored with it.
+ *
+ * Three names resolve, because all three are printed somewhere: the record id, the
+ * decision id, and the artifact slug. Unapplied answers are preferred over applied
+ * ones — clearing a pending flag is what the command is for — and where more than one
+ * survives that, the candidates are returned rather than the answer being denied.
+ */
+export function resolveAnswerRef(workspace, ref, { hub = null } = {}) {
+  const key = String(ref ?? '').trim();
+  if (!key) return { record: null, candidates: [], reason: 'no identifier given' };
+
+  // A record id names one file and resolves against every record ever written,
+  // including one a later answer shadowed — that is what `--json` and `show` hand
+  // out, and an id this tool printed must always resolve to the thing it printed.
+  const all = readAnswers(workspace, { hub });
+  const exact = all.find((a) => a.id === key);
+  if (exact) return { record: exact, candidates: [] };
+
+  const same = (v) => String(v ?? '').toLowerCase() === key.toLowerCase();
+  // A NAME resolves against exactly the list `pending` prints from, and for the
+  // reason this whole function exists: anything that list displays has to be
+  // appliable. Matching against every record instead re-creates the defect one
+  // layer down — the six pre-#120 records include two for the same artifact that
+  // nothing ever marked superseded, so `apply D0008` would answer "that names 2
+  // answers" about an id `pending` shows exactly once.
+  const current = currentAnswers(workspace, { hub });
+  const named = current.filter((a) => same(a.decisionId) || same(a.artifact));
+  if (!named.length) {
+    const shadowed = all.filter((a) => same(a.decisionId) || same(a.artifact));
+    return {
+      record: null,
+      candidates: shadowed,
+      reason: shadowed.length
+        ? `every answer under "${key}" has been superseded — he answered again, and the current answer is the one to apply`
+        : `nothing recorded under "${key}" — it is not a record id, a decision id, or an artifact slug in this store`,
+    };
+  }
+
+  const open = named.filter((a) => a.status !== APPLIED);
+  const pick = open.length ? open : named;
+  if (pick.length === 1) return { record: pick[0], candidates: [], alreadyApplied: !open.length };
+  return {
+    record: null,
+    candidates: pick,
+    reason: `"${key}" names ${pick.length} answers, so it does not say which one to apply — name one by its record id`,
+  };
+}
+
+export function transition(workspace, ref, status, meta = {}, now = new Date(), patch = null) {
+  // Resolved by any name it is printed under, then re-read raw: the resolver reads
+  // with the hub, which backfills a missing decision id onto its copy, and writing
+  // that copy back would smuggle a repair into every apply. `markDelivered` still
+  // carries repairs explicitly, through `patch`.
+  const { hub = null, ...event } = meta;
+  const found = resolveAnswerRef(workspace, ref, { hub });
+  if (!found.record) {
+    const list = found.candidates.map((a) => `  ${a.id}  ${a.decisionId ?? a.artifact ?? ''}  [${a.status}]`).join('\n');
+    throw new Error(`${found.reason}${list ? `\ncandidates:\n${list}` : ''}`);
+  }
+  const record = readAnswers(workspace).find((a) => a.id === found.record.id);
+  if (!record) throw new Error(`no answer ${found.record.id}`);
   const at = now.toISOString();
   // `patch` carries repairs (a backfilled decision id), never content: the
   // verdict, the words and the per-question calls are written once.
   if (patch?.decisionId) Object.assign(record, { ...patch, decisionIdSource: 'registry (backfilled)' });
   record.status = status;
-  record.history = [...record.history, { at, status, ...meta }];
+  // `hub` is how the record was found, not something that happened to it, so it
+  // stays out of the history line.
+  record.history = [...record.history, { at, status, ...event }];
   if (status === DELIVERED) record.deliveredAt = at;
   if (status === APPLIED) {
     record.appliedAt = at;
@@ -333,7 +406,7 @@ export function answersSection(pending, { now = new Date() } = {}) {
     const overdue = min > OVERDUE_MIN ? '**OVERDUE** ' : '';
     lines.push(`- ${overdue}**${a.decisionId ?? a.artifact}** ${a.verdict} · ${a.status} · recorded ${(a.at || '').slice(0, 16).replace('T', ' ')} (${ago(min)} ago) · \`${a.artifact ?? ''}\``);
   }
-  lines.push('', 'Read them: `node obot.agent/tools/ops-answers pending` · apply, then `ops-answers apply <id> --evidence <url>`.');
+  lines.push('', 'Read them: `obot.agent/tools/ops-answers pending` · apply, then `ops-answers apply <id> --evidence <url>`.');
   return `${lines.join('\n')}\n`;
 }
 
