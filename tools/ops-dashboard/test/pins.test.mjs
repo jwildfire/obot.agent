@@ -115,6 +115,28 @@ test('a renamed role keeps its own history: prior tags still resolve to it', () 
   }
 });
 
+test('a renamed role gets ONE row in the band, not one per tag it has carried', () => {
+  // The day the admiral was renamed the band showed four rows for three roles: a live
+  // row under the new tag and a dead one under the old, both resolving to the same
+  // role and saying opposite things about it. Rows are sorted newest-first before the
+  // band is cut, so the role's current session claims the slot and its older ones drop
+  // to the table below rather than off the page (obot.agent#182).
+  const role = STANDING_ROLES.find((r) => (r.priorTags ?? []).length);
+  assert.ok(role, 'this guard needs a role that has carried more than one tag');
+  const model = {
+    rows: [
+      row({ label: role.name, createdAt: '2026-08-18T00:00:00Z' }),
+      row({ label: `${role.priorTags[0]} obot-old`, createdAt: '2026-08-17T00:00:00Z' }),
+      row({ label: STANDING_ROLES[0].name, createdAt: '2026-08-16T00:00:00Z' }),
+    ],
+  };
+  const html = agentsTableHtml(model, { pins: emptyPins() });
+  const band = html.slice(html.indexOf('data-sec="pinned"'), html.indexOf('data-sec="rest"'));
+  assert.ok(band.includes(role.name), "the role's current session is in the band");
+  assert.ok(!band.includes('obot-old'), 'its older tag is not a second row in the band');
+  assert.ok(html.includes('obot-old'), 'and it is still on the page, below the band');
+});
+
 test('a long-lived worker never drifts into the pinned set', () => {
   // Age and cost are not roles. A worker that has run for a month, spent the most
   // money and moved four requirements is still judged on what it delivered, and it
