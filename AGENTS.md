@@ -7,10 +7,13 @@ This repo is an **overlay** on the
 in the obot2 workspace). gsm.agent's AGENTS.md conventions — drafts, attribution,
 approval gates, worktrees, TDD — apply here **in full**. This file adds only the obot
 program layer; it does not restate what upstream owns, and where the two appear to
-conflict, upstream wins unless the divergence is documented explicitly. The two
+conflict, upstream wins unless the divergence is documented explicitly. The three
 documented divergences are commit attribution mechanics — see
-[`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md) — and worktree
-location, below.
+[`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md) — worktree location,
+below, and merging: upstream's approval gates cover asking him to decide something,
+not landing work he has already granted the lane for, and in this program the standard
+lane is the default. [`scripts/policy.json`](scripts/policy.json) is the authority on
+that and [Merging](#merging-the-standard-lane-is-the-default) describes it.
 
 The tiers of agent execution used in this program (*session* / *spawned agent* /
 *subagent*) are defined in [`docs/terminology.md`](docs/terminology.md), and which tier may
@@ -187,9 +190,80 @@ grouped none of them: no `v1.6.0` milestone existed, three of the issues still c
 `v1.2.0` from the wave that scoped them, and the RC PR body carried no `Closes` lines. The
 release's own record had to be reconstructed from the diff the same night.
 
-## Running the merge command
+## Merging: the standard lane is the default
 
-Once a merge is approved, type it as **one command, undecorated**:
+**Merge your own passing work. That is the default, not an escalation.** Every repo in
+[`scripts/policy.json`](scripts/policy.json) is `profile: auto`, which puts its integration
+branch on the `standard` lane, and that lane is defined there as *"Mergeable via obot-merge
+with no extra flag"* — no attestation, no audit comment, and no wait for @jwildfire,
+unattended sessions included (`autonomy.level` is `A1`: *"routine merges — standard-lane
+obot-merge unattended"*). The lane is contract-gated rather than ungated: the task the
+session was dispatched to do is the approved work, and the lane removes the mechanical
+block rather than granting new scope.
+
+| repo | standard lane — yours to merge | attested — his sign-off first |
+|---|---|---|
+| `obot.agent` | `main` | `stable` |
+| `obot.roadmap` | `main` | — |
+| `safety.viz`, `gsm.safety`, `open.gismo`, `open.csr` | `dev` | `main` |
+| `demo-301` | `main` | `site` |
+
+That table is a copy; the file is the authority. Ask it directly when the two disagree, or
+before starting work in a repo not listed above:
+
+```bash
+obot.agent/scripts/obot-policy explain jwildfire/<repo>
+```
+
+### The three things that stop a merge
+
+- **A release-role branch.** `main` on the four `dev`-based repos, `stable` on `obot.agent`,
+  `site` on `demo-301`. Every release candidate is this case. It merges only with
+  `--jeremy-approved '<where/when he approved>'`, which posts the approval on the PR as an
+  audit comment.
+- **A carve-out path in the diff.** `scripts/policy.json`, `scripts/merge-policy.json`,
+  `scripts/autonomy-grants.json`, `scripts/obot-merge`, `scripts/obot-policy`,
+  `goals/registry.json`, `hooks/` — listed under `carveOut.repos` for `jwildfire/obot.agent`
+  and no other repo. `obot-merge` reads the PR's changed files and forces the attested lane
+  whatever the profile says, attended or not, so an unattended session cannot merge one at
+  all. `--decision '<what he already decided>'` is the second admissible form and is
+  confined to a carve-out merge into the integration branch of an `operational` repo.
+- **A branch with no role, or a repo absent from the file.** Refused outright, exit 2 —
+  not held for his approval. Adding a repo to the file is itself a decision, and lands it
+  at `protected`; no repo is on that profile today.
+
+`obot-merge` also forces the attested lane when the `policy.json` it just read does not
+match the authority copy at `jwildfire/obot.agent@main`, or when it cannot reach that copy
+at all. That is the tool checking the ground under its own feet, not a fourth tier — it
+fires when a session runs a merge from a worktree whose branch edits the policy file.
+
+### What does not stop a merge
+
+- **The repo's `class`.** `operational` and `clinical` record how much of a repo's output he
+  reviews before it reaches a released surface; the lanes still come from the profile.
+  `obot-merge` says so about itself: *"A repo's class (operational or clinical) does not
+  enter into it."* A clinical repo's integration branch is standard-lane like every other.
+  Class decides one thing only — which attestation form is admissible once a merge is
+  already attested, since `--decision` is refused on a clinical repo and `--jeremy-approved`
+  is not.
+- **The milestone and closing-issue gates.** They refuse merges (see [Milestone before
+  work](#milestone-before-work)), but they are paperwork to fix, not an approval to go and
+  ask for.
+- **A refusal from the auto-mode classifier.** That is a permission-layer coin flip on the
+  shape of the command string, not a policy decision — see below.
+
+**Why this section exists.** On 2026-08-18 two workers finished policy-passing pull
+requests on repos where the standard lane had already been granted, and held both for an
+approval that was never required. One of them would have left a published page telling him
+something false for a day and a half. Neither worker misread this file — until now it
+framed the merge command with *"Once a merge is approved"* and never said what the default
+was, so each reader supplied one. `docs/rc-framework.md` has carried the correct version
+throughout: *"Everything else lands without him: increments merge on the standard lane."*
+
+### Running the merge command
+
+Type it as **one command, undecorated** — `--check` in place of `--squash` dry-runs the
+policy and milestone gates without merging anything:
 
 ```bash
 obot.agent/scripts/obot-merge <pr#> -R jwildfire/<repo> --squash --delete-branch
@@ -207,7 +281,9 @@ safe; the wrapper prints ten lines, so there is nothing worth piping to `tail` a
 A classifier refusal is not a permission decision and not a policy refusal — the merge
 policy in [`scripts/policy.json`](scripts/policy.json) is the only thing that decides
 whether a merge is allowed. If a merge is refused, re-type the bare command; do not go
-looking for a different route.
+looking for a different route. Raw `gh pr merge`, REST, and GraphQL merges are denied by the
+workspace `merge-gate-guard` hook: a denial there means *use `obot-merge`*, not *find
+another route*.
 
 **Why this exists.** Of 497 `obot-merge` invocations across the session transcripts to
 2026-08-17, only 7 were written in a form the allowlist could match — and all 7 were
@@ -215,7 +291,8 @@ allowed. Every one of the 17 refusals in that history sits among the 490 that ma
 nothing. obot.agent#150 and #158 sat finished, green and unmerged overnight on that coin
 flip, and obot.roadmap#217 was refused and then allowed on the byte-identical string three
 minutes later. Guarded by
-[`scripts/test/merge-invocation.test.mjs`](scripts/test/merge-invocation.test.mjs).
+[`scripts/test/merge-invocation.test.mjs`](scripts/test/merge-invocation.test.mjs) and
+[`scripts/test/merge-default.test.mjs`](scripts/test/merge-default.test.mjs).
 
 ## Branching and release model (safety.viz only)
 

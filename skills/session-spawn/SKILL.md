@@ -133,9 +133,13 @@ Two things stay spawn-specific:
   corrupts the wrapup's inventory, obot.agent#57), and never a modeled timestamp.
   Fill in the workspace root and the sibling's `{slug}`; multi-writer rules are in
   [`session-update`](../session-update/SKILL.md).
-- **Merging**: never merge without Jeremy's explicit approval (operating
-  contract — unchanged). Once a merge IS approved, use the policy-gated lane
-  only: `obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>` (add `--check`
+- **Merging**: a sibling merges its own passing work. That is the default the
+  briefing states and it is what [`scripts/policy.json`](../../scripts/policy.json)
+  says — every repo in the file is `profile: auto`, so its integration branch is on
+  the standard lane and needs no approval and no wait. Do not brief a sibling to hold
+  finished work; two so briefed on 2026-08-18 did exactly that, and one would have
+  left a published page wrong for a day and a half. Use the policy-gated lane only:
+  `obot.agent/scripts/obot-merge <pr#> -R <owner>/<repo>` (add `--check`
   to dry-run the policy first) — typed as a **single, undecorated command**. The
   workspace allowlist matches that string whole; a `bash` prefix, a `./`, a
   `cd … &&`, a trailing `; echo`, or a `| tail -20` breaks the match and drops
@@ -149,7 +153,10 @@ Two things stay spawn-specific:
   lane and additionally needs
   `--jeremy-approved '<where/when he approved>'` — pass it ONLY when Jeremy
   explicitly approved that specific merge in-session; the note is posted on the
-  PR as an audit comment. Raw `gh pr merge`, REST, and GraphQL merges are
+  PR as an audit comment. A PR touching a carve-out path (`scripts/policy.json`,
+  `scripts/obot-merge`, `scripts/obot-policy`, `goals/registry.json`, `hooks/` —
+  `obot.agent` only) is forced onto the attested lane whatever the profile says.
+  Raw `gh pr merge`, REST, and GraphQL merges are
   denied by the workspace `merge-gate-guard` PreToolUse hook — a denial there
   means "use obot-merge", not "find another route".
   `scripts/obot-policy explain <owner/repo>` prints a repo's effective

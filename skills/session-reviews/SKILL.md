@@ -185,8 +185,12 @@ role its base branch plays. Check before you promise him anything:
 obot.agent/scripts/obot-policy explain <owner>/<repo>
 ```
 
-`standard` merges on his in-conversation approval alone. `attested` — every
-release branch, and every branch of a `protected` repo — additionally needs
+`standard` needs no attestation flag and, outside this queue, no approval at all —
+work on a repo's integration branch is the worker's to land. A `standard` PR is in
+front of him here because someone put it in the queue, not because the lane required
+it; his "merge it" is the go-ahead to run the command, not an approval the policy was
+waiting for. `attested` — every release branch, a PR touching a carve-out path, and
+every branch of a `protected` repo — additionally needs
 `--jeremy-approved '<where/when he approved>'`, quoting where in this
 conversation he approved it. Raw `gh pr merge`, REST, and GraphQL merges are
 denied by the workspace `merge-gate-guard` hook — a denial there means "use

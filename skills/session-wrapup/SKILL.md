@@ -612,11 +612,14 @@ the step 3 checkpoint remains the default contract.
 - **Step 8 applies standing-grant changes only** (board stages, issue-body
   fixes and comments, scratchpad check-offs, memory updates — including
   `next-session-todo`). The grant boundary does not move with `--auto`:
-  merges, deletions, closes beyond the wired grants, releases, and upstream
-  posts still land as asks in the entry, never auto-applied — **routed by the
-  headline table**: a release proposed for publication is an RC bullet, a call he
+  attested-lane merges, deletions, closes beyond the wired grants, releases, and
+  upstream posts still land as asks in the entry, never auto-applied — **routed by
+  the headline table**: a release proposed for publication is an RC bullet, a call he
   has to make is a decision bullet, and only the mechanical remainder is
-  `## 🙋 ToDo`.
+  `## 🙋 ToDo`. Standard-lane merges are inside the grant, not outside it — a
+  finished, passing PR on a repo's integration branch is the session's to land
+  before the wrapup, and one that reaches the entry as an ask is a worker that
+  held work it was granted the lane for (obot.agent#236).
 - **Step 9 runs in full**: post the entry plus changelog line and session
   report under the standard-update grant, and carry the deployed URL into the
   close-out. Deploy verification stays **asynchronous and non-blocking here too** —
