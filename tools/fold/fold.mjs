@@ -37,6 +37,7 @@ import { writeDayBoundary } from './lib/marker.mjs'
 import { landedSince } from './lib/repos.mjs'
 import { parseLanded, composeEntry } from './lib/diary.mjs'
 import { writeEntry, publishEntry } from './lib/publish.mjs'
+import { sweepIdeas } from './lib/ideas.mjs'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
@@ -182,6 +183,15 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
     dryRun: opts.dryRun,
   }
 
+  // The ideas backstop, read-only, so --dry-run previews it too. It last ran on
+  // 2026-08-14 because its only trigger lived in a lane nobody runs any more. The
+  // fold DETECTS; it does not triage, and it deliberately does NOT advance the
+  // watermark — advancing without replying would hide the ideas from whoever
+  // triages them next, which is the opposite of a backstop.
+  const ideas = sweepIdeas(workspace, { advance: false, now })
+  report.ideas = { count: ideas.items.length, unknown: ideas.unknown, why: ideas.why, truncated: ideas.truncated }
+  if (ideas.unknown) report.unknowns.push(`ideas: ${ideas.why}`)
+
   if (!opts.dryRun) {
     recordRun(workspace, report)
     stampBookend(workspace, { step: `gate-${verdict.verdict}`, ms: Date.now() - started })
@@ -289,6 +299,9 @@ function render(r) {
   L.push(`  push     ${r.push ? 'YES' : 'no '}  ${r.reasons.push}`)
   if (r.reasons.forced) L.push(`  forced        ${r.reasons.forced}`)
   if (r.boundary) L.push(`  boundary ${r.boundary.kept ? "kept" : "SET "}  day marker at ${r.boundary.time}`)
+  if (r.ideas) {
+    L.push(`  ideas    ${r.ideas.unknown ? 'UNKNOWN' : r.ideas.count ? `${r.ideas.count} new` : 'none   '}  ${r.ideas.why}`)
+  }
   if (r.diaryEntry) {
     const d = r.diaryEntry
     L.push(`  diary    ${d.written ? (d.pushed ? 'PUSHED' : d.committed ? 'commit' : 'file  ') : 'kept  '}  ` +

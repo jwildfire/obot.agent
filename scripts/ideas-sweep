@@ -27,8 +27,20 @@ if [ "${1:-}" = "--advance" ]; then
   exit 0
 fi
 
-SINCE="1970-01-01T00:00:00Z"
-[ -f "$WATERMARK_FILE" ] && SINCE="$(cat "$WATERMARK_FILE")"
+# --since lets a caller state the window instead of inheriting the file. The fold
+# needs this (obot.agent#203): it decides the cold-start window itself rather than
+# accepting the epoch default below, which would hand a first run every idea ever
+# filed as though all of it arrived this morning.
+SINCE=""
+if [ "${1:-}" = "--since" ]; then
+  SINCE="${2:?--since needs an ISO timestamp}"
+elif [ -n "${OBOT_IDEAS_SINCE:-}" ]; then
+  SINCE="$OBOT_IDEAS_SINCE"
+fi
+if [ -z "$SINCE" ]; then
+  SINCE="1970-01-01T00:00:00Z"
+  [ -f "$WATERMARK_FILE" ] && SINCE="$(cat "$WATERMARK_FILE")"
+fi
 
 gh api graphql -f query='query{repository(owner:"jwildfire",name:"obot.roadmap"){discussions(first:50,categoryId:"DIC_kwDOTLuTVs4DBzqe",orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url createdAt updatedAt body author{login} comments{totalCount}}}}}' \
   --jq ".data.repository.discussions.nodes[] | select(.updatedAt > \"$SINCE\" and .number != $SEED_NUMBER) | {number,title,url,author:.author.login,createdAt,updatedAt,comments:.comments.totalCount,body}"
