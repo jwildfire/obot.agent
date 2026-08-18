@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-17 -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/187 on 2026-08-17 20:55 EDT -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0, Labels: enhancement, Assignee: @me -->
 
 The fleet manager is the admiral, everywhere. The three standing roles are prime, admiral and nav.
