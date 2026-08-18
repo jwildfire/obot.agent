@@ -34,7 +34,11 @@ import { policyRepos, commitsSince } from './lib/repos.mjs'
 import { openDecisions } from './lib/decisions.mjs'
 import { stampBookend } from './lib/ledger.mjs'
 import { writeDayBoundary } from './lib/marker.mjs'
-import { existsSync, readFileSync } from 'node:fs'
+import { landedSince } from './lib/repos.mjs'
+import { parseLanded, composeEntry } from './lib/diary.mjs'
+import { writeEntry, publishEntry } from './lib/publish.mjs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const WS = process.env.OBOT_WORKSPACE || join(homedir(), 'Documents', 'obot2')
@@ -65,6 +69,7 @@ function parseArgs(argv) {
     else if (a === '--json') o.json = true
     else if (a === '--force') o.force = true
     else if (a === '--status') o.status = true
+    else if (a === '--no-publish') o.noPublish = true
     else if (a === '--since') o.since = argv[++i]
     else if (a === '--help' || a === '-h') o.help = true
     else return { error: `unknown argument: ${a}` }
@@ -194,6 +199,19 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
         report.unknowns.push(`boundary: could not write the day marker — ${e.message}`)
       }
     }
+
+    // The day's record. Gated on ACTIVITY, which is the diary's own gate: a day
+    // with work gets an entry even when nothing is waiting on him, because the
+    // diary is the keynote's raw material and its value does not depend on his
+    // reading it. A day without work gets nothing — "never machine-generated
+    // filler" is the diary's own contract and the openclaw lesson.
+    if (verdict.diary) {
+      try {
+        report.diaryEntry = writeTheDay({ workspace, hub, now, since, repos, queue, opts })
+      } catch (e) {
+        report.unknowns.push(`diary: ${String(e.message).split('\n')[0]}`)
+      }
+    }
     // The watermark advances only on a decided run. An unknown leaves it where it
     // was, so the window the next fold covers still includes whatever this one
     // could not see.
@@ -213,6 +231,54 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
   return { exit: verdict.verdict === 'unknown' ? 3 : 0, report }
 }
 
+function writeTheDay({ workspace, hub, now, since, repos, queue, opts }) {
+  const date = localDate(now)
+  const landedRes = landedSince(workspace, repos, since)
+  const landed = landedRes.rows.flatMap((r) => parseLanded(r.repo, r.log))
+
+  const markdown = composeEntry({
+    date,
+    landed,
+    rcs: queue.rcs,
+    decisions: queue.decisions,
+    todos: queue.todos,
+    configOpen: queue.blockers,
+    previousEntry: previousEntryDate(hub, date),
+  })
+
+  const w = writeEntry(hub, date, markdown)
+  const result = { file: w.file, written: w.written, why: w.why, landed: landed.length }
+  if (!w.written || opts.noPublish) return result
+
+  const rel = `diary/${date}.md`
+  const pub = publishEntry(hub, {
+    date,
+    paths: [rel],
+    message: `Daily diary: ${date}\n\nComposed by the 07:00 fold from ${landed.length} change(s) that landed ` +
+      `since ${since}. The narrative paragraph is marked as owed rather than written: ` +
+      `that part needs a model, and starting one on a clock is A2.\n\n` +
+      `Requirement: jwildfire/obot.roadmap#238`,
+    mintToken: () => execFileSync(join(REPO_ROOT, 'scripts', 'obot-app-token'), [], {
+      encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim(),
+  })
+  return { ...result, ...pub }
+}
+
+// The previous entry's date, so a carried item can say where it carried from.
+function previousEntryDate(hub, date) {
+  try {
+    return readdirSync(join(hub, 'diary'))
+      .filter((n) => /^\d{4}-\d{2}-\d{2}(-\d+)?\.md$/.test(n))
+      .map((n) => n.slice(0, 10))
+      .filter((d) => d < date)
+      .sort()
+      .at(-1) ?? null
+  } catch {
+    return null
+  }
+}
+
 function render(r) {
   const L = []
   L.push(`fold: ${r.verdict.toUpperCase()}${r.dryRun ? '  (dry run — nothing written)' : ''}`)
@@ -223,6 +289,11 @@ function render(r) {
   L.push(`  push     ${r.push ? 'YES' : 'no '}  ${r.reasons.push}`)
   if (r.reasons.forced) L.push(`  forced        ${r.reasons.forced}`)
   if (r.boundary) L.push(`  boundary ${r.boundary.kept ? "kept" : "SET "}  day marker at ${r.boundary.time}`)
+  if (r.diaryEntry) {
+    const d = r.diaryEntry
+    L.push(`  diary    ${d.written ? (d.pushed ? 'PUSHED' : d.committed ? 'commit' : 'file  ') : 'kept  '}  ` +
+           `${d.landed} change(s) → ${d.file}${d.why ? `  (${d.why})` : ''}`)
+  }
   L.push('')
   L.push(`queue: ${r.counts.rcs} RC · ${r.counts.decisions} decisions · ${r.counts.todos} todos · ` +
          `${r.counts.blockers ?? '?'} config items`)
@@ -241,6 +312,7 @@ const USAGE = `obot fold — decide whether there is anything to say this mornin
   --since ISO  fold a stated window instead of the watermark's
   --force      fold regardless of the gate, for a rehearsal
   --status     when did the fold last run, and is the clock still ticking
+  --no-publish compose and write the entry, but do not commit or push it
 `
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

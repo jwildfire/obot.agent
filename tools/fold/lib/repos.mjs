@@ -48,3 +48,35 @@ function defaultRun(dir, sinceIso, untilIso) {
     encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'],
   })
 }
+
+/**
+ * What actually LANDED on the integration branch since the watermark — the
+ * record half, as distinct from commitsSince which is the activity signal.
+ *
+ * First-parent on the integration branch only: a squash merge is one commit
+ * carrying an outcome sentence and its refs, whereas the raw commit list is
+ * hundreds of intermediate steps nobody reads. 181 commits is activity; six
+ * merged pull requests is a record.
+ */
+export function landedSince(workspace, repos, sinceIso, { run = defaultLanded } = {}) {
+  const rows = []
+  const failed = []
+  for (const name of repos) {
+    const dir = join(workspace, name)
+    if (!existsSync(join(dir, '.git'))) continue
+    try {
+      const out = run(dir, sinceIso)
+      if (out.trim()) rows.push({ repo: name, log: out })
+    } catch (e) {
+      failed.push(`${name}: ${e.message.split('\n')[0]}`)
+    }
+  }
+  return { rows, failed, unknown: failed.length > 0 }
+}
+
+function defaultLanded(dir, sinceIso) {
+  return execFileSync('git', [
+    '-C', dir, 'log', '--first-parent', 'origin/main', `--since=${sinceIso}`,
+    '--format=%h%x09%cI%x09%s',
+  ], { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] })
+}
