@@ -548,6 +548,10 @@ export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) 
     // suppressed by activity that happened before its current block.
     let lastBlockedAt = null
     let movedAfterBlockedAt = null
+    // The newest thing this session did, whatever it was. `updatedAt` in the state
+    // file usually agrees, but the timeline is the record that cannot be rewritten,
+    // and every check that asks "did it move after X" has to ask the same file.
+    const lastActivityAt = events?.length ? (events[events.length - 1].at || events[events.length - 1].ts || null) : null
     if (events) {
       for (const e of events) {
         const at = e.at || e.ts
@@ -569,6 +573,7 @@ export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) 
       firstTerminalAt,
       lastBlockedAt,
       movedAfterBlockedAt,
+      lastActivityAt,
       // Where the session actually ran. The one field that can tell this
       // workspace's role from something else wearing its name (obot.agent#188): a
       // name is a claim, a working directory is a fact, and all 110 records on this

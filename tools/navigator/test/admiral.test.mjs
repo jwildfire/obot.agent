@@ -151,6 +151,33 @@ test('a closeout gap is bounded above too — history nobody can judge is not a 
   assert.equal(closeoutGaps([ancient], { now: NOW }).length, 0)
 })
 
+test('a session that resumed after its closeout is not a gap — it is working', () => {
+  // obot.agent#176, one condition over. `firstTerminalAt` is a first-write-wins
+  // watermark the harness never resets, so a session that closed out and was then
+  // resumed carries it forever — and this scan had no liveness filter while the two
+  // other job scans in this file both have one. The row it produced asserts "W0099
+  // closed out 600m ago" in front of an agent holding `claude stop`, about a session
+  // that is mid-release. Five real records on this machine spent between 129 and 575
+  // minutes in exactly that state; 978bca0c was publishing a tag on `stable` through
+  // most of its 575.
+  const resumed = worker({
+    state: 'working', firstTerminalAt: agoMin(600), updatedAt: agoMin(2),
+    lastActivityAt: agoMin(2),
+  })
+  assert.equal(closeoutGaps([resumed], { now: NOW }).length, 0)
+
+  // Positive evidence only. A live session with NOTHING after its terminal stamp is
+  // still a gap: the safe direction here is to report, because a gap is only ever
+  // reported and an unreported one is a closeout nobody judges.
+  const quiet = worker({ state: 'working', firstTerminalAt: agoMin(600), lastActivityAt: agoMin(605) })
+  assert.equal(closeoutGaps([quiet], { now: NOW }).length, 1)
+
+  // And a properly closed-out worker is untouched, which is the whole population
+  // this condition exists for.
+  const closed = worker({ state: 'done', firstTerminalAt: agoMin(600), lastActivityAt: agoMin(600) })
+  assert.equal(closeoutGaps([closed], { now: NOW }).length, 1)
+})
+
 test('a gap carries NO verdict field — there is nothing here for an admiral to fill in', () => {
   const stale = worker({ state: 'done', firstTerminalAt: agoMin(600) })
   const [gap] = closeoutGaps([stale], { now: NOW })
