@@ -747,12 +747,20 @@ test('no state file at all is a sentence, not an empty tab', () => {
   assert.ok(html.includes('class="tabs"'));
 });
 
-test('the tab strip is data-driven — a fourth tab is one entry', () => {
-  assert.deepEqual(TABS.map((t) => t.href), ['/', '/live.html', '/navigator']);
+test('the tab strip is data-driven — a fifth tab is one entry', () => {
+  // The first four are the shared spine (jwildfire/obot.roadmap#203) and the hub's
+  // nav carries the same four names in the same order; Navigator is this surface's
+  // own and follows them. Ordering and contiguity are asserted in wire-view.test.mjs.
+  assert.deepEqual(TABS.map((t) => t.href), [
+    '/', '/wire.html', '/live.html',
+    'https://jwildfire.github.io/obot.roadmap/catalog.html',
+    '/navigator',
+  ]);
   const html = navigatorShell({ missing: 'x' });
   assert.ok(/href="\/navigator"[^>]*aria-current="page"/.test(html));
   assert.equal((html.match(/class="tabs"/g) || []).length, 1);
-  assert.equal((render({ queue: fullQueue, staged: [] }).match(/<a href="\/(live\.html|navigator)?"/g) || []).length, 3);
+  // The local tabs only — Catalog is an absolute URL, deliberately.
+  assert.equal((render({ queue: fullQueue, staged: [] }).match(/<a href="\/(wire\.html|live\.html|navigator)?"/g) || []).length, 4);
 });
 
 // ---------------------------------------------------------------------------

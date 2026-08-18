@@ -1,0 +1,137 @@
+#!/usr/bin/env node
+// config-count — hand the public site a number, and nothing else.
+//
+// Requirement: jwildfire/obot.roadmap#203. The config list is workspace-local and
+// stays that way: every entry names exactly which control stops an agent from
+// acting, so it is a map of the locks and it never touches a repo the deploy
+// publishes. But the public hub still has to carry the entity, or the two
+// surfaces stop sharing a spine — the requirement's rule is that neither surface
+// gets an entity the other lacks a place for, and where something belongs to only
+// one, the other carries its heading with a count and no detail.
+//
+// BL4 settled what may cross, on 2026-08-15: "full text stays on local surfaces
+// only — published pages carry a count at most". This is the thing that carries
+// the count.
+//
+//   node obot.agent/tools/config-count            # write the file
+//   node obot.agent/tools/config-count --dry-run  # print it, write nothing
+//   node obot.agent/tools/config-count --check    # exit 1 if the file is stale
+//
+// ## Why this is a separate tool and not a line in the dashboard
+//
+// Because it is a channel, and a channel should be one visible thing rather than a
+// side effect of rendering a page. The dashboard reads the config list constantly
+// and renders headlines to a loopback surface; if it also wrote the published
+// count, the code that may see text and the code that may cross the boundary would
+// be the same code, one refactor away from carrying a headline across with the
+// number. Here the crossing is the whole program, it is 120 lines, and the shape
+// of what it emits is asserted before it writes.
+//
+// ## What it emits
+//
+// Two integers and a timestamp, under a schema string the reader pins:
+//
+//   { "_schema": "obot.roadmap/config-count@1", "open": 6, "critical": 1,
+//     "asOf": "2026-08-17T21:55:00Z" }
+//
+// No ids, no headlines, no dates of individual items, no counts broken down by
+// anything that could identify one. `critical` is a count of items already flagged
+// critical on his queue, and it is the only breakdown, because "how many of these
+// are urgent" is the one thing a reader of the public page can act on (which is:
+// know that the machine is waiting on him) and it cannot name what they are.
+//
+// The reader — obot.roadmap scripts/lib/public-channel.mjs — validates every field
+// and refuses the whole payload if any of them is not a number or a date. So this
+// tool being careful is the belt; the reader having nowhere to put a string is the
+// braces, and the braces are the half that survives someone editing this file.
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { collectConfig, configFile } from './ops-dashboard/lib/collect.mjs';
+
+const SCHEMA = 'obot.roadmap/config-count@1';
+
+const args = process.argv.slice(2);
+const flag = (name) => args.includes(`--${name}`);
+const value = (name, fallback) => {
+  const i = args.indexOf(`--${name}`);
+  return i === -1 ? fallback : args[i + 1];
+};
+
+const workspace = path.resolve(value('workspace', process.cwd()));
+const hub = path.resolve(value('hub', path.join(workspace, 'obot.roadmap')));
+const out = path.join(hub, 'data', 'config-count.json');
+
+// ---------------------------------------------------------------- the count
+
+const { items, error } = collectConfig(workspace);
+
+if (error) {
+  // A missing list is not zero. Publishing 0 here would tell the public page
+  // "nothing needs his hands" on the strength of a file that could not be opened,
+  // which is the silent-success failure this programme keeps paying for. Refuse,
+  // and leave whatever was last published in place — a count with an older date
+  // is honest, and the reader renders the date when it is stale.
+  console.error(`config-count: refusing to write — ${error} (${configFile(workspace)})`);
+  console.error('config-count: a count that cannot be measured is not zero; the last published count stands.');
+  process.exit(1);
+}
+
+const payload = {
+  _schema: SCHEMA,
+  open: items.length,
+  critical: items.filter((it) => it.critical).length,
+  asOf: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+};
+
+// ------------------------------------------------------- assert before writing
+//
+// The payload is checked here as well as by the reader, and not because one of
+// them is redundant. This one catches the mistake at the moment it is made, in a
+// tool whose author can still see why; the reader catches the payload that
+// arrives, whoever wrote it. A file that fails here never reaches the repo at all.
+
+const problems = [];
+const keys = Object.keys(payload).sort();
+if (keys.join(',') !== '_schema,asOf,critical,open') problems.push(`unexpected fields: ${keys.join(', ')}`);
+for (const k of ['open', 'critical']) {
+  if (!Number.isInteger(payload[k]) || payload[k] < 0) problems.push(`${k} is not a count: ${JSON.stringify(payload[k])}`);
+}
+if (payload.critical > payload.open) problems.push('critical exceeds open');
+if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(payload.asOf)) problems.push(`asOf is not an ISO timestamp: ${payload.asOf}`);
+// The belt-and-braces one: no value in this object may be a string except the two
+// that are declared to be. If an item's text ever finds its way in here, it dies
+// on this line rather than in a review nobody ran.
+for (const [k, v] of Object.entries(payload)) {
+  if (typeof v === 'string' && k !== '_schema' && k !== 'asOf') problems.push(`${k} carries text, which never crosses this boundary`);
+}
+if (problems.length) {
+  for (const p of problems) console.error(`config-count: ${p}`);
+  process.exit(1);
+}
+
+const json = `${JSON.stringify(payload, null, 2)}\n`;
+
+if (flag('dry-run')) {
+  process.stdout.write(json);
+  process.exit(0);
+}
+
+if (flag('check')) {
+  let published;
+  try { published = JSON.parse(fs.readFileSync(out, 'utf8')); } catch {
+    console.error(`config-count: nothing published at ${path.relative(workspace, out)}`);
+    process.exit(1);
+  }
+  if (published.open !== payload.open || published.critical !== payload.critical) {
+    console.error(`config-count: published ${published.open}/${published.critical} but the list says ${payload.open}/${payload.critical} — re-run to refresh`);
+    process.exit(1);
+  }
+  console.log(`config-count: published count is current (${payload.open} open, ${payload.critical} critical)`);
+  process.exit(0);
+}
+
+fs.mkdirSync(path.dirname(out), { recursive: true });
+fs.writeFileSync(out, json);
+console.log(`config-count: wrote ${path.relative(workspace, out)} — ${payload.open} open, ${payload.critical} critical`);
+console.log('config-count: commit it to publish; the hub renders the number and never the items.');

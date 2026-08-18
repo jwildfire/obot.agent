@@ -45,7 +45,8 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { collectQueue, refreshRCs } from './lib/collect.mjs';
-import { render, sessionShell, sessionLogShell, navigatorShell, navigatorRecordShell, NOT_LISTENING } from './lib/render.mjs';
+import { render, sessionShell, sessionLogShell, navigatorShell, navigatorRecordShell, NOT_LISTENING, wirePage,
+} from './lib/render.mjs';
 import { parseNavigatorState } from './lib/navigator.mjs';
 import { buildMetricsModel, buildFeedModel, parseFilters } from './lib/metrics-view.mjs';
 import { buildSessionFeed } from './lib/feed.mjs';
@@ -87,7 +88,7 @@ const WATCH_CMD = 'node obot.agent/tools/session-hub/session-hub.mjs --watch';
 // The routes that serve one page are one surface: `/index.html` is the dashboard,
 // and `/session` is the address the tab strip uses for the live view the status
 // line calls `/live.html`. Recording them apart would split one look into three.
-const SURFACE_ALIASES = { '/index.html': '/', '/session': '/live.html' };
+const SURFACE_ALIASES = { '/index.html': '/', '/session': '/live.html', '/wire': '/wire.html' };
 
 export function parseArgs(argv) {
   // `claimMarker` is the whole of the primary fix for #142: a server told an
@@ -381,6 +382,22 @@ export function serve(args) {
       // showing a finished agent as running is worse than no roster. If assembling
       // it throws, the tab still serves the feed — neither the roster nor the feed
       // may take the other down.
+      // The Wire — what changed, and how much of it since he last looked (#203).
+      // Second of the four spine tabs, and the one surface that can answer the
+      // "since you last looked" half at all: this server sees the request, and a
+      // static public page never can. `look()` is read before the visit is
+      // recorded, which is the mechanism rather than an ordering detail.
+      if (p === '/wire.html' || p === '/wire') {
+        const before = look().before;
+        // A feed that cannot assemble costs the feed, never the page — the same
+        // rule the Agents tab applies to the same builder.
+        let feed = [];
+        try {
+          feed = buildFeedModel(buildSessionFeed({ workspace: args.workspace }));
+        } catch { /* no feed — the page renders its own honest empty state */ }
+        return send(200, 'text/html; charset=utf-8', wirePage(feed, before, before));
+      }
+
       if (p === '/live.html' || p === '/session' || p === '/session/' || p === '/session/log') {
         const before = look().before;
         // Read before the roster is assembled, because the pins decide scope: a
