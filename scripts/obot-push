@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# obot-push — push the current branch as obotclaw[bot] instead of as @jwildfire.
+#
+# THE PROBLEM THIS SOLVES. Every remote in this workspace is SSH, so `git push`
+# authenticates with @jwildfire's key whatever token is in the environment. No token
+# fixes that: the credential is the one the remote uses. Inside one three-hour window
+# on 2026-08-18 that recorded two force-pushes, a further push and a branch deletion
+# with him as the actor (jwildfire/obot.roadmap#260).
+#
+# THE LANE ALREADY WORKED; NOBODY SHOULD TYPE IT. tools/fold/lib/publish.mjs has been
+# pushing to an https://x-access-token:<token>@github.com/... URL all along, and the
+# repository activity feed shows those as obotclaw[bot]. The reason this is a script
+# rather than a documented one-liner is the same reason the bot's user id is now a
+# module: a URL reconstructed from memory is a URL that comes out plausible and wrong,
+# and thirty-eight fabricated user ids are the evidence (obot.agent#241).
+#
+# WHAT IT REFUSES, and why each refusal is louder than the failure it prevents:
+#   - an empty or unmintable token. An empty credential is not an error to git; it
+#     falls through to whatever is ambient, which is his keyring, and the push is
+#     recorded as his permanently (obot.agent#207, twice already).
+#   - a remote outside the jwildfire org. Read-only there, no exceptions.
+#   - --force / --force-with-lease / --delete. This is the attribution lane, not a
+#     shortcut to a rewrite; a history rewrite stays something a person types out.
+#
+# The SSH remote is left exactly as it is. That is deliberate: his own pushes from
+# these clones must keep going out as him, and if a mint fails the correct outcome is
+# a visible refusal rather than a silent fall-back to his identity.
+#
+# Usage, from inside the checkout or worktree whose branch you want pushed:
+#   obot.agent/scripts/obot-push                 # current branch to its own name
+#   obot.agent/scripts/obot-push -u              # ...and set upstream
+#   obot.agent/scripts/obot-push HEAD:some-branch
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOKEN_BIN="${OBOT_APP_TOKEN_BIN:-$SELF_DIR/obot-app-token}"
+REMOTE_NAME="${OBOT_PUSH_REMOTE:-origin}"
+
+die() { echo "obot-push: $*" >&2; exit 1; }
+
+for arg in "$@"; do
+  case "$arg" in
+    -f|--force|--force-with-lease|--force-with-lease=*|--delete|-d|--mirror)
+      die "refusing $arg — this wrapper is the attribution lane, not the lane for rewriting or deleting history. Do that deliberately, by hand, with approval." ;;
+  esac
+done
+
+url="$(git remote get-url "$REMOTE_NAME" 2>/dev/null)" || die "no remote '$REMOTE_NAME' here — run this from inside the checkout or worktree you want pushed"
+
+# Both spellings a remote can take, reduced to owner/repo.
+slug="$(printf '%s' "$url" | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
+owner="${slug%%/*}"
+[ "$owner" = "jwildfire" ] || die "remote '$REMOTE_NAME' is $slug — writes outside the jwildfire org are refused, with no exceptions. Hand the change to @jwildfire instead."
+
+token="$("$TOKEN_BIN" 2>/dev/null)" || token=""
+[ -n "$token" ] || die "the app token mint returned nothing — refusing to push on whatever credential is ambient, which is @jwildfire's. Nothing was pushed."
+
+if [ "$#" -eq 0 ] || [ "$1" = "-u" ] || [ "$1" = "--set-upstream" ]; then
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  [ "$branch" != "HEAD" ] || die "detached HEAD — name the refspec explicitly"
+  set -- "$@" "HEAD:$branch"
+fi
+
+# The token is interpolated into the URL and never echoed: this output reaches a
+# transcript, and an installation token is live for an hour.
+git push "https://x-access-token:${token}@github.com/${slug}.git" "$@"
