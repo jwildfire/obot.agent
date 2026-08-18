@@ -38,11 +38,33 @@ from one that passes everything.
 | Paragraph | exactly one, no newline in it, ≤ 60 visible words |
 | Bullets | `- ` at column zero, ≤ 20 visible words, no sub-bullet, no continuation |
 | Total | 10 bullets, except that release candidates and decisions are never cut |
-| Config | the count only, never item text — the parameter takes a number |
+| Config | earned-critical items by **id** (at most three), the rest a count — never item text |
 | Nothing else | no headings, no meta line, no report links, no footer, no coda, no inline bold |
 
 Words, never characters: a line that wraps on his phone is still one line, and a
 markdown link's URL is not prose.
+
+The config line names the items that have **earned** the critical tag, by id —
+`3 critical config items (c0016, c0017, c0019) and 10 others`. Criticality comes
+from the Operations Dashboard's own `criticalClaim`, so the brief cannot disagree
+with the page he answers these on: earned by a blocking reference something
+resolved to an open issue, never asserted, and budgeted at three. An id carries no
+item text, and anything that is not exactly `cNNNN` is dropped rather than
+repaired — item text has no route into the brief even when passed in the wrong
+parameter. The ids matter because c0017 is the item gating the fold's own
+schedule: a brief that could not name it could not say why it is being written by
+hand.
+
+Those ids are read **before** the hub's decision collector, and the order is
+load-bearing: importing hub code installs its local-only guard on `node:fs` for
+the whole process (obot.agent#206), after which a dynamic import of anything
+outside the hub is refused. It fails closed and says so on the run report.
+
+Nothing is composed out of failed queries, in either half. A git scan that could
+not run says so instead of becoming "nothing landed overnight", a partial one
+states its number as a floor, and `--brief` on an unknown queue prints nothing at
+all — stderr does not save a brief that is short, tidy and wrong once it has been
+piped to a file.
 
 What it deliberately leaves alone: the diary entry, which is the archive and the
 keynote's raw material and is written for someone who was not present; and the
@@ -99,7 +121,8 @@ Navigator's sweep declares itself sole writer of `.claude/session-hub/`.
 - `state.json` — the watermark, the last published queue hash, and the session-log
   sizes at the last fold.
 - `brief.md` — the daily brief, rewritten whenever the queue changes. Local: it
-  carries a config **count**, and the list it counts never leaves the machine.
+  carries config **ids and a count**, never item text — the list itself never
+  leaves the machine.
 - `runs.jsonl` — one line per run, **including quiet ones**. A quiet night and a
   dead scheduler produce identical output, which is nothing; this file is what
   tells them apart.

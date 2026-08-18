@@ -85,6 +85,42 @@ export function openBlockerCount(workspace) {
  * Bytes, not line timestamps: the `- HH:MM` on a scratchpad line is shelled local
  * time and agents here have run under at least three zones.
  */
+/**
+ * The IDS of the config items that have EARNED the critical tag, and nothing else
+ * about them.
+ *
+ * Reuses the Operations Dashboard's own parse and its own criticality rule rather
+ * than deciding either here — the brief must not be able to disagree with the page
+ * he answers these on. Criticality is earned (a `Blocks:` reference something
+ * resolved to an open issue) or computed, never asserted by the item, and it is
+ * budgeted at three (@jwildfire, 2026-08-15: "use it sparingly. I'm going to be
+ * annoyed if you tell me something is critical when it isn't").
+ *
+ * An ID and nothing more crosses this boundary. The count stays the entire
+ * permitted payload for everything else, and item text has no route out of this
+ * function at all — the return value is an array of strings matched against
+ * `cNNNN`.
+ */
+export async function criticalConfigIds(workspace) {
+  try {
+    const { collectConfig } = await import('../../ops-dashboard/lib/collect.mjs')
+    const { criticalClaim, CRITICAL_BUDGET } = await import('../../ops-dashboard/lib/rank.mjs')
+    const res = collectConfig(workspace)
+    if (res.error && !res.absent) return { unknown: true, why: res.error, ids: [] }
+    const ids = res.items
+      .filter((i) => criticalClaim(i))
+      .map((i) => i.id)
+      .filter((id) => /^c\d{4}$/i.test(String(id ?? '')))
+      .slice(0, CRITICAL_BUDGET)
+    return { unknown: false, why: null, ids }
+  } catch (e) {
+    // Not fatal, and deliberately not an unknown for the gate: the COUNT is read
+    // separately and is what the queue hash is built from. Losing the ids costs
+    // the brief three identifiers, not its honesty about how many are open.
+    return { unknown: true, why: `could not read config criticality: ${String(e.message).split('\n')[0]}`, ids: [] }
+  }
+}
+
 export function sessionLogSizes(workspace) {
   let names
   try {

@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 
 import { decide, queueHash } from './lib/decide.mjs'
 import { readState, writeState, recordRun } from './lib/state.mjs'
-import { sweptEvents, openBlockerCount, sessionLogSizes, scratchpadTodos, grownSince } from './lib/collect.mjs'
+import { sweptEvents, openBlockerCount, sessionLogSizes, scratchpadTodos, grownSince, criticalConfigIds } from './lib/collect.mjs'
 import { policyRepos, commitsSince } from './lib/repos.mjs'
 import { openDecisions } from './lib/decisions.mjs'
 import { stampBookend } from './lib/ledger.mjs'
@@ -145,6 +145,16 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
   }
 
   // --- the queue, as it stands now -----------------------------------------
+
+  // The critical config ids are read BEFORE the hub collector, and that ordering
+  // is load-bearing rather than tidy. Importing hub code installs its local-only
+  // guard on node:fs for the WHOLE process (obot.agent#206), after which a
+  // dynamic import of anything outside the hub is refused — measured here: the
+  // brief's first live run reported "could not read config criticality: ...
+  // outside this repository". It fails closed and says so, which is why this is
+  // an ordering comment rather than an incident.
+  const critical = await criticalConfigIds(workspace)
+
   const decisions = await openDecisions(hub)
   const blockers = openBlockerCount(workspace)
   const todos = scratchpadTodos(workspace)
@@ -202,15 +212,33 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
   // spends on a phone. Composed from the same collection pass, so the two cannot
   // disagree about what is waiting.
   const wantBrief = opts.brief || verdict.diary || verdict.briefing
-  const landed = wantBrief ? gatherLanded(workspace, repos, since) : []
+  const landedRes = wantBrief ? gatherLanded(workspace, repos, since) : { items: [], unknown: false }
+  const landed = landedRes.items
+  if (wantBrief && critical.unknown) report.unknowns.push(`config ids: ${critical.why}`)
   const briefText = wantBrief
-    ? composeBrief({ landed, rcs, decisions: decisions.items, todos: todos.items, configOpen: blockers.count })
+    ? composeBrief({
+        landed,
+        landedUnknown: landedRes.unknown || git.unknown,
+        rcs,
+        decisions: decisions.items,
+        todos: todos.items,
+        configOpen: blockers.count,
+        configCritical: critical.ids,
+      })
     : null
 
   // --brief reads and writes nothing: it renders exactly what the next fold will
   // write, so the shape can be checked by looking at it rather than by trusting
   // the tool's report of itself.
-  if (opts.brief) return { exit: verdict.verdict === 'unknown' ? 3 : 0, brief: briefText, report }
+  //
+  // On an UNKNOWN queue it prints nothing at all. A brief built from failed
+  // queries is short, tidy and wrong, and stderr does not save it — piped to a
+  // file or read past on a phone, a queue that could not be read renders
+  // identically to a morning with nothing waiting.
+  if (opts.brief) {
+    const known = verdict.verdict !== 'unknown'
+    return { exit: known ? 0 : 3, briefRequested: true, brief: known ? briefText : null, report }
+  }
 
   if (!opts.dryRun) {
     recordRun(workspace, report)
@@ -316,9 +344,12 @@ function deliver({ workspace, verdict, queue, swept, now }) {
 // disagreeing about it.
 function gatherLanded(workspace, repos, since) {
   try {
-    return landedSince(workspace, repos, since).rows.flatMap((r) => parseLanded(r.repo, r.log))
-  } catch {
-    return []
+    const res = landedSince(workspace, repos, since)
+    return { items: res.rows.flatMap((r) => parseLanded(r.repo, r.log)), unknown: res.unknown }
+  } catch (e) {
+    // Unknown, never empty. An empty list and a scan that could not run read
+    // identically downstream, and only one of them means the night was quiet.
+    return { items: [], unknown: true, why: String(e.message).split('\n')[0] }
   }
 }
 
@@ -420,7 +451,7 @@ const USAGE = `obot fold — decide whether there is anything to say this mornin
 `
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const { exit, error, help, report, brief } = await run(process.argv.slice(2))
+  const { exit, error, help, report, brief, briefRequested } = await run(process.argv.slice(2))
   // The verdict is the FIRST line, because callers summarise by first line and a
   // check whose headline is swallowed reports nothing while looking healthy
   // (obot.agent#129).
@@ -442,8 +473,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // not answer goes to stderr rather than into the brief: a short, tidy brief
   // composed from failed queries is this programme's canonical defect, and the one
   // place it must not appear is the surface he trusts to be complete.
-  if (brief !== undefined) {
-    console.log(brief.trimEnd())
+  if (briefRequested) {
+    if (brief) console.log(brief.trimEnd())
+    else console.error('fold: UNKNOWN — refusing to print a brief composed from failed queries. Nothing was written to stdout.')
     for (const u of report.unknowns) console.error(`fold: ${u}`)
     process.exit(exit)
   }
