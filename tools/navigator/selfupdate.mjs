@@ -80,13 +80,60 @@ const GIT_TIMEOUT = 45000
 export const DASHBOARD_PORT = Number(process.env.OBOT_DASHBOARD_PORT) || 7326
 
 /**
- * How quiet the dashboard has to have been before it may be restarted.
+ * How quiet the dashboard has to have been before it may be restarted — on the ONE
+ * path that has nothing better to go on: a build too old to have a health endpoint,
+ * judged from the disk record of when a page was last opened.
  *
- * The page does not poll — it is rendered per request — so a gap this long means
- * nobody is reading it right now. Erring long is free: the next sweep is five
- * minutes away and stale-for-five-more-minutes is the outcome this bar prefers.
+ * Erring long was free when this was the only bar. It is not free any more, which is
+ * why it no longer governs the healthy path: see `SETTLE_MS` below.
  */
 export const QUIET_MS = 20000
+
+/**
+ * How long after a response closes the restart still holds off, on a server that can
+ * report `inflight`.
+ *
+ * This replaces the twenty-second bar on the healthy path, and the replacement is the
+ * whole of obot.agent#258. A completed response is not a request in flight. The pages
+ * this server renders fetch NOTHING from this origin — every `src` and `href` in a
+ * rendered page is a navigation link or a github.com URL — so when `inflight` is zero
+ * the response is complete on the wire and a restart drops nothing whatsoever.
+ * Twenty seconds of quiet was therefore never measuring "a restart would interrupt
+ * something". It was measuring "somebody might ask again soon", which is a guess about
+ * the future, and it is the guess a poller falsifies forever: the checkout stood at
+ * `7482007` while the server served `0832443`, because something was watching the page
+ * for the merge it was waiting on. Watching for the deploy prevented the deploy.
+ *
+ * What survives is two seconds, for the one thing last-request time genuinely knows:
+ * a person clicking a link makes two requests a few hundred milliseconds apart, and
+ * restarting between them turns a click into a connection error. Two seconds covers
+ * that and costs at most one more sweep.
+ */
+export const SETTLE_MS = 2000
+
+/**
+ * How many consecutive sweeps may defer the restart before one happens regardless.
+ *
+ * THREE, and the number is a judgement about which failure is worse rather than a
+ * round figure. At the five-minute cadence three deferrals is a fifteen-minute
+ * ceiling on how long this machine can serve a build older than its checkout while
+ * somebody is looking at it.
+ *
+ * The two costs are not symmetrical, which is what decides it. Forcing a restart may
+ * drop one request: the reader gets a connection error, refreshes, and has both the
+ * page and the new build a second later — a fault that announces itself and repairs
+ * itself. Not forcing one leaves a page that renders perfectly and is out of date,
+ * which is not visible as a fault at all; that is the state @jwildfire read for a day
+ * and a half in obot.agent#186, and the state `/config/c0016` was 404 in on the
+ * morning of 2026-08-18 while the route sat merged in the checkout.
+ *
+ * So the bound is set where a watcher's own patience runs out. Fifteen minutes is
+ * longer than any honest request (they are milliseconds) and longer than a click-
+ * through; it is shorter than the time anyone spends waiting for a merge to appear
+ * before concluding the machine is broken. A larger number protects nothing extra and
+ * costs exactly the failure this bound exists to end.
+ */
+export const DEFERRAL_LIMIT = 3
 
 /** The tiers of D1, in the words the page prints. Data, so the page and the code cannot drift. */
 export const CONSUMER_POLICY = {
@@ -376,8 +423,20 @@ export function lastLookMs(store, now = new Date()) {
  * outcome carries a code and a sentence, including the boring ones, because a page
  * that speaks only when something is wrong cannot be trusted when it is silent.
  */
-export function planRestart({ marker, health: h, headSha, lastLookMs: lookMs, quietMs = QUIET_MS, port = DASHBOARD_PORT }) {
+export function planRestart({ marker, health: h, headSha, lastLookMs: lookMs, quietMs = QUIET_MS,
+                              settleMs = SETTLE_MS, port = DASHBOARD_PORT,
+                              deferrals = 0, limit = DEFERRAL_LIMIT }) {
   const out = (act, code, reason) => ({ act, code, reason })
+  // Every wait goes through here, so the bound cannot be reachable by one deferral and
+  // not another — the reason a restart is being held off does not change the fact that
+  // it is being held off, and the failure this bounds is the holding, not the reason.
+  //
+  // `deferred: true` is the flag the record and the page key on. It marks a restart
+  // this machine WANTS and is not doing, which is a different thing from having
+  // nothing to do — and the two used to render identically, as one grey bullet.
+  const held = (code, reason) => (deferrals >= limit
+    ? { ...out('restart', 'deferral-bound', `${reason}, but the restart has now been deferred ${deferrals} times — it is going ahead rather than waiting for a quiet moment that may never come`), forced: true, heldFor: deferrals }
+    : { ...out('skip', code, reason), deferred: true })
 
   if (!marker || marker.state === 'none') {
     return out('skip', 'not-running', 'no dashboard has advertised itself on this machine — nothing to restart')
@@ -419,24 +478,31 @@ export function planRestart({ marker, health: h, headSha, lastLookMs: lookMs, qu
     // page is the fallback, and when even that cannot be read the answer is to refuse
     // rather than to guess — a guess here is a killed request.
     if (lookMs === null || lookMs === undefined) {
-      return out('refuse', 'unknown-quiescence', 'the running dashboard predates the health endpoint and no page-visit record could be read, so whether it is mid-request is unknowable — it is left running')
+      return held('unknown-quiescence', 'the running dashboard predates the health endpoint and no page-visit record could be read, so whether it is mid-request is unknowable — it is left running')
     }
     if (lookMs < quietMs) {
-      return out('skip', 'busy', `the page was opened ${Math.round(lookMs / 1000)}s ago — a restart now could land mid-request, so it waits for the next sweep`)
+      return held('busy', `the page was opened ${Math.round(lookMs / 1000)}s ago and this build cannot say whether a request is in flight, so it waits for the next sweep`)
     }
     return out('restart', 'stale-code-quiet', `the running dashboard is serving older code and the page has been quiet for ${Math.round(lookMs / 1000)}s`)
   }
+  // In flight is the only state a restart destroys anything in: the marker's exit hook
+  // runs on SIGTERM and calls `process.exit` without draining, so an open response dies
+  // with the process. Everything else below is a courtesy.
   if (h.inflight > 0) {
-    return out('skip', 'busy', `${h.inflight} request${h.inflight === 1 ? ' is' : 's are'} in flight — a restart now would kill ${h.inflight === 1 ? 'it' : 'them'}, so it waits for the next sweep`)
+    return held('busy', `${h.inflight} request${h.inflight === 1 ? ' is' : 's are'} in flight — a restart now would kill ${h.inflight === 1 ? 'it' : 'them'}, so it waits for the next sweep`)
   }
   const idle = Number.isFinite(h.idleMs) ? h.idleMs : (lookMs ?? null)
   if (idle === null) {
-    return out('refuse', 'unknown-quiescence', 'the dashboard reports no idle time, so whether it is being read is unknowable — it is left running')
+    return held('unknown-quiescence', 'the dashboard reports no idle time, so whether it is being read is unknowable — it is left running')
   }
-  if (idle < quietMs) {
-    return out('skip', 'busy', `the page was last served ${Math.round(idle / 1000)}s ago — a restart now could land mid-request, so it waits for the next sweep`)
+  // The settling window, and the whole of what last-request time is still trusted for.
+  // A click is two requests a few hundred milliseconds apart; restarting between them
+  // turns it into a connection error. Beyond that this number knows nothing — see
+  // `SETTLE_MS`, and obot.agent#258 for what believing it cost.
+  if (idle < settleMs) {
+    return held('settling', `a response closed ${idle}ms ago — a click is two requests, so it lets this one settle and takes the next sweep`)
   }
-  return out('restart', 'stale-code-quiet', `the running dashboard is serving \`${h.code?.short ?? 'unknown'}\` and has been quiet for ${Math.round(idle / 1000)}s`)
+  return out('restart', 'stale-code-quiet', `the running dashboard is serving \`${h.code?.short ?? 'unknown'}\` with nothing in flight and the last response closed ${Math.round(idle / 1000)}s ago`)
 }
 
 const sleepMs = (ms) => { try { execFileSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { timeout: ms + 4000, stdio: 'ignore' }) } catch { /* a sleep that fails is a shorter sleep */ } }
@@ -465,7 +531,7 @@ export { alive }
  * strictly better than a killed one serving nothing, and the next sweep will try
  * again. Nothing here sends SIGKILL.
  */
-export function restartDashboard({ root, workspace, port = DASHBOARD_PORT, pid, start = true,
+export function restartDashboard({ root, workspace, port = DASHBOARD_PORT, pid, start = true, expect = null,
                                    spawnFn = spawn, kill = process.kill.bind(process), isAlive = alive,
                                    probe: p = probe, sleep = sleepMs, waitMs = 12000, logFile = null } = {}) {
   const url = `http://127.0.0.1:${port}/`
@@ -499,26 +565,72 @@ export function restartDashboard({ root, workspace, port = DASHBOARD_PORT, pid, 
     return { ok: false, code: 'spawn-failed', reason: `the replacement dashboard could not be started: ${e.message}` }
   }
 
-  // Started is not serving. The whole requirement is that a failure to update is
-  // visible, and a spawn that exits two seconds later on a syntax error is exactly
-  // the failure this would otherwise report as a success.
+  // Started is not serving, and SERVING IS NOT THIS PROCESS SERVING. This loop used to
+  // end on the first 200 from the port, which answers "is something on 7326" — a
+  // question the OLD process answers perfectly well, and did: a restart that spawned a
+  // replacement which never bound would report success on the strength of the process
+  // it had just failed to replace. What is asked for here is identity, and `/healthz`
+  // already reports the pid and the commit, so the proof costs nothing extra.
+  //
+  // AND IT IS ASKED OF `/healthz` ALONE, never of the page. `/healthz` is exempt from
+  // the server's traffic counter on purpose; requesting `/` is real traffic, it resets
+  // the idle clock on whatever is serving, and a verification that did that would seed
+  // the very deferral it was verifying its way out of (obot.agent#258). The old
+  // fallback that probed `/` for builds predating the endpoint is gone for that reason
+  // and for a second one: every build this restarter can start HAS the endpoint, so a
+  // page answering while `/healthz` does not is proof of a foreign process, not of an
+  // old one.
+  const mine = child.pid ?? null
   let waited = 0
+  let foreign = null
   while (waited < waitMs) {
     const r = p(`${url}healthz`)
     if (r && r.status === 200) {
-      let code = null
-      try { code = JSON.parse(r.body)?.code ?? null } catch { /* answering is the point; parsing is a bonus */ }
-      return { ok: true, code: 'restarted', pid: child.pid ?? null, serving: code?.short ?? null, reason: `the dashboard answered on ${url} serving \`${code?.short ?? 'unknown'}\`` }
-    }
-    // An older build has no health endpoint; a 200 on the page itself still proves it
-    // is serving, and this path exists only until one restart has happened.
-    const root200 = p(url)
-    if (root200 && root200.status === 200) {
-      return { ok: true, code: 'restarted', pid: child.pid ?? null, serving: null, reason: `the dashboard answered on ${url} (no health endpoint — this build predates it)` }
+      let h = null
+      try { h = JSON.parse(r.body) } catch { /* an unparseable answer is an unverified one */ }
+      const servingPid = Number.isFinite(h?.pid) ? h.pid : null
+      const short = h?.code?.short ?? null
+      if (servingPid !== null && mine !== null && servingPid !== mine) {
+        // Whatever is on the port, it is not what was just started. Keep waiting only
+        // while the replacement could still take over; once it is gone it never will.
+        foreign = { servingPid, short }
+        if (!isAlive(mine)) break
+      } else if (expect && h?.code?.sha && h.code.sha !== expect) {
+        return { ok: false, code: 'wrong-build', pid: mine, servingPid, serving: short, verified: false,
+                 reason: `the dashboard answered as pid ${servingPid ?? '?'} but is serving \`${short ?? 'unknown'}\`, not the \`${expect.slice(0, 7)}\` it was restarted onto` }
+      } else if (servingPid === null) {
+        // It answered and cannot name itself. Unverified is its own state: it must not
+        // read as verified, and it must not read as a failure either.
+        return { ok: true, code: 'restarted', pid: mine, servingPid: null, serving: short, verified: false,
+                 reason: `the dashboard answered on ${url} serving \`${short ?? 'unknown'}\`, but which process is answering could not be confirmed — this build does not report its pid` }
+      } else {
+        return { ok: true, code: 'restarted', pid: mine, servingPid, serving: short, verified: true,
+                 reason: `the dashboard answered on ${url} as pid ${servingPid} serving \`${short ?? 'unknown'}\`` }
+      }
     }
     sleep(500); waited += 500
   }
-  return { ok: false, code: 'no-answer', reason: `a replacement dashboard was started (pid ${child.pid ?? '?'}) but nothing answered on ${url} within ${Math.round(waitMs / 1000)}s — the page is DOWN and the next sweep will start it again` }
+  if (foreign) {
+    // The replacement could not take the port. If it is somehow still alive it is
+    // serving nothing and holding nothing, so it goes — "either bind or exit" is the
+    // rule, and a process that did neither is not left behind to be counted as a
+    // dashboard by the next thing that looks.
+    const stopped = stopReplacement(mine, { kill, isAlive })
+    return { ok: false, code: 'not-ours', pid: mine, servingPid: foreign.servingPid, serving: foreign.short, verified: false,
+             reason: `the replacement (pid ${mine ?? '?'}) never took ${url} — pid ${foreign.servingPid} is still answering there, serving \`${foreign.short ?? 'unknown'}\`${stopped ? ', and the replacement has been stopped rather than left running' : ''}` }
+  }
+  return { ok: false, code: 'no-answer', pid: mine, verified: false, reason: `a replacement dashboard was started (pid ${mine ?? '?'}) but nothing answered on ${url} within ${Math.round(waitMs / 1000)}s — the page is DOWN and the next sweep will start it again` }
+}
+
+/**
+ * Stop a replacement that never became the server. Ours to stop and nothing else's:
+ * the pid came from the spawn a few seconds earlier in this same function, so there is
+ * no identification step to get wrong and no way for this to reach a process somebody
+ * is using.
+ */
+export function stopReplacement(pid, { kill = process.kill.bind(process), isAlive = alive } = {}) {
+  if (!pid || !isAlive(pid)) return false
+  try { kill(pid, 'SIGTERM'); return true } catch { return false }
 }
 
 // ── The run ──────────────────────────────────────────────────────────────────────
@@ -591,20 +703,28 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
                              marker = readMarker(markerPath(workspace)),
                              health: readHealth = health, lastSeen = readLastSeen(workspace),
                              restart = restartDashboard, ff = fastForward, quietMs = QUIET_MS,
-                             port = DASHBOARD_PORT, logFile = null } = {}) {
+                             port = DASHBOARD_PORT, logFile = null, previous = undefined } = {}) {
   const at = now().toISOString()
   const checkout = ff(root)
   const headSha = checkout.to ?? null
+  // How many sweeps in a row have now wanted this restart and not done it. Read back
+  // off the record this function wrote last time, which is the only place it could
+  // live: the sweep is a fresh process every five minutes and has no memory of its own.
+  // An unreadable or pre-#258 record reads as zero, which fails towards waiting.
+  const deferrals = priorDeferrals(previous === undefined ? readRecord(workspace) : previous)
 
   const consumers = []
   const lock = takeLock(workspace)
   if (!lock.held) {
-    consumers.push({ id: 'ops-dashboard', act: 'skip', code: 'locked', ok: true, reason: lock.reason })
+    // A locked sweep got no turn, so it decided nothing — and must therefore reset
+    // nothing. Zeroing the count here would let a second restarter racing this one
+    // hold the bound off indefinitely, which is this defect wearing a different hat.
+    consumers.push({ id: 'ops-dashboard', act: 'skip', code: 'locked', ok: true, reason: lock.reason, deferrals })
   } else {
     try {
       const h = readHealth(port)
       const plan = planRestart({
-        marker, health: h, headSha, quietMs, port,
+        marker, health: h, headSha, quietMs, port, deferrals,
         lastLookMs: lastLookMs(lastSeen, now()),
       })
       if (plan.act === 'restart' || plan.act === 'start') {
@@ -617,16 +737,23 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
         // between "a restart happened" and "a restart was overdue".
         const prev = previousProcess(marker, now())
         const r = restart({
-          root, workspace, port, logFile,
+          root, workspace, port, logFile, expect: headSha,
           pid: plan.act === 'restart' ? marker?.pid : null,
           start: true,
         })
-        consumers.push({ id: 'ops-dashboard', act: plan.act, code: r.code, ok: r.ok,
+        // A restart was attempted, so the hold is over either way: it succeeded, or it
+        // failed and has its own alarm. Carrying the count past an attempt would force
+        // a second restart on the very next sweep on top of a failure already being
+        // reported, which is motion rather than information.
+        consumers.push({ id: 'ops-dashboard', act: plan.act, code: r.code, ok: r.ok, deferrals: 0,
+                         forced: Boolean(plan.forced), heldFor: plan.heldFor ?? 0, verified: r.verified ?? null,
                          reason: r.ok ? `${r.reason}${prev.words ? `, replacing one ${prev.words}` : ''}` : `${plan.reason}, but ${r.reason}`,
-                         was: h?.code?.short ?? null, previous: prev, serving: r.serving ?? null, at: now().toISOString() })
+                         was: h?.code?.short ?? null, previous: prev, serving: r.serving ?? null,
+                         servingPid: r.servingPid ?? null, at: now().toISOString() })
       } else {
-        consumers.push({ id: 'ops-dashboard', act: plan.act, code: plan.code, ok: plan.act !== 'refuse',
-                         reason: plan.reason, serving: h?.code?.short ?? null })
+        consumers.push({ id: 'ops-dashboard', act: plan.act, code: plan.code, ok: true,
+                         deferred: Boolean(plan.deferred), deferrals: plan.deferred ? deferrals + 1 : 0,
+                         limit: DEFERRAL_LIMIT, reason: plan.reason, serving: h?.code?.short ?? null })
       }
     } finally { lock.release() }
   }
@@ -659,6 +786,28 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
  * 2026-08-16. A new filename can only ever be absent to an old reader, and absent is
  * a state every reader here already handles.
  */
+/**
+ * The last record this machine wrote, or null. Absent is the commonest answer on a
+ * fresh machine and an unreadable one is treated the same way here for once: both mean
+ * "no count to carry", and both fail towards waiting rather than towards restarting.
+ */
+export function readRecord(workspace) {
+  try { return JSON.parse(readFileSync(recordPath(workspace), 'utf8')) } catch { return null }
+}
+
+/**
+ * How many consecutive sweeps have deferred this consumer's restart, per the record.
+ *
+ * Never inferred and never guessed at: a record written before obot.agent#258 carries
+ * no count, and the honest reading of that is zero — the counting starts now. Anything
+ * that is not a non-negative integer is zero too, because a corrupt number that
+ * happened to exceed the limit would force a restart on evidence of nothing.
+ */
+export function priorDeferrals(record, id = 'ops-dashboard') {
+  const n = (record?.consumers ?? []).find((c) => c?.id === id)?.deferrals
+  return Number.isInteger(n) && n >= 0 ? n : 0
+}
+
 export function writeRecord(workspace, record) {
   try {
     const file = recordPath(workspace)
@@ -736,9 +885,24 @@ export function renderSelfUpdate(record, now = new Date()) {
     ? `checkout: \`${String(c.to ?? '').slice(0, 7)}\` on \`${c.branch}\` — ${c.reason}`
     : `**AUTO UPDATE FAILED** — ${c.reason}. The checkout is ${positionSentence(record.position)}.`)
 
+  // THREE STATES, AND THEY MUST NOT COLLAPSE INTO TWO (obot.agent#258).
+  //
+  //   restarted and verified — a plain line naming the process and the commit.
+  //   deferred with a reason AND A COUNT — a bullet, below, that says how many sweeps
+  //     this restart has now been held off and out of how many it may be.
+  //   failed with a reason — an alarm.
+  //
+  // The count is the whole difference between the second and a dashboard with nothing
+  // to do. Before it, a restart held off indefinitely and a machine that was already
+  // current printed the same grey bullet, so the state that needed watching was the one
+  // that looked most settled.
   for (const con of record.consumers ?? []) {
     if (!con.ok) lines.push(`**DASHBOARD RESTART FAILED** — ${con.reason}`)
-    else if (con.act === 'restart' || con.act === 'start') lines.push(`${con.id}: ${con.act === 'start' ? 'started' : 'restarted'} — ${con.reason}`)
+    else if (con.act === 'restart' || con.act === 'start') {
+      const forced = con.forced ? ` (forced after ${con.heldFor} deferral${con.heldFor === 1 ? '' : 's'})` : ''
+      const unverified = con.verified === false ? ' — which process is serving could not be confirmed' : ''
+      lines.push(`${con.id}: ${con.act === 'start' ? 'started' : 'restarted'}${forced} — ${con.reason}${unverified}`)
+    }
   }
 
   lines.push('')
@@ -753,7 +917,12 @@ export function renderSelfUpdate(record, now = new Date()) {
     ? `- sweep: \`${s.short}\` — the code this run is executing, loaded ${ageWords(now.getTime() - Date.parse(s.startedAt)) ?? 'just now'}${moved ? `; the checkout has since moved to \`${String(c.to).slice(0, 7)}\` and the next run executes that` : ''}`
     : '- sweep: which commit this run is executing could not be read')
   for (const con of record.consumers ?? []) {
-    if (con.ok && con.act !== 'restart' && con.act !== 'start') lines.push(`- ${con.id}: not restarted — ${con.reason}`)
+    if (!con.ok || con.act === 'restart' || con.act === 'start') continue
+    // A deferral says which one it is, out of how many it gets. A reader who sees
+    // "deferral 3 of 3" knows the next sweep restarts regardless, and a reader who sees
+    // this bullet without a count knows there was nothing to restart in the first place.
+    const count = con.deferred ? `, deferral ${con.deferrals ?? 1} of ${con.limit ?? DEFERRAL_LIMIT}` : ''
+    lines.push(`- ${con.id}: not restarted${count} — ${con.reason}`)
   }
   lines.push(`- never restarted: ${CONSUMER_POLICY.never.map((n) => `${n.what} — ${n.why}`).join('; ')}.`)
   return `${lines.join('\n')}\n`

@@ -223,7 +223,15 @@ export const provenanceLine = ({ code = null, hub = null, update = null } = {}) 
     bits.push(update.restartedAt
       ? `updates: checked ${when}; this page was restarted onto <code>${esc(update.head ?? '')}</code> automatically`
       : update.deferred
-        ? `updates: checked ${when}; a restart onto <code>${esc(update.head ?? '')}</code> is waiting for the page to be idle`
+        // The count, not just the fact. This line used to promise a restart "waiting
+        // for the page to be idle", which was an unbounded wait dressed as an
+        // imminent one: whoever was reading it was the reason it was waiting
+        // (jwildfire/obot.agent#258). Now it says which deferral this is and that
+        // there is a last one.
+        ? `updates: checked ${when}; a restart onto <code>${esc(update.head ?? '')}</code> is waiting for the page to settle${
+            update.deferrals && update.deferralLimit
+              ? ` (deferral ${update.deferrals} of ${update.deferralLimit} — after that it restarts regardless)`
+              : ''}`
         : `updates: checked ${when}; the checkout is current with its remote`);
   } else if (update?.state === 'absent') {
     bits.push(`updates: ${esc(update.why)}`);
@@ -242,7 +250,7 @@ export const provenanceLine = ({ code = null, hub = null, update = null } = {}) 
   // bug with an extra process.
   return `<p class="prov ${tone}">${bits.join(' &middot; ')}${
     code?.behind && !armed ? ` <span class="prov-fix"><code>${esc(RESTART_CMD)}</code>, then <code>/session-dashboard</code></span>` : ''}${
-    code?.behind && armed ? ' <span class="prov-fix">no action needed — the sweep restarts this page within five minutes, once nobody is reading it</span>' : ''}</p>`;
+    code?.behind && armed ? ' <span class="prov-fix">no action needed — the sweep restarts this page within five minutes of it going quiet, and within fifteen whether it does or not</span>' : ''}</p>`;
 };
 
 export const RESTART_CMD = "pkill -f 'ops-dashboard.mjs --serve'";
