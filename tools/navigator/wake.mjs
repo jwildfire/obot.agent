@@ -87,6 +87,31 @@ export const WAKE_WINDOW_HOURS = 24
 export const STALL_MIN = 30
 /** Grace before a worker waiting on a human is called unresolved. */
 export const WAITING_GRACE_MIN = 10
+/**
+ * One more sweep before a `waiting` reading is believed — obot.agent#176.
+ *
+ * The discriminator above needs time to be true. A session misread as blocked has
+ * not yet contradicted the record at the instant it is misread: W0033's fabricated
+ * block was written at 07:16:18.954Z and its next entry came at 07:29:15.879Z, and
+ * the wake fired at 07:28:40.973Z — thirty-five seconds too early to know. So the
+ * first sighting is held for one sweep and re-read, which is the whole difference
+ * between a discriminator that works retrospectively and one that works.
+ *
+ * FIVE MINUTES because that is the sweep's own period, from
+ * `com.obot.navigator-sweep.plist` (`StartInterval` 300). Measured against every
+ * blocked entry on this machine that was followed by a resume: 48 of them, median
+ * 1.4 minutes, p75 4.4, p90 30.9. Fifteen minutes of total quiet therefore sits
+ * above 83% of every resume ever recorded here and far below the genuine article —
+ * the real stalls in this corpus ran 20 and 21 hours. The eight resumes slower than
+ * this belong almost entirely to prime and the Navigator, which rest by design and
+ * are not watched.
+ *
+ * The cost is named rather than hidden: a genuine wait is reported about four
+ * minutes later than before. W0021, W0024 and W0031.1 each fired at 11 to 13
+ * minutes and were all real. Four minutes against a session's work is the trade this
+ * whole gate is, and it is the one the requirement asks for.
+ */
+export const WAITING_SETTLE_MIN = 5
 /** How long the Navigator must be idle before idleness itself is a detection. */
 export const IDLE_MIN = 20
 /** A sweep gap longer than this means the host was away, not the fleet stalled. */
@@ -183,22 +208,31 @@ export const scrubDetail = (s) => (isBoilerplateDetail(s) ? '' : String(s ?? '')
  */
 export const blockedSince = (job) => (job?.state === 'blocked' && job?.lastBlockedAt) || job?.updatedAt || null
 
-/** D1: it had already said it was finished before this block appeared. */
-export function terminalBeforeBlock(job) {
-  const at = Date.parse(blockedSince(job) ?? '')
-  const terminal = Date.parse(job?.firstTerminalAt ?? '')
-  return !Number.isNaN(at) && !Number.isNaN(terminal) && terminal < at
-}
-
 /**
- * D2: it emitted something after the block, so it was working through it.
+ * It emitted something after the block, so it was working through it.
+ *
+ * THE discriminator, and the only one. `firstTerminalAt` was the obvious second
+ * candidate and it is refuted by the record: it is a first-write-wins watermark the
+ * harness never resets, so it says "this session has EVER closed out", never "this
+ * session's current run is finished". 31 of the 113 job records on this machine
+ * produced timeline activity after it. Worse, it is TRUE for W0007 — which closed
+ * out at 08:13, was resumed four minutes later, and then sat twenty hours on a real
+ * permission prompt until a person stopped it. Ordering against that watermark puts
+ * the false case at +5.2 minutes and the true one at +71.8: same sign, and the true
+ * one further out. There is no threshold on it that works, in either direction, and
+ * it is not used here at all — not to suppress, and not to annotate, because an
+ * annotation would have printed CHECK IT FIRST on the realest stall in the corpus.
  *
  * Only when the block is the one the TIMELINE describes. A block that lives in
- * `tempo` alone — which is every real permission prompt in the 113 records on this
- * machine, W0007 and W0008 included, none of which wrote a `blocked` entry at all —
- * has no entry to measure "after" from, so the timeline cannot refute it and this
- * returns false. Anchoring on a stale earlier block and finding ordinary work after
- * it would suppress the genuine article, which is the one outcome that costs work.
+ * `tempo` alone — which is every real permission prompt in these records, W0007 and
+ * W0008 included, neither of which wrote a `blocked` entry at all — has no entry to
+ * measure "after" from, so the timeline cannot refute it and this returns false.
+ *
+ * And the anchor is the LAST blocked entry, never the first. W0021 sat genuinely
+ * stuck through a three-entry blocked run; anchoring on the run's start would read
+ * the second and third entries as it coming back to life, and one of those entries
+ * is the obot.agent#177 template comment — which would make one bug disarm the gate
+ * for the other.
  */
 export function movedThroughBlock(job) {
   if (job?.state !== 'blocked' || !job?.lastBlockedAt) return false
@@ -207,8 +241,8 @@ export function movedThroughBlock(job) {
 }
 
 export function misreadBlocked(job) {
-  if (!terminalBeforeBlock(job) || !movedThroughBlock(job)) return null
-  return `stamped a terminal result at ${job.firstTerminalAt} — before the blocked entry at ${job.lastBlockedAt} — and then went on working at ${job.movedAfterBlockedAt}; the state was derived from its own prose, not from a pending prompt`
+  if (!movedThroughBlock(job)) return null
+  return `it moved again at ${job.movedAfterBlockedAt}, after the blocked entry at ${job.lastBlockedAt} — the state was derived from its own prose, not from a pending prompt`
 }
 
 const W_ID = /W\d{4}(?:\.\d+)?/
@@ -332,20 +366,28 @@ export function classify(job, now = new Date(), { hostWasAway = false, workspace
     })
   } else if (!misread && !terminal && (job.state === 'blocked' || job.tempo === 'blocked') && job.needs &&
              quiet !== null && quiet >= (hostWasAway ? Infinity : WAITING_GRACE_MIN)) {
-    out.push({
+    // Held on the first sighting, believed on the second. `settling` is not a kind
+    // anything acts on and not a kind anything is woken for; it exists so that a
+    // detection which was raised and then withdrawn leaves a trace, because the
+    // alternative is a channel that is silent for two different reasons.
+    const settled = quiet >= WAITING_GRACE_MIN + WAITING_SETTLE_MIN
+    if (!settled) {
+      out.push({
+        kind: 'settling',
+        key: `settling:${job.id}`,
+        job: job.id,
+        worker: label(job),
+        at: job.updatedAt,
+        line: `${label(job)} reads blocked after ${Math.round(quiet)}m — held one sweep and re-read before anyone is woken, because a session misread as blocked has not yet contradicted the record at the instant it is misread (obot.agent#176)`,
+      })
+    }
+    else out.push({
       kind: 'waiting',
       key: `waiting:${job.id}`,
       job: job.id,
       worker: label(job),
       at: job.updatedAt,
-      // D1 without D2 is not enough to suppress — W0007 is that shape and was really
-      // stuck — but it is far too much to leave out of the sentence. This is the
-      // wake that fired on 2026-08-17T07:28:40Z, and what made it wrong was invisible
-      // in the line while being present in the record the whole time.
-      line: `${label(job)} has been waiting ${Math.round(quiet)}m and nobody has resolved it — needs: ${clip(job.needs, 120)}` +
-            (terminalBeforeBlock(job)
-              ? ` · CHECK IT FIRST: it stamped a terminal result at ${job.firstTerminalAt}, BEFORE this block. The harness derives this state from the session's own prose, so a sentence about work somebody else must do reads exactly like a pending prompt (obot.agent#176). Read ~/.claude/jobs/${job.id}/timeline.jsonl before acting`
-              : ''),
+      line: `${label(job)} has been waiting ${Math.round(quiet)}m and nobody has resolved it — needs: ${clip(job.needs, 120)} · its record was re-read ${WAITING_SETTLE_MIN}m after the first sighting and had not moved`,
     })
   } else if (!misread && !terminal && job.tempo === 'active' && quiet !== null &&
              quiet >= (hostWasAway ? Infinity : STALL_MIN)) {
@@ -370,7 +412,7 @@ export function classify(job, now = new Date(), { hostWasAway = false, workspace
   // `stopped` detection to fall back on, so if a suppression counted as a detection
   // the one safety net under a manager that really has stopped would switch itself
   // off exactly when the record had just been shown to be unreliable.
-  if (budgeted && !terminal && !out.some((d) => d.kind !== 'misread') && quiet !== null &&
+  if (budgeted && !terminal && !out.some((d) => !['misread', 'settling'].includes(d.kind)) && quiet !== null &&
       quiet >= (hostWasAway ? Infinity : TRIGGERED_QUIET_MIN)) {
     out.push({
       kind: 'wedged',
@@ -401,7 +443,7 @@ export function pending(jobs = [], { now = new Date(), judged = new Set(), hostW
       // Nobody is woken to look at a state that was never real. It is counted in the
       // section instead, which is where a suppression belongs: visible, and not a
       // notification (obot.agent#176).
-      if (d.kind === 'misread') continue
+      if (d.kind === 'misread' || d.kind === 'settling') continue
       out.push(d)
     }
   }
@@ -418,7 +460,7 @@ export function pending(jobs = [], { now = new Date(), judged = new Set(), hostW
  */
 export function misreadHolds(jobs = [], { now = new Date(), hostWasAway = false, workspace = null } = {}) {
   return jobs.flatMap((job) => classify(job, now, { hostWasAway, workspace })
-    .filter((d) => d.kind === 'misread'))
+    .filter((d) => d.kind === 'misread' || d.kind === 'settling'))
 }
 
 /** Closeouts older than the window: counted so the bound is never silent. */
@@ -672,7 +714,12 @@ export function wakeSection({ pending = [], delivered = [], held = [], listener 
   // indented line as a detail of the one above it, and this is the line that says
   // how much of the channel's own reading was thrown away.
   if (misread.length) {
-    lines.push(`suppressed: ${misread.length} blocked reading(s) refused as misread — each had already stamped a terminal result AND moved again afterwards, so the state came from the session's own prose (obot.agent#176). Nothing was closed on them: ${misread.map((d) => d.worker).join(', ')}`)
+    const refused = misread.filter((d) => d.kind === 'misread')
+    const settling = misread.filter((d) => d.kind === 'settling')
+    const parts = []
+    if (refused.length) parts.push(`${refused.length} refused as misread (the session moved again after the block, so the state came from its own prose): ${refused.map((d) => d.worker).join(', ')}`)
+    if (settling.length) parts.push(`${settling.length} held one sweep to be re-read before anyone is woken: ${settling.map((d) => d.worker).join(', ')}`)
+    lines.push(`held: ${parts.join(' · ')} — obot.agent#176. Nothing was closed on any of them.`)
   }
   if (pending.length) {
     lines.push('', '### Pending', '')

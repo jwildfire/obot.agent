@@ -12,7 +12,7 @@ import {
   DEATH, IDLE_MIN, MAX_WAKES_PER_RUN, REWAKE_MIN, STALL_MIN, TRIGGERED_QUIET_MIN,
   WAKE_WINDOW_HOURS, classify, deliverable, hostWasAway, idleDetection, isBoilerplateDetail,
   judgedWorkers, listenerState, misreadHolds, outsideWindow, parseWakeLog, pending, readJobs,
-  scrubDetail, verdictKeys, wakeLine, wakeSection, workerIdOf,
+  scrubDetail, verdictKeys, wakeLine, wakeSection, workerIdOf, WAITING_SETTLE_MIN,
 } from '../wake.mjs'
 
 const NOW = new Date('2026-08-17T06:00:00Z')
@@ -128,9 +128,14 @@ test('a manager that exited cleanly is the design working, not a closeout to jud
 })
 
 test('a manager waiting on a human says what it is waiting for', () => {
-  const d = classify(manager({ detail: 'awaiting approval', needs: 'approve Bash: obot-merge 158', updatedAt: agoMin(11) }), NOW)
+  // Past the settle. At eleven minutes this reads `settling` and is held for one
+  // sweep rather than delivered (obot.agent#176) — the four minutes are the price of
+  // not waking anyone on a state the record has not been given a chance to contradict.
+  const waiting = manager({ detail: 'awaiting approval', needs: 'approve Bash: obot-merge 158', updatedAt: agoMin(16) })
+  const d = classify(waiting, NOW)
   assert.deepEqual(d.map((x) => x.kind), ['waiting'])
   assert.match(d[0].line, /approve Bash/)
+  assert.deepEqual(classify({ ...waiting, updatedAt: agoMin(11) }, NOW).map((x) => x.kind), ['settling'])
 })
 
 test('the exclusion that was correct still holds: a resting role is never a corpse', () => {
@@ -377,20 +382,15 @@ test('with no job ledger on the machine the channel is unwatched, not clear', ()
 // raised in that session: it had DECIDED not to restart the dashboard and named that
 // as an outstanding action in its report. The harness's own classifier read that
 // sentence — an action somebody else had to take — as this session being blocked on
-// it, five minutes after the same session stamped a terminal result.
-//
-// So `blocked` is not a signal to be trusted and then filtered. It is the thing
+// it. So `blocked` is not a signal to be trusted and then filtered; it is the thing
 // being fabricated, and the admiral closes sessions on it.
 //
-// The fixtures below are the two shapes that matter, transcribed from
-// ~/.claude/jobs/d2dc1b30/timeline.jsonl and from the W0007 record above. They look
-// alike in the state file and are opposites in the timeline, which is why the gate
-// reads the timeline.
+// Every fixture below is transcribed from a record on this machine.
 
-const NOWL = new Date('2026-08-17T10:30:00Z') // three hours past the 07:16 block — the admiral's bar
+const NOWL = new Date('2026-08-17T07:33:00Z')
 
-// d2dc1b30, verbatim: terminal at 07:11:28, blocked at 07:16:18 with a `needs`
-// derived from its own prose, and then five more entries as it went on working.
+// d2dc1b30, verbatim. The block at 07:16:18 was written from its own prose; the next
+// entry is 07:29:15 and the last is 07:32:09, so the session was working throughout.
 const misreadJob = (over = {}) => ({
   id: 'd2dc1b30', name: '👯🤖 W0033 2026-08-17 agentdate', state: 'blocked', tempo: 'blocked',
   detail: 'ops-dashboard stale (pid 42255); need manual restart to see merged changes',
@@ -402,81 +402,137 @@ const misreadJob = (over = {}) => ({
   ...over,
 })
 
-// W0007, verbatim: closed out, and then genuinely stuck on a permission prompt with
-// nothing after it for twenty hours. Same two fields set as above; the timeline is
-// what tells them apart.
+// 5ccdd375 / W0007, verbatim, and the reason `firstTerminalAt` is not used as a
+// discriminator anywhere: it closed out at 08:13:32, was RESUMED four minutes later,
+// and then froze on a real permission prompt until a person stopped it 20.8 hours
+// on. Its terminal watermark precedes its block by 71.8 minutes — the same sign as
+// W0033's, and further out.
 const stuckAfterCloseoutJob = (over = {}) => ({
-  id: 'w0007job', name: '👯🤖 W0007 2026-08-16 lastlook', state: 'working', tempo: 'blocked',
-  detail: '', needs: 'approve Bash: python3 …',
-  updatedAt: '2026-08-17T09:00:00.000Z',
-  firstTerminalAt: '2026-08-17T07:30:00.000Z',
-  lastBlockedAt: '2026-08-17T09:00:00.000Z',
-  movedAfterBlockedAt: null,
+  id: '5ccdd375', name: '👯🤖 W0007 2026-08-16 lastlook', state: 'working', tempo: 'blocked',
+  detail: '', needs: 'approve Bash: bash …/tools/scratchpad-log …',
+  updatedAt: '2026-08-16T09:25:23.193Z',
+  firstTerminalAt: '2026-08-16T08:13:32.955Z',
+  lastBlockedAt: null, movedAfterBlockedAt: null,
   ...over,
 })
 
-test('the fabricated block: a session that stamped a terminal result and then went on working is not waiting', () => {
+test('the fabricated block: a session that went on working is not waiting', () => {
   const d = classify(misreadJob(), NOWL)
   assert.equal(d.filter((x) => x.kind === 'waiting').length, 0,
     'this is the wake that fired on 2026-08-17T07:28:40Z, and it must not fire again')
-  assert.ok(d.some((x) => x.kind === 'misread'), 'suppressed, and said out loud — a silent gate is indistinguishable from a broken one')
   const m = d.find((x) => x.kind === 'misread')
-  assert.match(m.line, /07:11:28/, 'it names the terminal stamp that precedes the block')
-  assert.match(m.line, /07:32:09/, 'and the activity that followed it')
+  assert.ok(m, 'suppressed, and said out loud — a silent gate is indistinguishable from a broken one')
+  assert.match(m.line, /07:32:09/, 'it names the activity that followed the block')
 })
 
-test('the gate needs BOTH discriminators: a terminal stamp alone never suppresses', () => {
-  // W0007 closed out at 08:13 and was then stuck twenty hours on a real permission
-  // prompt. `firstTerminalAt` precedes its block exactly as it does above, and this
-  // is the detection the whole channel was built for. Suppressing on that field
-  // alone would trade obot.agent#176 for the failure that preceded it.
-  const d = classify(stuckAfterCloseoutJob(), NOWL)
-  assert.ok(d.some((x) => x.kind === 'waiting'), 'a session that stopped moving after its block is genuinely stuck')
-  assert.equal(d.filter((x) => x.kind === 'misread').length, 0)
+test('the settle is what makes that true in time, not only in hindsight', () => {
+  // Replayed at the instant the false wake actually fired. The session had not yet
+  // contradicted the record — its next entry was still 35 seconds away — so the
+  // discriminator cannot fire and the ONLY thing standing between a fabricated state
+  // and a notification is the hold.
+  const atTheWake = misreadJob({
+    updatedAt: '2026-08-17T07:16:18.954Z',
+    lastBlockedAt: '2026-08-17T07:16:18.954Z',
+    movedAfterBlockedAt: null,
+  })
+  const d = classify(atTheWake, new Date('2026-08-17T07:28:40.973Z'))
+  assert.equal(d.filter((x) => x.kind === 'waiting').length, 0, 'quiet 12.4m is under grace + settle')
+  assert.ok(d.some((x) => x.kind === 'settling'))
+
+  // And one sweep later the record has answered: 07:29:15, 07:30:41, 07:32:09.
+  assert.ok(classify(misreadJob(), NOWL).some((x) => x.kind === 'misread'))
 })
 
-test('activity alone never suppresses either: a live session with no terminal stamp still reports', () => {
-  const d = classify(misreadJob({ firstTerminalAt: null }), NOWL)
+test('a real stall is delayed by the settle and never suppressed by it', () => {
+  const w0007 = classify(stuckAfterCloseoutJob(), new Date('2026-08-17T05:21:23.193Z'))
+  assert.ok(w0007.some((x) => x.kind === 'waiting'), '1196 minutes is not a settle question')
+  assert.equal(w0007.filter((x) => x.kind === 'misread').length, 0)
+
+  // The four minutes the settle costs, stated as a test rather than as a claim.
+  const fresh = { ...stuckAfterCloseoutJob(), updatedAt: agoMin(12) }
+  assert.deepEqual(classify(fresh, NOW).map((x) => x.kind), ['stopped', 'settling'])
+  assert.deepEqual(classify({ ...fresh, updatedAt: agoMin(16) }, NOW).map((x) => x.kind), ['stopped', 'waiting'])
+})
+
+test('the terminal watermark is used nowhere — it is true for the real stall too', () => {
+  // W0007's `firstTerminalAt` precedes its block by 71.8 minutes and W0033's by 5.2.
+  // Any rule ordering against it suppresses the true case harder than the false one,
+  // and an ANNOTATION built on it would have printed a warning on the one detection
+  // in this corpus that was right. So the line carries no such caveat.
+  const w = classify(stuckAfterCloseoutJob(), new Date('2026-08-17T05:21:23.193Z')).find((x) => x.kind === 'waiting')
+  assert.ok(!/CHECK IT FIRST|terminal result/.test(w.line), 'no doubt is cast on a genuine stall')
+  assert.match(w.line, /re-read/, 'what it says instead is that the record was re-read and had not moved')
+})
+
+test('a tempo-block has no entry to measure "after" from, so it is never refuted by one', () => {
+  // W0007 and W0008 wrote no `blocked` timeline entry at all. Anchoring a tempo-block
+  // on some earlier, unrelated block and finding ordinary work after it would suppress
+  // the genuine article.
+  const d = classify(stuckAfterCloseoutJob({
+    lastBlockedAt: '2026-08-16T07:45:00.000Z',
+    movedAfterBlockedAt: '2026-08-16T08:00:00.000Z',
+  }), new Date('2026-08-17T05:21:23.193Z'))
   assert.ok(d.some((x) => x.kind === 'waiting'))
   assert.equal(d.filter((x) => x.kind === 'misread').length, 0)
 })
 
-test('a misread never reaches the admiral: it is not a kind the closure path acts on', () => {
-  // The admiral iterates `classify` and acts on kinds in its own ACT_MIN table.
-  // `misread` is deliberately not one of them, and the assertion is here rather
-  // than only in admiral.test.mjs because this is the file that emits it.
-  const d = classify(misreadJob(), NOWL)
-  assert.ok(!d.some((x) => ['waiting', 'stalled', 'dead'].includes(x.kind)))
+test('the anchor is the LAST blocked entry: a multi-entry block does not resume itself', () => {
+  // 7f91b395 / W0021, verbatim: a genuine stall whose blocked run is three entries,
+  // 05:27:25 / 05:28:03 / 05:29:14, hand-stopped an hour later. The middle entry is
+  // the obot.agent#177 template comment — so anchoring on the run's START would let
+  // one bug disarm the gate for the other.
+  const d = classify({
+    id: '7f91b395', name: '👯🤖 W0021 2026-08-17 gsrelease', state: 'blocked', tempo: 'blocked',
+    detail: 'v1.1.0 is held at the tag pending @jwildfire\'s ruling on SafetyCensus()',
+    needs: '@jwildfire: rule on SafetyCensus() to resume v1.1.0 release',
+    updatedAt: '2026-08-17T05:29:14.239Z', firstTerminalAt: null,
+    lastBlockedAt: '2026-08-17T05:29:14.239Z', movedAfterBlockedAt: null,
+  }, new Date('2026-08-17T06:31:53.330Z'))
+  assert.deepEqual(d.map((x) => x.kind), ['waiting'])
 })
 
-test('a suppressed block does not suppress the wedged catch-all underneath it', () => {
-  // A budgeted role has no `stopped` detection to fall back on, so if `misread`
-  // counted as a detection the safety net beneath it would silently switch off.
-  const d = classify(misreadJob({ name: '⚓🤖 obot-admiral', updatedAt: agoMin(0) }), NOWL)
-  assert.ok(d.some((x) => x.kind === 'wedged'), 'still reported as wedged, because it must exit inside its budget')
+test('a misread never reaches the admiral: neither held kind is one it acts on', () => {
+  for (const j of [misreadJob(), misreadJob({ updatedAt: '2026-08-17T07:29:15.879Z', movedAfterBlockedAt: null, lastBlockedAt: '2026-08-17T07:29:15.879Z' })]) {
+    const kinds = classify(j, NOWL).map((x) => x.kind)
+    assert.ok(!kinds.some((k) => ['waiting', 'stalled', 'dead'].includes(k)), JSON.stringify(kinds))
+  }
 })
 
-test('the same gate covers a fabricated death, which the admiral acts on in an hour', () => {
-  // The DEATH regex reads `detail` and `needs` — both of which are the session's own
-  // prose. A worker writing an issue ABOUT an API error is the same defect one word
-  // over, and `dead` has the shortest bar of the three.
-  const d = classify(misreadJob({ detail: 'filed the API Error report', needs: 'API unavailable — retry' }), NOWL)
+test('neither a suppression nor a hold switches off the wedged catch-all beneath it', () => {
+  // A budgeted role has no `stopped` detection to fall back on, so if either counted
+  // as a detection the one safety net under a manager that really has stopped would
+  // switch itself off exactly when the record had just been shown to be unreliable.
+  const d = classify(misreadJob({ name: '⚓🤖 obot-admiral', updatedAt: agoMin(TRIGGERED_QUIET_MIN + 1) }), NOW)
+  assert.ok(d.some((x) => x.kind === 'wedged'))
+})
+
+test('the same discriminator covers a fabricated death, which is acted on in an hour', () => {
+  // The DEATH regex reads `detail` and `needs`, both of which are the session's own
+  // prose. "checking gh rate limits" and "postmortem: W0009 lost to API error" are
+  // both real lines from this machine's timelines, and both match it.
+  const d = classify(misreadJob({ detail: 'postmortem: W0009 lost to API error', needs: '' }), NOWL)
   assert.equal(d.filter((x) => x.kind === 'dead').length, 0)
   assert.ok(d.some((x) => x.kind === 'misread'))
 })
 
-test('misreads stay out of the wake list and are counted in the section', () => {
-  const jobs = [misreadJob(), stuckAfterCloseoutJob()]
-  const p = pending(jobs, { now: NOWL })
-  assert.ok(!p.some((d) => d.kind === 'misread'), 'nobody is woken to look at a state that was never real')
-  const held = misreadHolds(jobs, { now: NOWL })
-  assert.equal(held.length, 1)
-  const section = wakeSection({ pending: p, misread: held, jobsRead: true })
-  assert.match(section, /suppressed/i, 'the count is on the page — obot.agent#129, third time')
-  assert.ok(!/^\s+.*suppressed/im.test(section), 'unindented: the dashboard reads an indented line as a detail and drops its alarm')
+test('a death is not settled: its signature is a transport error, not a decision', () => {
+  const d = classify(job({ state: 'blocked', tempo: 'blocked', updatedAt: agoMin(11),
+    detail: "API Error: Can't reach the API server (ENOTFOUND)" }), NOW)
+  assert.deepEqual(d.map((x) => x.kind), ['dead'], 'reported on the first sighting, as before')
 })
 
-test('readJobs carries the two timeline facts the gate needs', () => {
+test('held detections stay out of the wake list and are counted in the section', () => {
+  const jobs = [misreadJob(), stuckAfterCloseoutJob({ updatedAt: agoMin(12) })]
+  const p = pending(jobs, { now: NOW })
+  assert.ok(!p.some((d) => ['misread', 'settling'].includes(d.kind)), 'nobody is woken for a state that was never real, or not yet read twice')
+  const held = misreadHolds(jobs, { now: NOW })
+  assert.equal(held.length, 2)
+  const section = wakeSection({ pending: p, misread: held, jobsRead: true })
+  assert.match(section, /held/i, 'the count is on the page — obot.agent#129, third time')
+  assert.ok(!/^\s+.*held/im.test(section), 'unindented: the dashboard reads an indented line as a detail and drops its alarm')
+})
+
+test('readJobs carries the timeline facts the gate needs', () => {
   const timeline = [
     { at: '2026-08-17T07:11:28.873Z', state: 'done', detail: 'merged' },
     { at: '2026-08-17T07:16:18.954Z', state: 'blocked', detail: 'ops-dashboard stale (pid 42255)' },
@@ -485,17 +541,15 @@ test('readJobs carries the two timeline facts the gate needs', () => {
     { at: '2026-08-17T07:32:09.627Z', state: 'done', detail: 'mechanism established' },
   ].map((e) => JSON.stringify(e)).join('\n')
   const read = (p) => {
-    // No `firstTerminalAt` in the state file: this is the fallback path, and the
-    // `done` state is what gates it — an intermediate blocked entry must never be
-    // read as a live worker's closeout.
     if (p.endsWith('state.json')) return JSON.stringify({ name: '👯🤖 W0033', state: 'done', updatedAt: '2026-08-17T07:32:09.627Z' })
     if (p.endsWith('timeline.jsonl')) return timeline
     throw new Error('no such file')
   }
   const [j] = readJobs('/jobs', { read, list: () => ['d2dc1b30'] })
-  assert.equal(j.lastBlockedAt, '2026-08-17T07:29:15.879Z', 'the block the detection would be about is the LAST one, not the first')
+  assert.equal(j.lastBlockedAt, '2026-08-17T07:29:15.879Z', 'the LAST block, not the first')
   assert.equal(j.movedAfterBlockedAt, '2026-08-17T07:32:09.627Z')
-  assert.equal(j.firstTerminalAt, '2026-08-17T07:11:28.873Z', 'and the terminal watermark still comes off the timeline when the state file lacks it')
+  assert.equal(j.lastActivityAt, '2026-08-17T07:32:09.627Z')
+  assert.equal(j.firstTerminalAt, '2026-08-17T07:11:28.873Z', 'and the watermark still comes off the timeline when the state file lacks it')
 })
 
 // ---- obot.agent#177: template boilerplate is not a session's status -----------
@@ -511,8 +565,6 @@ test('a detail that is structurally a comment is not a detail', () => {
 })
 
 test('boilerplate never reaches a wake line, and never counts as a death signature', () => {
-  // The third of the four entries in obot.agent#177 re-asserted `blocked` forty-five
-  // seconds before a clean close-out, carrying the template comment as its detail.
   const d = classify(job({ state: 'blocked', tempo: 'blocked', updatedAt: agoMin(120),
     detail: '<!-- how to use: this is the briefing a lead session hands a spawned sibling. -->',
     needs: 'approve Bash: git push' }), NOW)
@@ -530,35 +582,4 @@ test('readJobs scrubs boilerplate at the read boundary, so no consumer has to re
   }
   const [j] = readJobs('/jobs', { read, list: () => ['b4c16f12'] })
   assert.equal(j.detail, '', 'the Agents tab renders this field as a task tag on a surface @jwildfire reads')
-})
-
-test('the line that actually fired now carries what was wrong with it', () => {
-  // The 07:28:40 wake, replayed: the block is fresh, nothing has happened after it,
-  // so the conjunction cannot suppress and the detection correctly stands. What
-  // changes is the sentence — the terminal stamp was in the record the whole time
-  // and was the one fact that would have stopped a reader believing the `needs`.
-  const d = classify(misreadJob({
-    updatedAt: '2026-08-17T07:16:18.954Z',
-    lastBlockedAt: '2026-08-17T07:16:18.954Z',
-    movedAfterBlockedAt: null,
-  }), new Date('2026-08-17T07:28:40.973Z'))
-  const w = d.find((x) => x.kind === 'waiting')
-  assert.ok(w, 'D1 alone must not suppress — W0007 is exactly this shape and was really stuck')
-  assert.match(w.line, /CHECK IT FIRST/)
-  assert.match(w.line, /07:11:28/, 'the terminal stamp that precedes the block')
-  assert.match(w.line, /timeline\.jsonl/, 'and where to settle it in one read')
-})
-
-test('a real permission prompt is never annotated or suppressed by a stale block', () => {
-  // W0007 and W0008 wrote no `blocked` timeline entry at all — verified across all
-  // 113 job records on this machine: every `needs` in a state file belongs to a job
-  // with no blocked entry, and every job with a blocked entry carries no `needs`.
-  // So a tempo-block has nothing to measure "after" from, and must not be refuted by
-  // work that happened after some earlier, unrelated block.
-  const d = classify(stuckAfterCloseoutJob({
-    lastBlockedAt: '2026-08-17T07:45:00.000Z',   // an old prose-derived block
-    movedAfterBlockedAt: '2026-08-17T08:00:00.000Z', // and ordinary work after it
-  }), NOWL)
-  assert.ok(d.some((x) => x.kind === 'waiting'), 'still the detection the channel was built for')
-  assert.equal(d.filter((x) => x.kind === 'misread').length, 0)
 })

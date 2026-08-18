@@ -105,21 +105,26 @@ run and no permission prompt was ever raised in it
 ([obot.agent#176](https://github.com/jwildfire/obot.agent/issues/176)). You went live
 an hour before that fired.
 
-Two questions, both answered by one append-only file, and a `no` to either means the
-condition is not real and you close nothing:
+One question, answered by one append-only file, and a `yes` means the condition is
+not real and you close nothing:
 
 ```bash
 python3 -c "import json,sys;[print(e['at'],e.get('state'),str(e.get('detail',''))[:70]) for e in map(json.loads,open(sys.argv[1]))]" ~/.claude/jobs/<id>/timeline.jsonl
 ```
 
-- Did it stamp a terminal result BEFORE the block? Then it had already finished, and
-  what you are reading is its own prose about somebody else's work.
-- Has it emitted anything AFTER the block? Then it went on working, whatever the
-  state file says.
+- Has it emitted anything after the LAST `blocked` entry? Then it went on working,
+  whatever the state file says.
 
-`tools/navigator/wake.mjs` applies the same two tests before a `waiting` or `dead`
-detection ever reaches your brief, so a session that fails them should not be in your
-brief at all. Check anyway. The whole point of this rule is that the record which
+Do NOT use `firstTerminalAt` for this. It is a first-write-wins watermark the harness
+never resets, so it says "this session has ever closed out" and never "this session's
+current run is finished" — it is true for 31 of the 113 job records on this machine,
+and it is true for W0007, which closed out, was resumed four minutes later, and then
+sat twenty hours on a real permission prompt. Ordering against it marks the genuine
+stall harder than the fabricated one.
+
+`tools/navigator/wake.mjs` applies the same test, and holds any fresh `waiting`
+reading for one sweep before anyone is woken at all, so a session that fails it should
+not be in your brief. Check anyway. The whole point of this rule is that the record which
 told you to act is the record that was wrong, and leaving a genuinely stalled session
 open costs one cycle while closing a working one costs its work.
 
