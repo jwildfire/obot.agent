@@ -222,6 +222,15 @@ test('drafts and release-role bases are never candidates', () => {
   assert.equal(candidates([pr({ baseRefName: 'stable' })], { now: NOW }).check.length, 0)
 })
 
+test('a pull request already in his RC queue is never also a config item', () => {
+  // One piece of work in two of his three buckets is the duplication #220 names:
+  // "two mechanisms reaching him about one thing, because neither can see what the
+  // other has done". The RC test is the shared classifier's, not a second opinion.
+  assert.equal(candidates([pr({ reviewRequests: [{ login: 'jwildfire' }] })], { now: NOW }).check.length, 0)
+  assert.equal(candidates([pr({ reviewDecision: 'CHANGES_REQUESTED' })], { now: NOW }).check.length, 0)
+  assert.equal(candidates([pr({ reviewRequests: [{ login: 'someone-else' }] })], { now: NOW }).check.length, 1)
+})
+
 test('a lane read clean at this revision is not read again, and a new push re-opens it', () => {
   const p = pr({ number: 7, updatedAt: agoMin(500) })
   const checked = { 'jwildfire/obot.agent#7': { updatedAt: p.updatedAt } }

@@ -45,6 +45,12 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { readFailure } from '../ops-dashboard/lib/absent.mjs'
+// What a release candidate IS, from the one function that decides it for the sweep
+// and the dashboard alike. Imported rather than restated: a second definition here
+// would let a pull request be an RC over there and a config item over here, which is
+// exactly the duplication jwildfire/obot.roadmap#220 is about — "two mechanisms
+// reaching him about one thing, because neither can see what the other has done".
+import { classifyRC } from './classify.mjs'
 
 /** The config list, in the one place it lives. Local only — it never enters a repo
  *  or a published site, and only its ids and counts ever render anywhere. */
@@ -276,6 +282,13 @@ export function candidates(prs = [], { now = new Date(), covered = new Map(),
   for (const pr of prs) {
     if (pr.isDraft) continue
     if (pr.baseRefName !== pr.integration) continue
+    // ALREADY IN BUCKET ONE. A release candidate is his to look at by the route built
+    // for that, and an item asking for the same pull request a second time is one
+    // piece of work in two of his three buckets — the duplication the requirement
+    // names outright. `needsRoute` refuses a release-role base later on the wrapper's
+    // own reading; this catches the other two ways a pull request becomes an RC,
+    // which the wrapper's output cannot see.
+    if (classifyRC(pr, pr.release ?? [])) continue
     const key = prKey(pr.repo, pr.number)
     // Already routed. Checked BEFORE the age bar and before any call, so an item that
     // exists costs this run nothing at all.

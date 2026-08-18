@@ -92,11 +92,15 @@ if (MODE === 'help') {
 function listPRs(repos) {
   const prs = []
   const errors = []
-  for (const { repo, integration } of repos) {
+  for (const { repo, integration, release } of repos) {
     try {
+      // `reviewRequests` and `reviewDecision` are fetched for one reason: they are two
+      // of the three ways a pull request is already a release candidate, and a release
+      // candidate must never also become a config item.
       const raw = execFileSync(GH, ['pr', 'list', '-R', repo, '--state', 'open', '--json',
-        'number,title,url,baseRefName,isDraft,updatedAt'], { encoding: 'utf8', timeout: 60000 })
-      for (const pr of JSON.parse(raw)) prs.push({ ...pr, repo, integration })
+        'number,title,url,baseRefName,isDraft,updatedAt,reviewRequests,reviewDecision'],
+        { encoding: 'utf8', timeout: 60000 })
+      for (const pr of JSON.parse(raw)) prs.push({ ...pr, repo, integration, release })
     } catch (e) {
       // Named, never swallowed. A repo that failed to list contributes no candidates,
       // and reporting "nothing to route" on a listing that never happened is the
