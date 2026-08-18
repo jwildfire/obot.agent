@@ -94,6 +94,35 @@ condition still holds** before acting on it, because minutes have passed since t
 brief was written and a worker may have woken up or a pull request may have moved.
 A condition that has resolved itself is a condition you leave alone.
 
+**Re-verify a `waiting` or `dead` session against the timeline, never against the
+state file.** The harness DERIVES those states from the session's own prose, so a
+sentence describing an action somebody else has to take is read as this session being
+blocked on it. That is not a hypothesis: on 2026-08-17 it put W0033 on the wake
+channel as "waiting 12m and nobody has resolved it — needs: restart ops-dashboard",
+five minutes after the same session stamped a terminal result, while it was in fact
+reviewing a peer's follow-up and verifying two merges. No restart command was ever
+run and no permission prompt was ever raised in it
+([obot.agent#176](https://github.com/jwildfire/obot.agent/issues/176)). You went live
+an hour before that fired.
+
+Two questions, both answered by one append-only file, and a `no` to either means the
+condition is not real and you close nothing:
+
+```bash
+python3 -c "import json,sys;[print(e['at'],e.get('state'),str(e.get('detail',''))[:70]) for e in map(json.loads,open(sys.argv[1]))]" ~/.claude/jobs/<id>/timeline.jsonl
+```
+
+- Did it stamp a terminal result BEFORE the block? Then it had already finished, and
+  what you are reading is its own prose about somebody else's work.
+- Has it emitted anything AFTER the block? Then it went on working, whatever the
+  state file says.
+
+`tools/navigator/wake.mjs` applies the same two tests before a `waiting` or `dead`
+detection ever reaches your brief, so a session that fails them should not be in your
+brief at all. Check anyway. The whole point of this rule is that the record which
+told you to act is the record that was wrong, and leaving a genuinely stalled session
+open costs one cycle while closing a working one costs its work.
+
 ### 3. You record your own actions as `call` lines. You DO NOT write verdicts
 
 Every action you take goes in the delivery record, actor-stamped, so your work is

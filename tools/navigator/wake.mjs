@@ -132,6 +132,85 @@ export const MAX_WAKES_PER_RUN = 3
  */
 export const DEATH = /API Error|API unavailable|Connection refused|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|can't reach the api|rate.?limit|Internal server error|heap out of memory/i
 
+/**
+ * A status detail that is structurally a comment, and therefore not a status.
+ *
+ * obot.agent#177. The sibling briefing's opening `<!-- how to use: … -->` is the
+ * first text in the prompt a spawned session receives, which is exactly the position
+ * a classifier samples, so it arrived in `intent` and then in four timeline entries
+ * as the session's `detail` — one of them re-asserting `blocked` forty-five seconds
+ * before a clean close-out. The template no longer ships it, which removes the class
+ * at source; this is the guard for everything the template does not control, because
+ * the field is written by the harness and read by the Agents tab, and a row whose
+ * task tag reads "how to use: this is the briefing…" displaces what the session is
+ * actually doing on a surface @jwildfire reads.
+ *
+ * Empty is the right answer rather than a truncation: the value carries nothing
+ * about the session, and every consumer already has a rendering for a missing detail.
+ */
+export const isBoilerplateDetail = (s) => /^\s*<!--/.test(String(s ?? ''))
+export const scrubDetail = (s) => (isBoilerplateDetail(s) ? '' : String(s ?? ''))
+
+/**
+ * Why a `blocked` reading is a misreading — or null, when it is to be believed.
+ *
+ * obot.agent#176. The harness derives this state from the session's own prose, so a
+ * sentence describing an action somebody ELSE has to take is read as this session
+ * being blocked on it. On 2026-08-17 that put W0033 on the wake channel as "waiting
+ * 12m and nobody has resolved it", five minutes after the same session had stamped a
+ * terminal result, while it was in fact reviewing a peer's follow-up. The admiral had
+ * gone live an hour earlier and closes sessions on that signal.
+ *
+ * BOTH discriminators, and both are already in the append-only timeline:
+ *
+ *   D1  a terminal result was stamped BEFORE the block   → it had already finished
+ *   D2  the session emitted something AFTER the block    → it went on working
+ *
+ * They are ANDed, and the conjunction is load-bearing rather than cautious. D1 alone
+ * describes W0007 exactly — closed out at 08:13 and then stuck twenty hours on a real
+ * permission prompt with nothing after it — which is the failure this whole channel
+ * was built for, and `wake.test.mjs` has carried that record as a fixture since the
+ * channel was written. Suppressing on D1 alone would trade obot.agent#176 for the bug
+ * that preceded it. What separates the two is D2 and only D2: one of them moved again
+ * and the other never did.
+ *
+ * The consequence is deliberate and worth stating: at the instant a block first
+ * appears, D2 cannot yet be true, so the wake still fires and a person still glances
+ * at it. What the gate protects is the ACTING path — the admiral acts at 180 minutes,
+ * by which time a session that kept working has said so in the record. That is the
+ * failure in the safe direction the requirement asks for: leaving a stalled session
+ * open costs one cycle, and closing a working one costs its work.
+ */
+export const blockedSince = (job) => (job?.state === 'blocked' && job?.lastBlockedAt) || job?.updatedAt || null
+
+/** D1: it had already said it was finished before this block appeared. */
+export function terminalBeforeBlock(job) {
+  const at = Date.parse(blockedSince(job) ?? '')
+  const terminal = Date.parse(job?.firstTerminalAt ?? '')
+  return !Number.isNaN(at) && !Number.isNaN(terminal) && terminal < at
+}
+
+/**
+ * D2: it emitted something after the block, so it was working through it.
+ *
+ * Only when the block is the one the TIMELINE describes. A block that lives in
+ * `tempo` alone — which is every real permission prompt in the 113 records on this
+ * machine, W0007 and W0008 included, none of which wrote a `blocked` entry at all —
+ * has no entry to measure "after" from, so the timeline cannot refute it and this
+ * returns false. Anchoring on a stale earlier block and finding ordinary work after
+ * it would suppress the genuine article, which is the one outcome that costs work.
+ */
+export function movedThroughBlock(job) {
+  if (job?.state !== 'blocked' || !job?.lastBlockedAt) return false
+  const moved = Date.parse(job?.movedAfterBlockedAt ?? '')
+  return !Number.isNaN(moved) && moved > Date.parse(job.lastBlockedAt)
+}
+
+export function misreadBlocked(job) {
+  if (!terminalBeforeBlock(job) || !movedThroughBlock(job)) return null
+  return `stamped a terminal result at ${job.firstTerminalAt} — before the blocked entry at ${job.lastBlockedAt} — and then went on working at ${job.movedAfterBlockedAt}; the state was derived from its own prose, not from a pending prompt`
+}
+
 const W_ID = /W\d{4}(?:\.\d+)?/
 
 export const isWorker = (job) => WORKER_TAGS.some((t) => String(job?.name ?? '').startsWith(t))
@@ -221,9 +300,28 @@ export function classify(job, now = new Date(), { hostWasAway = false, workspace
     })
   }
 
+  // Is this `blocked` reading a reading at all? Both branches below rest on a state
+  // the harness derives from the session's own prose, and one of them reaches the
+  // admiral in an hour and the other in three (obot.agent#176). The check sits above
+  // both rather than inside either, because a fabricated death and a fabricated block
+  // are the same defect one word apart.
+  const misread = (job.state === 'blocked' || job.tempo === 'blocked') && !terminal
+    ? misreadBlocked(job)
+    : null
+  if (misread) {
+    out.push({
+      kind: 'misread',
+      key: `misread:${job.id}`,
+      job: job.id,
+      worker: label(job),
+      at: job.updatedAt,
+      line: `${label(job)} reads ${job.state}/${job.tempo} but ${misread}`,
+    })
+  }
+
   // Death first: a dead worker is also, technically, quiet and blocked. Reporting it
   // as "waiting for an answer" would send the Navigator to answer a corpse.
-  if (!terminal && job.state === 'blocked' && DEATH.test(said)) {
+  if (!misread && !terminal && job.state === 'blocked' && DEATH.test(said)) {
     out.push({
       kind: 'dead',
       key: `dead:${job.id}`,
@@ -232,7 +330,7 @@ export function classify(job, now = new Date(), { hostWasAway = false, workspace
       at: job.updatedAt,
       line: `${label(job)} died — ${clip(job.detail || job.needs || 'no detail', 120)} · quiet ${quiet === null ? '?' : Math.round(quiet)}m · its own record understates what it wrote, so check GitHub for a branch or PR before writing it off`,
     })
-  } else if (!terminal && (job.state === 'blocked' || job.tempo === 'blocked') && job.needs &&
+  } else if (!misread && !terminal && (job.state === 'blocked' || job.tempo === 'blocked') && job.needs &&
              quiet !== null && quiet >= (hostWasAway ? Infinity : WAITING_GRACE_MIN)) {
     out.push({
       kind: 'waiting',
@@ -240,9 +338,16 @@ export function classify(job, now = new Date(), { hostWasAway = false, workspace
       job: job.id,
       worker: label(job),
       at: job.updatedAt,
-      line: `${label(job)} has been waiting ${Math.round(quiet)}m and nobody has resolved it — needs: ${clip(job.needs, 120)}`,
+      // D1 without D2 is not enough to suppress — W0007 is that shape and was really
+      // stuck — but it is far too much to leave out of the sentence. This is the
+      // wake that fired on 2026-08-17T07:28:40Z, and what made it wrong was invisible
+      // in the line while being present in the record the whole time.
+      line: `${label(job)} has been waiting ${Math.round(quiet)}m and nobody has resolved it — needs: ${clip(job.needs, 120)}` +
+            (terminalBeforeBlock(job)
+              ? ` · CHECK IT FIRST: it stamped a terminal result at ${job.firstTerminalAt}, BEFORE this block. The harness derives this state from the session's own prose, so a sentence about work somebody else must do reads exactly like a pending prompt (obot.agent#176). Read ~/.claude/jobs/${job.id}/timeline.jsonl before acting`
+              : ''),
     })
-  } else if (!terminal && job.tempo === 'active' && quiet !== null &&
+  } else if (!misread && !terminal && job.tempo === 'active' && quiet !== null &&
              quiet >= (hostWasAway ? Infinity : STALL_MIN)) {
     out.push({
       kind: 'stalled',
@@ -261,7 +366,11 @@ export function classify(job, now = new Date(), { hostWasAway = false, workspace
   // supposed to be gone and now never will be. Two states, kept apart: `overrun` in
   // admiral.mjs catches the admiral still RUNNING past its budget, this catches the
   // one that has STOPPED and will never exit.
-  if (budgeted && !terminal && !out.length && quiet !== null &&
+  // `misread` deliberately does not count toward `out.length`. A budgeted role has no
+  // `stopped` detection to fall back on, so if a suppression counted as a detection
+  // the one safety net under a manager that really has stopped would switch itself
+  // off exactly when the record had just been shown to be unreliable.
+  if (budgeted && !terminal && !out.some((d) => d.kind !== 'misread') && quiet !== null &&
       quiet >= (hostWasAway ? Infinity : TRIGGERED_QUIET_MIN)) {
     out.push({
       kind: 'wedged',
@@ -289,10 +398,27 @@ export function pending(jobs = [], { now = new Date(), judged = new Set(), hostW
   for (const job of jobs) {
     for (const d of classify(job, now, { hostWasAway, workspace })) {
       if (d.kind === 'stopped' && verdictKeys(job).some((k) => judged.has(k))) continue
+      // Nobody is woken to look at a state that was never real. It is counted in the
+      // section instead, which is where a suppression belongs: visible, and not a
+      // notification (obot.agent#176).
+      if (d.kind === 'misread') continue
       out.push(d)
     }
   }
   return out.sort((a, b) => Date.parse(b.at ?? 0) - Date.parse(a.at ?? 0))
+}
+
+/**
+ * The blocked readings this sweep refused to believe.
+ *
+ * Separate from `pending` on purpose. A suppression that produces no output is
+ * indistinguishable from a gate that never ran, and this programme has shipped that
+ * failure often enough to name it: the sweep reports the count next to the pending
+ * list, and the list itself is unaffected.
+ */
+export function misreadHolds(jobs = [], { now = new Date(), hostWasAway = false, workspace = null } = {}) {
+  return jobs.flatMap((job) => classify(job, now, { hostWasAway, workspace })
+    .filter((d) => d.kind === 'misread'))
 }
 
 /** Closeouts older than the window: counted so the bound is never silent. */
@@ -402,23 +528,47 @@ export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) 
     let s
     try { s = JSON.parse(read(`${dir}/${id}/state.json`, 'utf8')) } catch { continue }
     let firstTerminalAt = s.firstTerminalAt || null
-    if (!firstTerminalAt && s.state === 'done') {
-      try {
-        for (const l of read(`${dir}/${id}/timeline.jsonl`, 'utf8').trim().split('\n')) {
-          const ev = JSON.parse(l)
-          if (['done', 'blocked', 'failed'].includes(ev.state || ev.type)) { firstTerminalAt = ev.at || ev.ts; break }
-        }
-      } catch { /* no timeline — the state file is what there is */ }
+    // The timeline is the only append-only record here, and the gate in
+    // `misreadBlocked` rests entirely on it: the state file holds one snapshot and
+    // therefore cannot say whether a session moved AFTER it went blocked. It is read
+    // once, here, for every job — a second reader is how two halves of this detector
+    // would come to disagree about the same session.
+    let events = null
+    try {
+      events = read(`${dir}/${id}/timeline.jsonl`, 'utf8').trim().split('\n')
+        .map((l) => { try { return JSON.parse(l) } catch { return null } })
+        .filter((e) => e && (e.at || e.ts))
+    } catch { /* no timeline — the state file is what there is */ }
+    if (!firstTerminalAt && s.state === 'done' && events) {
+      const first = events.find((e) => ['done', 'blocked', 'failed'].includes(e.state || e.type))
+      if (first) firstTerminalAt = first.at || first.ts
+    }
+    // The block a detection would be about is the LAST one, never the first. A worker
+    // that was misread hours ago, worked on, and is genuinely stuck now must not be
+    // suppressed by activity that happened before its current block.
+    let lastBlockedAt = null
+    let movedAfterBlockedAt = null
+    if (events) {
+      for (const e of events) {
+        const at = e.at || e.ts
+        if ((e.state || e.type) === 'blocked') { lastBlockedAt = at; movedAfterBlockedAt = null }
+        else if (lastBlockedAt) movedAfterBlockedAt = at
+      }
     }
     out.push({
       id,
       name: s.name ?? '',
       state: s.state ?? '?',
       tempo: s.tempo ?? '',
-      detail: s.detail ?? '',
-      needs: s.needs ?? '',
+      // Scrubbed at the boundary rather than at each render site (obot.agent#177):
+      // there are several surfaces and one reader, and a rule applied in one place
+      // cannot be forgotten in the next one somebody adds.
+      detail: scrubDetail(s.detail),
+      needs: scrubDetail(s.needs),
       updatedAt: s.updatedAt ?? null,
       firstTerminalAt,
+      lastBlockedAt,
+      movedAfterBlockedAt,
       // Where the session actually ran. The one field that can tell this
       // workspace's role from something else wearing its name (obot.agent#188): a
       // name is a claim, a working directory is a fact, and all 110 records on this
@@ -499,7 +649,7 @@ export function hostWasAway(prevSweptIso, now = new Date()) {
  * the third time (verdict swallowed, detail kept), and the one alarm here that must
  * never be quiet is the one saying the alarms are not being delivered.
  */
-export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true } = {}) {
+export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true, misread = [] } = {}) {
   const lines = ['## Wake — workers that stopped', '']
   // Every detector here reads `~/.claude/jobs`. With no ledger on the machine the
   // pending list is empty because nothing was looked at, and "clear — every worker
@@ -513,6 +663,12 @@ export function wakeSection({ pending = [], delivered = [], held = [], listener 
   if (listener) lines.push(listener.summary)
   if (awayNote) lines.push(awayNote)
   if (outside) lines.push(`bounded: ${outside} unjudged closeout(s) older than ${WAKE_WINDOW_HOURS}h are not woken for — judge them from the delivery record, not from here`)
+  // Unindented, like every line above the list: the dashboard's reader treats an
+  // indented line as a detail of the one above it, and this is the line that says
+  // how much of the channel's own reading was thrown away.
+  if (misread.length) {
+    lines.push(`suppressed: ${misread.length} blocked reading(s) refused as misread — each had already stamped a terminal result AND moved again afterwards, so the state came from the session's own prose (obot.agent#176). Nothing was closed on them: ${misread.map((d) => d.worker).join(', ')}`)
+  }
   if (pending.length) {
     lines.push('', '### Pending', '')
     for (const d of pending) {

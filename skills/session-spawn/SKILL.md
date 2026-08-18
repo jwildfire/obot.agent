@@ -91,7 +91,21 @@ working. ([obot.roadmap#194](https://github.com/jwildfire/obot.roadmap/issues/19
 
 ### 1. Write the briefing
 
-Fill in [`templates/sibling-briefing.md`](../../templates/sibling-briefing.md).
+Fill in [`templates/sibling-briefing.md`](../../templates/sibling-briefing.md):
+copy the whole file, fill in every `{…}` placeholder, and pass it as the spawn's
+prompt ahead of the `TASK:` line.
+
+> **The template file is the prompt, verbatim.** Everything in it is sent, so it
+> carries no notes to its own editor — no HTML comments, no "how to use" preamble.
+> The harness samples the first text of a prompt into the job record's `intent`
+> and into timeline `detail`, so a comment at the top of the file arrives on the
+> Agents tab as what the session is doing, attached to a state
+> ([obot.agent#177](https://github.com/jwildfire/obot.agent/issues/177): sixteen
+> entries across ten jobs, one of them re-asserting `blocked` forty-five seconds
+> before a clean close-out). Guidance about the template belongs here, in the
+> skill; `scripts/test/tool-invocation.test.mjs` fails if a prompt template grows
+> a comment again.
+
 Put the id from step 0 into every `{W-id}` placeholder — the template's
 `## Your identity` block tells the sibling what its id is and where to stamp it.
 The `## Context` block is the only part composed per spawn — cwd and key paths

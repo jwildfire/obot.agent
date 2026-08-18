@@ -160,3 +160,64 @@ test('a non-executable module keeps its interpreter, because it is not a command
     'and until then the documented form must keep it',
   );
 });
+
+/**
+ * A prompt template is sent verbatim, so it carries no notes to its own editor —
+ * obot.agent#177.
+ *
+ * `templates/sibling-briefing.md` opened with a six-line `<!-- how to use: … -->`
+ * explaining the template to a human editing it. The whole file is what a lead pastes
+ * into a spawned session's prompt, and the harness samples the first text of a prompt
+ * into that job's `intent` and into timeline `detail`. So the note arrived as the
+ * session's status: sixteen entries across ten job records on this machine, one of
+ * them re-asserting `blocked` forty-five seconds before a clean close-out, and the
+ * Agents tab renders that field as a task tag on a page @jwildfire reads.
+ *
+ * It was self-inflicted in the most avoidable way — first thing in the file is
+ * exactly the position a classifier samples — and the class comes back the moment
+ * somebody helpfully documents a template again. `cleanDetail` in
+ * `tools/ops-dashboard/lib/roster.mjs` filters this text at the render side and
+ * cannot unwrite the entries already on disk; this is the source.
+ *
+ * Scoped to templates that BECOME a prompt. `interview-log.md` is a record an agent
+ * fills in and never sends, so a comment in it is exactly what a comment is for.
+ */
+const PROMPT_TEMPLATES = [
+  'templates/sibling-briefing.md',
+  'templates/delta-sweep-briefing.md',
+  'templates/p004-test-driver-prompt.md',
+  'templates/interview-question.md',
+];
+
+test('a template that becomes a prompt carries no HTML comment, anywhere in it', () => {
+  const offenders = [];
+  for (const rel of PROMPT_TEMPLATES) {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    // Anywhere, not merely at the top: the whole file is sent, and a trailing note
+    // still travels in every prompt. The opening position is only what made this one
+    // land in `intent` rather than merely in the transcript.
+    const at = text.indexOf('<!--');
+    if (at !== -1) {
+      const line = text.slice(0, at).split('\n').length;
+      offenders.push(`${rel}:${line} — ${text.slice(at, at + 80).replace(/\s+/g, ' ')}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these are sent verbatim as a prompt and land in the job record's own status field:\n  ${offenders.join('\n  ')}`,
+  );
+});
+
+test('every template the spawn skill sends is on the list the guard checks', () => {
+  // A guard with a hand-written list fails silently when a template is added. The
+  // skill names the file it sends, so the skill is what the list is checked against.
+  const skill = fs.readFileSync(path.join(ROOT, 'skills/session-spawn/SKILL.md'), 'utf8');
+  assert.ok(
+    PROMPT_TEMPLATES.some((t) => skill.includes(t.replace('templates/', ''))),
+    'the spawn skill still names a template on this list',
+  );
+  for (const rel of PROMPT_TEMPLATES) {
+    assert.ok(fs.existsSync(path.join(ROOT, rel)), `${rel} is on the list but not in the repo — the guard is checking nothing`);
+  }
+});
