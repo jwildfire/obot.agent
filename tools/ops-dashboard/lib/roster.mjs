@@ -41,6 +41,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { isForeignRole } from '../../lib/roles.mjs';
 import { nothingYet } from './absent.mjs';
 
 // Printed on the page rather than left to be discovered. Both are things a reader
@@ -669,6 +670,11 @@ export function buildRoster({
   // death is worse than no pin, because the absence reads as health. A caller that
   // says nothing pins nothing, so the scope rules are unchanged for everyone else.
   pinned = () => false,
+  // The workspace these rows are the roster OF. Optional, and its absence changes
+  // nothing: without it a session is judged by its name exactly as before. With it,
+  // a session carrying a role's name that ran somewhere else is held apart from the
+  // role instead of merged into it (obot.agent#188).
+  workspace = null,
 } = {}) {
   const isPinnedName = (name) => { try { return !!pinned(name); } catch { return false; } };
   const epoch = workers?.epoch ?? null;
@@ -692,7 +698,7 @@ export function buildRoster({
   const rows = [];
   const claimed = workers?.claims ?? [];
 
-  const rowFor = ({ id, label, slug, task, claimedAt, matched, sub = false }) => {
+  const rowFor = ({ id, label, slug, task, claimedAt, matched, sub = false, foreignRole = false }) => {
     // The newest session wins the status: a worker that was resumed is one agent.
     const job = matched.slice().sort((a, b) => Date.parse(b.startedAt ?? 0) - Date.parse(a.startedAt ?? 0))[0] ?? null;
     const worker = job ? isWorkerName(job.name) : true;
@@ -719,6 +725,15 @@ export function buildRoster({
       id: id ?? null,
       idText: id ?? 'no worker id',
       label: label ?? id,
+      // A row that wears a role's name and did not run here. Stamped on the row
+      // rather than re-derived by each view, because the view holds no job record —
+      // and because two views answering the same question from different data is how
+      // the page came to say a role was running when nothing was.
+      foreignRole,
+      // Every directory this row's sessions ran in, so the page can say where rather
+      // than merely that. One entry in practice; a list because a resumed agent can
+      // have moved.
+      cwds: [...new Set(matched.map((j) => j.cwd).filter(Boolean))],
       slug: slug || slugOfName(job?.name ?? label) || '',
       task: task ?? '',
       claimedAt: claimedAt ?? null,
@@ -769,9 +784,24 @@ export function buildRoster({
   // worker that skipped the claim. Named rather than folded into the unattributed
   // row, which would say they predate the ledger when they do not.
   const named = new Map();
+  const foreignNamed = new Map();
   const deadEarlier = [];
   for (const j of jobs) {
     if (idIn(j.name)) continue;
+    // Held apart BEFORE the name grouping, not filtered after it. Grouping by name
+    // and sorting by recency is what let a fixture's `working` become the admiral's
+    // status: the two collapsed into one row and the newest session won it
+    // (obot.agent#188). They are different agents, so they are different rows.
+    if (isForeignRole(j, { workspace })) {
+      // Scoped like any other agent, and WITHOUT the pin exemption below: the pin
+      // belongs to the role, and this is not the role. Otherwise every fixture the
+      // machine ever spawned would sit on the page for good, wearing a pinned name.
+      if (isCurrent(j, epochDay, now)) {
+        if (!foreignNamed.has(j.name)) foreignNamed.set(j.name, []);
+        foreignNamed.get(j.name).push(j);
+      }
+      continue;
+    }
     // Last activity, not first: a standing session opened yesterday and still
     // answering this morning is an agent that ran in the id era, and the whole
     // point of this row is that it is spending money right now. A death gets in
@@ -794,9 +824,15 @@ export function buildRoster({
   }
   const extras = [...named.entries()].map(([label, matched]) => rowFor({ id: null, label, matched }));
   extras.sort((a, b) => (b.cost.value ?? -1) - (a.cost.value ?? -1) || a.label.localeCompare(b.label));
+  // Shown, never dropped. A row that vanished would leave the four sessions that
+  // caused obot.agent#188 invisible on the page built to account for every agent —
+  // and the next reader would have to find them the way this one did, by hand.
+  const foreignRows = [...foreignNamed.entries()]
+    .map(([label, matched]) => rowFor({ id: null, label, matched, foreignRole: true }));
+  foreignRows.sort((a, b) => a.label.localeCompare(b.label));
 
   return {
-    rows: [...rows, ...extras],
+    rows: [...rows, ...extras, ...foreignRows],
     sources: src,
     droppedDeaths: dropped.length,
     unattributed: usage?.unattributed ?? null,
@@ -946,6 +982,9 @@ export function readJobs(jobsDir) {
       updatedAt: s.updatedAt ?? null,
       model: modelFlag(s.respawnFlags),
       firstTerminalAt: s.firstTerminalAt ?? null,
+      // Where the session ran. The one field that separates this workspace's role
+      // from something else wearing its name (obot.agent#188).
+      cwd: s.cwd ?? null,
       timeline: timelineClose(readText(path.join(dir, 'timeline.jsonl'))),
     });
   }
@@ -1006,5 +1045,5 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date(), pinne
     },
   };
 
-  return buildRoster({ workers, jobs, usage, delivery, sources, now, pinned });
+  return buildRoster({ workers, jobs, usage, delivery, sources, now, pinned, workspace });
 }

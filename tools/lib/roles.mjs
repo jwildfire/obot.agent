@@ -203,7 +203,21 @@ import { realpathSync } from 'node:fs'
 // and a lexical comparison of those two says "different workspace" about one
 // directory. Resolved when the path still exists; a deleted temp directory cannot be
 // resolved and keeps its lexical form, which is still not inside the workspace.
-const real = (p) => { try { return realpathSync(p) } catch { return p } }
+//
+// Memoised, because this is asked once per job per consumer and the dashboard
+// re-renders on a watch loop — the same two or three directories, hundreds of times.
+// Bounded rather than unbounded: the server is long-lived, and a cache that only ever
+// grows is a leak wearing an optimisation.
+const RESOLVED = new Map()
+const real = (p) => {
+  const hit = RESOLVED.get(p)
+  if (hit !== undefined) return hit
+  let out
+  try { out = realpathSync(p) } catch { out = p }
+  if (RESOLVED.size > 512) RESOLVED.clear()
+  RESOLVED.set(p, out)
+  return out
+}
 
 /**
  * Is this session running inside the workspace?
