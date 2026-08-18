@@ -120,13 +120,29 @@ export function validateDecision(payload) {
 // bounded-agent policy for judgment findings, hub grant limits, a run token so
 // delegated ledger entries can be finalized — and worktree isolation, so
 // several apply agents can run at once without racing the shared checkout.
-export function agentPrompt({ entries, hub, runToken, label }) {
+export function agentPrompt({ entries, hub, runToken, label, workspace }) {
   const decisions = entries.flatMap((e) => [
     `Decision: ${e.decision}`,
     ...e.findings.map((id) => `- ${id}`),
   ]);
+  // WHOSE NAME THE APPLY GOES OUT UNDER — obot.agent#197. This lane ran entirely on
+  // `gh auth token`, which authenticates as @jwildfire, so every label, milestone,
+  // assignee and close it applied was recorded by GitHub as his own act on issues he
+  // had not read. apply_audit_decision.mjs already separates the two credentials
+  // (GH_TOKEN for repo operations, PROJECT_TOKEN for the board), so the repo half
+  // simply moves to the app token and stops lying.
+  //
+  // The board half cannot move. A GitHub App installed on a user account cannot reach
+  // a user-owned ProjectsV2 board at all — GitHub's REST reference says so on every
+  // user-owned project endpoint ("does not work with ... GitHub App installation
+  // access tokens"), and there is no permission to grant: the only Projects permission
+  // GitHub offers is organization-scoped. So PROJECT_TOKEN stays his, and stays
+  // spelled out here rather than being folded back into one token that hides which
+  // writes are which.
+  const root = workspace ?? path.dirname(path.resolve(hub));
+  const appToken = path.join(root, 'obot.agent/scripts/obot-app-token');
   const applies = entries.map((e) =>
-    `AUDIT_AGENTIC_PACK="$CLAUDE_JOB_DIR/tmp/audit-agentic.md" GITHUB_TOKEN="$(gh auth token)" node scripts/apply_audit_decision.mjs --decision ${e.decision} --findings ${e.findings.join(',')} --by jwildfire --run-id ${runToken}`);
+    `AUDIT_AGENTIC_PACK="$CLAUDE_JOB_DIR/tmp/audit-agentic.md" GH_TOKEN="$(${appToken})" PROJECT_TOKEN="$(gh auth token)" node scripts/apply_audit_decision.mjs --decision ${e.decision} --findings ${e.findings.join(',')} --by jwildfire --run-id ${runToken}`);
   return [
     `You are one local audit apply lane for jwildfire/obot.roadmap. @jwildfire submitted "${label.replace(/"/g, "'")}" from the local hub audit queue; you complete that batch. The payload is finding ids only — what runs is derived from a FRESH audit, never from the page. Other apply agents may be running in parallel: you own your worktree, and main is shared — take rejected pushes calmly.`,
     '',
@@ -138,7 +154,7 @@ export function agentPrompt({ entries, hub, runToken, label }) {
     '2. In the worktree, run each apply in order:',
     ...applies.map((c) => `   ${c}`),
     '   The script re-runs the whole audit, refuses ids the current state no longer reports (stale) or could not check (blocked), applies mechanical ops directly, appends every outcome to site/audit/decisions.json, and writes judgment findings to the pack file.',
-    `3. If the pack file is non-empty after the accept run, work it one finding at a time. .github/roadmap-audit-policy.md is binding — only the operations the pack asks for, nothing broader. Then finalize the delegated entries: node scripts/apply_audit_decision.mjs --finalize-run ${runToken} --outcome applied (or failed, if a finding could not be completed — never claim applied for work not done).`,
+    `3. If the pack file is non-empty after the accept run, work it one finding at a time. .github/roadmap-audit-policy.md is binding — only the operations the pack asks for, nothing broader. Any gh write you type yourself goes through ${root}/obot.agent/scripts/obot-gh, which mints an obotclaw[bot] token — the ambient gh token authenticates as @jwildfire and records him as having done it (obot.agent#197). Then finalize the delegated entries: node scripts/apply_audit_decision.mjs --finalize-run ${runToken} --outcome applied (or failed, if a finding could not be completed — never claim applied for work not done).`,
     '4. Commit in the worktree, then land on main: git push origin HEAD:main. If the push is rejected (another apply agent landed first), git pull --rebase origin main and retry, up to 3 times. A conflict in site/audit/decisions.json is two appends to the same array — keep BOTH sets of entries. A conflict in site/audit/findings.json: keep the other side (theirs) — it is as fresh as yours and the next audit run rewrites it anyway. Verify the push landed (git ls-remote origin main).',
     `5. Clean up: from ${hub}, git worktree remove .claude/worktrees/audit-apply-${runToken} --force and git branch -D audit-apply-${runToken}.`,
     '6. End with a result: line summarizing the outcome per finding id.',
@@ -335,7 +351,7 @@ export function createServer({ workspace, hub, port, model = 'opus', dryRun = fa
         if (v.error) { json(res, 400, { error: v.error }); return; }
         const runToken = `local-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
         const name = `👯🤖 ${localDate()} audit-apply ${runToken.slice(-4)}`;
-        const prompt = agentPrompt({ ...v, hub, runToken });
+        const prompt = agentPrompt({ ...v, hub, runToken, workspace });
         const args = spawnArgs({ name, prompt, model });
         if (dryRun) {
           console.log(`[session-audit] dry-run — would spawn: claude ${args.slice(0, -1).join(' ')} <prompt ${prompt.length} chars>`);

@@ -136,6 +136,30 @@ test('prose about a write is not a write', () => {
   deferred(`echo "addSubIssue(input: {}) is the mutation we were missing"`);
 });
 
+test('the advice names a lane that exists on this checkout', () => {
+  // A guard that refuses a write and then sends the agent to a command which is not
+  // there has not removed the class; it has replaced it with a dead end, and the next
+  // agent works around the guard rather than around the problem. The wrapper is absent
+  // in a workspace whose obot.agent checkout predates it - during the very change that
+  // introduces both, and on any machine that has not pulled.
+  const withWrapper = execFileSync(GUARD, {
+    input: JSON.stringify({ tool_input: { command: 'gh issue edit 1 --add-label x' } }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PROJECT_DIR: path.resolve(ROOT, '../../..') },
+  });
+  assert.match(JSON.parse(withWrapper).hookSpecificOutput.permissionDecisionReason,
+    /obot\.agent\/scripts\/obot-gh/);
+
+  const withoutWrapper = execFileSync(GUARD, {
+    input: JSON.stringify({ tool_input: { command: 'gh issue edit 1 --add-label x' } }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PROJECT_DIR: '/nonexistent-workspace' },
+  });
+  const reason = JSON.parse(withoutWrapper).hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /obot-app-token/);
+  assert.doesNotMatch(reason, /Run it through the wrapper/);
+});
+
 test('the guard is registered by the installer, so a fresh machine gets it', () => {
   const installer = fs.readFileSync(path.join(ROOT, 'hooks/install.sh'), 'utf8');
   assert.match(installer, /attribution-guard\.sh:PreToolUse:Bash/,

@@ -340,7 +340,7 @@ else
     refuse "release merge into '$BASE' names no issue: an RC body must carry a 'Closes #N' line for every issue it ships, so the release groups its work instead of shipping anonymously (safety.viz v1.6.0, 2026-08-14). Add the lines, or re-run with --no-issues '<why this release closes nothing>'."
   fi
   if [ -n "$MISSING" ] && [ -z "$MILESTONE_OVERRIDE" ]; then
-    refuse "no milestone on$MISSING in $REPO. No work is done on an issue until a milestone is assigned (@jwildfire, 2026-08-14) - assign one with 'gh issue edit <n> -R $REPO --milestone <title>', creating the milestone first if the release has none. Override with --no-milestone '<reason>' only when the issue genuinely belongs to no release."
+    refuse "no milestone on$MISSING in $REPO. No work is done on an issue until a milestone is assigned (@jwildfire, 2026-08-14) - assign one with 'obot.agent/scripts/obot-gh issue edit <n> -R $REPO --milestone <title>', creating the milestone first if the release has none. Override with --no-milestone '<reason>' only when the issue genuinely belongs to no release."
   fi
   if [ -n "$MILESTONE_OVERRIDE" ] && [ -n "$MISSING" ]; then
     MILESTONE_REPORT="$MILESTONE_REPORT
@@ -362,7 +362,7 @@ if [ -n "$MILESTONE_REPORT" ]; then printf '%s\n' "$MILESTONE_REPORT"; fi
 # Deliberately not a gate. The refusals above protect the release's *record* - an
 # issue with no milestone, a release naming no issue - which is wrong and
 # unrecoverable once the merge lands. A title is cosmetic and fixable afterwards
-# with one 'gh pr edit --title', and this script runs on the attested lane after
+# with one 'obot-gh pr edit --title', and this script runs on the attested lane after
 # he has already approved: refusing there would stall an approved release at its
 # last step over a string. Warn, merge, fix the title after.
 if [ "$ROLE" = "release" ]; then
@@ -378,7 +378,7 @@ if [ "$ROLE" = "release" ]; then
   if [ -z "$TITLE_OK" ]; then
     printf 'obot-merge: WARN - RC title is off-shape: "%s"\n' "$PR_TITLE"
     printf '  expected exactly "%s vX.Y.Z-RCn" with no summary (@jwildfire, 2026-08-15).\n' "$PKG"
-    printf '  Not blocking the merge - fix it with: gh pr edit %s -R %s --title "%s vX.Y.Z-RCn"\n' "$PR" "$REPO" "$PKG"
+    printf '  Not blocking the merge - fix it with: obot.agent/scripts/obot-gh pr edit %s -R %s --title "%s vX.Y.Z-RCn"\n' "$PR" "$REPO" "$PKG"
   fi
 fi
 

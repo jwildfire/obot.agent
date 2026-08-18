@@ -44,6 +44,7 @@
 # Parse failures defer. This guard must never block unrelated work.
 
 import json
+import os
 import re
 import sys
 
@@ -234,14 +235,35 @@ MUTATION = re.compile(
 
 # ------------------------------------------------------------------------ verdict
 
-WRAPPER_ADVICE = (
-    "Run it through the wrapper, which mints an obotclaw[bot] installation token:\n\n"
-    "  obot.agent/scripts/obot-gh <the same gh args>\n\n"
-    "Board moves are the exception - a GitHub App cannot reach a user-owned ProjectsV2 "
-    "board at all, so `obot-gh project ...` refuses and explains why. If a write "
-    "genuinely must carry his name, `obot-gh --as-jeremy --reason '<why>' ...` does it "
-    "and records it in .claude/attribution.journal."
-)
+def wrapper_advice():
+    """Name the lane that exists on this checkout, not the one that ought to.
+
+    The guard can be armed in a workspace whose obot.agent checkout predates the
+    wrapper - during the change that introduces both, or on a machine that has not
+    pulled. A guard that refuses a write and then sends the agent to a command which
+    is not there has not removed the class; it has replaced it with a dead end, and
+    the next agent works around the guard instead of around the problem."""
+    root = os.environ.get("CLAUDE_PROJECT_DIR") or os.path.expanduser("~/Documents/obot2")
+    wrapper = os.path.join(root, "obot.agent/scripts/obot-gh")
+    if os.path.exists(wrapper):
+        return (
+            "Run it through the wrapper, which mints an obotclaw[bot] installation "
+            "token:\n\n"
+            "  obot.agent/scripts/obot-gh <the same gh args>\n\n"
+            "Board moves are the exception - a GitHub App cannot reach a user-owned "
+            "ProjectsV2 board at all, so `obot-gh project ...` refuses and explains why. "
+            "If a write genuinely must carry his name, "
+            "`obot-gh --as-jeremy --reason '<why>' ...` does it and records it in "
+            ".claude/attribution.journal."
+        )
+    return (
+        "This checkout has no obot.agent/scripts/obot-gh yet, so mint the token "
+        "inline:\n\n"
+        "  GH_TOKEN=$(obot.agent/scripts/obot-app-token) gh <the same args>\n\n"
+        "A board write is the exception and cannot be attributed to the bot at all: a "
+        "GitHub App cannot reach a user-owned ProjectsV2 board. Say out loud that it "
+        "goes out under his name, and say why."
+    )
 
 
 def deny(reason):
@@ -260,7 +282,7 @@ for seg in SEGMENTS:
         deny(
             "attribution-guard: `GH_TOKEN=$(gh auth token)` runs the write as @jwildfire "
             "using his own credential - which is precisely what obot.agent#197 is about. "
-            "Agent writes go out as obotclaw[bot].\n\n" + WRAPPER_ADVICE
+            "Agent writes go out as obotclaw[bot].\n\n" + wrapper_advice()
         )
 
     if WRAPPED.search(seg) or EXPLICIT_TOKEN.search(seg):
@@ -273,7 +295,7 @@ for seg in SEGMENTS:
                 "@jwildfire - so his GitHub history records him doing it. Two days of "
                 "labels, milestones, parent links and board moves landed under his name on "
                 "~100 issues that way, none of which he made (obot.agent#197).\n\n{}"
-                .format(label, WRAPPER_ADVICE)
+                .format(label, wrapper_advice())
             )
 
     if GRAPHQL_CALL.search(seg) and MUTATION.search(command):
@@ -281,7 +303,7 @@ for seg in SEGMENTS:
             "attribution-guard: this is a GraphQL mutation, and with no token set it "
             "authenticates as @jwildfire - so his GitHub history records him doing it "
             "(obot.agent#197). Sub-issue links and board writes are mutations, and they "
-            "are the bulk of what went out under his name.\n\n" + WRAPPER_ADVICE
+            "are the bulk of what went out under his name.\n\n" + wrapper_advice()
         )
 
 sys.exit(0)  # defer
