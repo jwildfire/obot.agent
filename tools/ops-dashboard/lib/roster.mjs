@@ -307,7 +307,12 @@ export function statusOf(o = {}, now = new Date()) {
       : { status: 'not launched', note: 'id claimed, no session ever started under it — burned, not lost' };
   }
   const tl = o.timeline ?? { last: null, closed: false, at: null };
-  const detail = String(o.detail ?? '').trim();
+  // Through `cleanDetail`, exactly as `jobLine` and `jobError` already are. This was
+  // the unscrubbed twin: the task tag was filtered and the status note beside it, on
+  // the same row, still read "how to use: this is the briefing a lead session hands a
+  // spawned sibling" (obot.agent#177). `needs` goes through it too — it is written by
+  // the same classifier, off the same prose, and lands in the same sentence.
+  const detail = cleanDetail(o.detail) ?? '';
 
   if (o.state === 'working') {
     const quiet = minutesSince(o.updatedAt, now);
@@ -322,7 +327,8 @@ export function statusOf(o = {}, now = new Date()) {
 
   if (o.state === 'blocked') {
     if (o.worker) {
-      const needs = o.needs ? ` — needs ${o.needs}` : '';
+      const cleanNeeds = cleanDetail(o.needs);
+      const needs = cleanNeeds ? ` — needs ${cleanNeeds}` : '';
       return { status: 'died', note: `blocked: ${detail || 'no reason recorded'}${needs}` };
     }
     return { status: 'waiting', note: detail || 'blocked — the ordinary wait for a standing session' };
