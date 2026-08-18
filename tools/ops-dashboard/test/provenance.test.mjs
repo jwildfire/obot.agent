@@ -254,3 +254,32 @@ test('a current machine says which commit it is current with, on the healthy pat
   assert.match(html, /updates: checked 2m ago; the checkout is current with its remote/);
   assert.match(html, /class="prov ok"/);
 });
+
+test('the page says when this process started, not only how old its code is', () => {
+  // Two different questions, and #243 asks for both: "is this build recent" and "did
+  // this page actually restart". A sha answers neither on its own.
+  const dir = tmp();
+  const captured = { started: { sha: 'a'.repeat(40), short: 'abc1234', at: '2026-08-17T21:00:00Z' },
+                     startedAt: '2026-08-17T21:30:00Z', root: dir };
+  const st = codeState(captured, new Date('2026-08-17T21:42:00Z'));
+  assert.equal(st.upMin, 12);
+  assert.match(provenanceLine({ code: { ...st, behind: 0, unknown: false } }), /started 12m ago/);
+});
+
+test('a process whose start time is unknown says nothing rather than "just now"', () => {
+  const st = codeState({ started: { sha: 'b'.repeat(40), short: 'def5678', at: '2026-08-17T21:00:00Z' }, root: tmp() },
+    new Date('2026-08-17T21:42:00Z'));
+  assert.equal(st.upMin, null);
+  assert.doesNotMatch(provenanceLine({ code: { ...st, behind: 0 } }), /started/);
+});
+
+test('the restart time survives the five minutes after a restart', () => {
+  // The obvious source is the automatic-update record, and it is the wrong one: it
+  // describes the most recent sweep, so the answer would blink out while the process
+  // it described was still running.
+  const html = provenanceLine({
+    code: { short: 'abc1234', ageMin: 5, upMin: 200, behind: 0 },
+    update: { state: 'ok', ageMin: 2, head: 'abc1234', restartedAt: null, deferred: null },
+  });
+  assert.match(html, /started 3h ago/);
+});

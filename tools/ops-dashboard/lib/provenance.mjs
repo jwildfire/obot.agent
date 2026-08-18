@@ -79,12 +79,20 @@ export function codeState(captured, now = new Date()) {
   const behind = head && head.sha !== started.sha
     ? count(captured.root, `${started.sha}..${head.sha}`)
     : 0;
+  const up = captured.startedAt ? Date.parse(captured.startedAt) : NaN;
   return {
     ok: behind === 0,
     unknown: behind === null,
     short: started.short,
     at: started.at,
     ageMin: started.at ? Math.max(0, Math.round((now.getTime() - Date.parse(started.at)) / 60000)) : null,
+    // When this process started, which is a different question from how old its code
+    // is and the one jwildfire/obot.roadmap#243 asks the page to answer: *when did it
+    // restart*. It has to come from the captured stamp rather than from a record of
+    // the last automatic restart, because that record only describes the most recent
+    // sweep — five minutes later it says nothing, and the answer would blink out while
+    // the process it described was still running.
+    upMin: Number.isFinite(up) ? Math.max(0, Math.round((now.getTime() - up) / 60000)) : null,
     behind: behind ?? null,
     head: head?.short ?? null,
   };

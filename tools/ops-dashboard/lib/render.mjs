@@ -113,6 +113,15 @@ const unreadNames = (read) => {
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 };
 
+/** How long ago, for a moment rather than for an age. `ageWords` says how old a thing is. */
+const agoWords = (min) => {
+  if (min === null || min === undefined || !Number.isFinite(min)) return null;
+  if (min < 1) return 'just now';
+  if (min < 60) return `${Math.round(min)}m ago`;
+  const h = min / 60;
+  return h < 48 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago`;
+};
+
 const ageWords = (min) => {
   if (min === null || min === undefined || !Number.isFinite(min)) return null;
   if (min < 60) return `${Math.max(0, Math.round(min))}m old`;
@@ -151,9 +160,14 @@ export const provenanceLine = ({ code = null, hub = null, update = null } = {}) 
   if (code?.unknown) { bits.push('code: which commit is running could not be read'); tone = 'warn'; }
   else if (code?.short) {
     const age = ageWords(code.ageMin);
+    // When this process started, next to how old its code is. Two different questions
+    // that a single sha cannot answer — "is this build recent" and "did this page
+    // actually restart" — and #243 asks the page for both.
+    const up = agoWords(code.upMin);
+    const stamp = `code: <code>${esc(code.short)}</code>${age ? `, ${esc(age)}` : ''}${up ? `, started ${esc(up)}` : ''}`;
     bits.push(code.behind
-      ? `code: <code>${esc(code.short)}</code>${age ? `, ${esc(age)}` : ''} — ${code.behind} commit${code.behind === 1 ? '' : 's'} behind this checkout, restart to pick ${code.behind === 1 ? 'it' : 'them'} up`
-      : `code: <code>${esc(code.short)}</code>${age ? `, ${esc(age)}` : ''}, current with this checkout`);
+      ? `${stamp} — ${code.behind} commit${code.behind === 1 ? '' : 's'} behind this checkout, restart to pick ${code.behind === 1 ? 'it' : 'them'} up`
+      : `${stamp}, current with this checkout`);
     if (code.behind) tone = 'warn';
   }
   if (hub?.warn) { bits.push(`decisions: ${esc(hub.warn)}`); tone = 'warn'; }
