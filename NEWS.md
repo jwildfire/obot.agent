@@ -8,6 +8,14 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.5.0 (Upcoming)
 
+- **The ideas inbox is being watched again.** The backstop sweep last ran on 14 August — the watermark file says so, to the second. It stopped because the only thing that ever started it lived inside the interactive session kickoff, and nothing has run that since the 4th. The fold runs it now. ([roadmap #238](https://github.com/jwildfire/obot.roadmap/issues/238), [#203](https://github.com/jwildfire/obot.agent/issues/203))
+
+- **The point of the change is that an empty inbox and a broken one now look different.** They did not: the sweep printed nothing and exited cleanly in both cases, which is exactly why four days went by unnoticed. The category identifier it queries is written into the script, so if it ever changed, every run would report "no new ideas" forever and look perfectly healthy doing it. Before believing an empty result the fold now confirms the category is reachable at all, and a sweep that cannot answer is reported as unknown rather than as calm.
+
+- **It looks and does not touch.** The fold never marks the ideas as seen — doing that without replying to them would hide them from whoever triages next, which is the opposite of a backstop. And when it does advance a watermark it advances to what was actually read, never to the clock: the old behaviour stamped "now", so anything that changed between the read and the stamp was skipped permanently.
+
+- One step is deliberately left out: the Apple Reminders ingest. It can stall on a permission prompt, and at seven in the morning there is nobody to answer one.
+
 - **And the alarm that came with it now looks like an alarm.** The banner that says the page cannot be trusted shipped an hour earlier using a style rule that lived only in the Navigator tab's sheet — so on the dashboard, the surface it is most likely to appear on, it rendered as plain grey text among plain grey text. It is now in the shared sheet both surfaces load: red-ruled box, its own background, the same at 390px as on the desktop. Caught by looking at what the fix actually renders rather than at whether its test passed, which is the same discipline the bug underneath it was about.
 
 - **The diary writes itself again, on days that had work.** There is no entry for 17 August; that day carried ninety-one commits and a shipped release. None for the 15th either, and a nine-day gap before the 14th. The entry used to be the last step of closing a session, and the standing sessions never close. The fold now writes it: both queues that need you at the top, then what actually landed, grouped by repository, every line linking the pull request it came from. ([roadmap #238](https://github.com/jwildfire/obot.roadmap/issues/238), [#202](https://github.com/jwildfire/obot.agent/issues/202))
