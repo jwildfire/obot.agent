@@ -20,7 +20,8 @@
 //
 // D1 — what counts as a consumer worth restarting. Restarting one mid-request is
 // worse than serving stale for five more minutes, so the bar is deliberately high and
-// the tiers are written down rather than left to whatever the code happens to do:
+// the tiers are written down rather than left to whatever the code happens to do
+// (D3 below is what stops "deliberately high" from meaning "never reached"):
 //
 //   * RESTARTED automatically — a long-running local server whose entire state is on
 //     disk, started from this checkout, holding a declared start command, and
@@ -44,6 +45,21 @@
 // in progress. Every refusal carries a stable code and a plain sentence, and both
 // reach the page, because the whole point of this requirement is that a failure to
 // update is visible rather than silent.
+//
+// D3 — how long the restart may be held off, and what proves it happened. Added by
+// obot.agent#258, because D1's bar had no ceiling: the deferral was keyed on how
+// recently the page had been requested, so anything that watched the page held the
+// restart off for as long as it kept watching, and watching for a deploy was what
+// prevented the deploy. Two halves, both in `planRestart` and `restartDashboard`:
+//
+//   * ONLY IN-FLIGHT IS A REASON TO WAIT, and even that waits at most three sweeps.
+//     See `SETTLE_MS` and `DEFERRAL_LIMIT`, where the argument is made in full.
+//   * RESTARTED MEANS THIS PROCESS IS SERVING. The port answering proves only that
+//     something is on it — a question the process being replaced answers perfectly
+//     well — so the check compares the pid and the commit `/healthz` reports against
+//     the replacement just spawned, and it asks `/healthz` alone. Asking for the page
+//     is traffic, and a verification that generated traffic would seed the next
+//     deferral.
 //
 // Untracked files never block. His drafts folder is permanently full of them, and a
 // guard that demanded a spotless tree would refuse every run and be true exactly once.
