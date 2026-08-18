@@ -640,6 +640,11 @@ export function buildFeedModel(events = [], now = new Date()) {
     const d = e.ts ? new Date(e.ts) : null;
     current.items.push({
       badge, tone,
+      // The numeric stamp, kept beside the rendered one so the Wire can split the
+      // feed at "since you last looked" without re-parsing a clock string it just
+      // formatted (#203). Null when the event predates the ts field — such an
+      // event cannot prove it is new, and the Wire treats it as old.
+      tsMs: d && !Number.isNaN(d.getTime()) ? d.getTime() : null,
       time: d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : (e.at ?? ''),
       text: cleanLine(e.line),
       url: e.url ?? null,

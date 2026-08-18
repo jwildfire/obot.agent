@@ -18,6 +18,7 @@ import { wakeText, DISMISS_MEANS } from './triage.mjs';
 import { CRITICAL_BUDGET } from './rank.mjs';
 import { parseNavigatorState } from './navigator.mjs';
 import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
+import { wireHtml, WIRE_CSS } from './wire-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
 import { rosterHtml, ROSTER_CSS, emptyRoster } from './roster-view.mjs';
@@ -65,14 +66,47 @@ const KIND = {
  * `/live.html` rather than a prettier path for the session tab: the status line builds
  * that exact URL from the served marker, so it stays the session view's address.
  */
+//
+// THE SHARED SPINE (jwildfire/obot.roadmap#203). The first four are the same four
+// entities, in the same order, as the public hub's roadmap sub-nav — Queue, Wire,
+// Agents, Catalog — so a reader who knows one surface can navigate the other
+// without being told. They answer the three questions every surface built for his
+// absence has to answer, and then point at the record:
+//
+//   Queue    what needs you        this page       hub: roadmap.html
+//   Wire     what changed          /wire.html      hub: wire.html
+//   Agents   what is running       /live.html      hub: the NOW strip, counts only
+//   Catalog  the record            the hub itself  hub: catalog.html
+//
+// The depth differs by surface and that is the design, not a gap. Where a surface
+// renders an entity as a summary or a pointer rather than a page, it still carries
+// the entry — a bucket that silently vanished from one surface would leave a reader
+// comparing them unable to tell "none" from "not shown", which are opposite facts.
+// Catalog is that case here: this dashboard does not duplicate the record, it
+// points at the one on the hub, and says so.
+//
+// `spine: true` marks them, and everything after the divider is this surface's own.
+// A local-only tab must never come between two spine entries, or the order stops
+// carrying meaning across the two surfaces.
 export const TABS = [
-  { id: 'ops', href: '/', label: 'Operations' },
-  { id: 'session', href: '/live.html', label: 'Agents' },
+  { id: 'ops', href: '/', label: 'Queue', spine: true },
+  { id: 'wire', href: '/wire.html', label: 'Wire', spine: true },
+  { id: 'session', href: '/live.html', label: 'Agents', spine: true },
+  { id: 'catalog', href: 'https://jwildfire.github.io/obot.roadmap/catalog.html', label: 'Catalog', spine: true, away: true },
   { id: 'navigator', href: '/navigator', label: 'Navigator' },
 ];
 
+/** The spine, in order — asserted against the hub's own list, which must match. */
+export const SPINE = TABS.filter((t) => t.spine).map((t) => t.label);
+
 export const tabs = (active) => `<nav class="tabs" aria-label="Views">
-  ${TABS.map((t) => `<a href="${t.href}"${t.id === active ? ' aria-current="page"' : ''}>${t.label}</a>`).join('\n  ')}
+  ${TABS.map((t, i) => {
+    const away = t.away ? ' target="_blank" rel="noopener" class="away" title="On the public hub — this surface does not duplicate the record"' : '';
+    const link = `<a href="${t.href}"${t.id === active ? ' aria-current="page"' : ''}${away}>${t.label}${t.away ? '<span class="away-mark" aria-hidden="true">↗</span>' : ''}</a>`;
+    // The divider marks where the shared spine ends and this surface's own tabs
+    // begin — the same mark the hub's sub-nav carries, for the same reason.
+    return t.spine && !TABS[i + 1]?.spine ? `${link}\n  <span class="tab-div" aria-hidden="true">·</span>` : link;
+  }).join('\n  ')}
 </nav>`;
 
 // The chip is a handle, never the explanation: `c0001` for a config item, `D0007` for
@@ -686,6 +720,39 @@ const sweepHead = (state, missing) => {
   }
   return `<p class="swept">swept ${esc(state.sweptAt)}${state.summary ? ` · ${esc(state.summary)}` : ''}</p>`;
 };
+
+/**
+ * The Wire tab (#203) — the same page frame as the Navigator tab, deliberately.
+ *
+ * Moving between spine tabs must not move the text under him: one column, one
+ * measure, one header. The only thing that changes is which of the four questions
+ * the body answers.
+ *
+ * `look` is the visit record read BEFORE this request was recorded, which is the
+ * whole mechanism — a page that read it afterwards would say "just now" on every
+ * visit and the signal would mean nothing (last-seen.mjs says the same).
+ */
+export const wirePage = (feed, look, lastLook) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wire · obot</title>
+<style>${SHELL_CSS}${NAV_CSS}${METRICS_CSS}${WIRE_CSS}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">🍊😺 obot</span>
+  ${tabs('wire')}
+  <span class="spacer"></span>
+  <span class="where" title="${esc(lastLookTitle(lastLook))}"><span class="wide">local only · </span>${esc(phrase(lastLook))}</span>
+</header>
+<div class="nav-wrap">
+${wireHtml(feed, look)}
+</div>
+</body>
+</html>`;
 
 const navigatorPage = (body) => `<!doctype html>
 <html lang="en">
