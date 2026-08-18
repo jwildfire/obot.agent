@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Claim currency, both halves, on the five-minute ride.
 //
 // jwildfire/obot.agent#262, under jwildfire/obot.roadmap#264 and #266.
@@ -39,6 +40,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { readFailure } from '../ops-dashboard/lib/absent.mjs';
 import { collectConfig } from '../ops-dashboard/lib/collect.mjs';
@@ -415,10 +417,10 @@ export { CONFIG_WORDS, PREMISE_WORDS };
 // the sweep and without the sweep's other side effects — it fast-forwards the checkout
 // and restarts the dashboard, neither of which belongs in "show me what the claims say".
 //
-//   node tools/navigator/currency.mjs
+//   tools/navigator/currency.mjs
 //
 // Read-only apart from the append to the local checks ledger, which is the point of it.
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const ws = process.env.OBOT_WORKSPACE || `${process.env.HOME}/Documents/obot2`;
   const hubRoot = process.env.OBOT_HUB || path.join(ws, 'obot.roadmap');
   const i = process.argv.indexOf('--artifact');

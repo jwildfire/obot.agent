@@ -241,6 +241,12 @@ export function judge(exitCode, stdout, expect) {
  * nothing to stderr — two live config items depend on that reading as a pass, and it
  * still does. A prose expectation (`→ the file exists`) is judged on the exit code
  * alone and is untouched by any of this.
+ *
+ * Which is why the second half keys on stderr rather than on the exit code, and the
+ * narrowness is the design rather than an oversight. A rule that read any non-zero exit
+ * as "did not answer" would swallow that `grep -c` pass into `unknown` and quietly stop
+ * checking two items — trading a false `fails` for a false `unknown`, which is the worse
+ * trade, because a wrong verdict looks wrong and an unknown looks like nothing happening.
  */
 export function noAnswer(exitCode, stdout, expect, stderr = '') {
   if (exitCode === 0) return null;

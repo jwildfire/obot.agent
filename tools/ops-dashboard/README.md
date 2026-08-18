@@ -482,8 +482,8 @@ one command with three jq pipes and no shell at all.
 **On the sweep, and at publish time.** They fail differently and neither substitutes.
 
 ```bash
-node tools/navigator/currency.mjs                       # the pass, as the sweep runs it
-node tools/navigator/currency.mjs --artifact <slug>     # one artifact, exits 1 if a premise does not hold
+tools/navigator/currency.mjs                        # the pass, as the sweep runs it
+tools/navigator/currency.mjs --artifact <slug>     # one artifact, exits 1 if a premise does not hold
 ```
 
 Cadence catches the world moving under a page that was right when written — and the config
