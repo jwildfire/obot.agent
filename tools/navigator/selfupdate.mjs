@@ -58,11 +58,25 @@ import { join, dirname, resolve } from 'node:path'
 // publish and the other to quote. Only the two commands that touch the network or
 // the index get their own budget below — a fetch is not an eight-second read.
 import { captureCode, git as gitRead } from '../ops-dashboard/lib/provenance.mjs'
+// The marker is the answer to "which process is the machine's dashboard", and the
+// last-seen store is the answer to "was anybody reading it". Both already exist and
+// both are already the authority for those questions elsewhere; reading them here
+// rather than re-deriving either is what keeps a test server safe from this module.
+import { readLastSeen } from '../ops-dashboard/lib/last-seen.mjs'
+import { markerPath, readMarker } from '../ops-dashboard/lib/serve-marker.mjs'
 
 const GIT_TIMEOUT = 45000
 
-/** The default port the machine's dashboard lives on. A server anywhere else is not it. */
-export const DASHBOARD_PORT = 7326
+/**
+ * The port the machine's dashboard lives on. A server anywhere else is not it.
+ *
+ * Read from the environment so a scratch machine can move it, and read from the same
+ * variable the server itself reads: the restart works by finding the process holding
+ * the serve marker, the server claims that marker only on its default port, and two
+ * halves that disagree about which port is "the" port would restart nothing and
+ * report that everything was fine.
+ */
+export const DASHBOARD_PORT = Number(process.env.OBOT_DASHBOARD_PORT) || 7326
 
 /**
  * How quiet the dashboard has to have been before it may be restarted.
@@ -359,7 +373,10 @@ export function restartDashboard({ root, workspace, port = DASHBOARD_PORT, pid, 
   } catch { out = 'ignore' }
   let child
   try {
-    child = spawnFn(process.execPath, [script, '--serve', '--workspace', workspace], {
+    // `--exclusive` rather than the default roll-forward: a replacement that quietly
+    // lands on 7327 is a dashboard nobody can find and a serve marker nobody holds,
+    // and it would report as a success here. Better it refuses to start and says so.
+    child = spawnFn(process.execPath, [script, '--serve', '--exclusive', '--workspace', workspace], {
       detached: true, stdio: ['ignore', out, out], cwd: workspace,
     })
     child.unref?.()
@@ -437,7 +454,8 @@ export function takeLock(workspace, { now = Date.now } = {}) {
  * running, which is the failure this requirement exists to end.
  */
 export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
-                             marker = null, health: readHealth = health, lastSeen = null,
+                             marker = readMarker(markerPath(workspace)),
+                             health: readHealth = health, lastSeen = readLastSeen(workspace),
                              restart = restartDashboard, ff = fastForward, quietMs = QUIET_MS,
                              port = DASHBOARD_PORT, logFile = null } = {}) {
   const at = now().toISOString()
@@ -453,7 +471,7 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
       const h = readHealth(port)
       const plan = planRestart({
         marker, health: h, headSha, quietMs, port,
-        lastLookMs: lastSeen === null ? null : lastLookMs(lastSeen, now()),
+        lastLookMs: lastLookMs(lastSeen, now()),
       })
       if (plan.act === 'restart' || plan.act === 'start') {
         const r = restart({
@@ -551,8 +569,14 @@ export function renderSelfUpdate(record, now = new Date()) {
 
   lines.push('')
   const s = record.sweep
+  // The sweep's own build stamp, and the one honest thing to say about a process that
+  // updates the checkout it is running from: for the rest of this run it is older than
+  // the disk beneath it. That window is a real mismatch — every tool this run shells
+  // comes off the new tree — and it lasts exactly one cadence, so it is stated rather
+  // than hidden. An invisible five-minute mismatch is this requirement's whole subject.
+  const moved = s?.sha && c.to && s.sha !== c.to
   lines.push(s?.short
-    ? `- sweep: \`${s.short}\` — the code this run is executing, loaded ${ageWords(now.getTime() - Date.parse(s.startedAt)) ?? 'just now'}`
+    ? `- sweep: \`${s.short}\` — the code this run is executing, loaded ${ageWords(now.getTime() - Date.parse(s.startedAt)) ?? 'just now'}${moved ? `; the checkout has since moved to \`${String(c.to).slice(0, 7)}\` and the next run executes that` : ''}`
     : '- sweep: which commit this run is executing could not be read')
   for (const con of record.consumers ?? []) {
     if (con.ok && con.act !== 'restart' && con.act !== 'start') lines.push(`- ${con.id}: not restarted — ${con.reason}`)

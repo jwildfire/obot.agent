@@ -61,7 +61,13 @@ import { autoUpdate, captureCode, codeState, fetchHub, resolveHub } from './lib/
 import { markerPath, holdServeMarker } from './lib/serve-marker.mjs';
 
 const HOST = '127.0.0.1';
-const DEFAULT_PORT = 7326;
+// One value for "the port this machine's dashboard lives on", because two things now
+// depend on agreeing about it: this server, which claims the serve marker only on the
+// default port, and the sweep's restarter, which will only ever restart the process
+// holding that marker (tools/navigator/selfupdate.mjs). The override exists so a
+// scratch machine can move both together and rehearse the restart without going
+// anywhere near his — same reason `OBOT_WORKSPACE` exists.
+const DEFAULT_PORT = Number(process.env.OBOT_DASHBOARD_PORT) || 7326;
 
 // The commit this process is running, taken at load rather than at render time — a
 // long-running server's checkout moves on beneath it, so reading HEAD during a request
