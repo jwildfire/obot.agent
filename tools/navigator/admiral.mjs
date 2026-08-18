@@ -40,6 +40,7 @@
 // else: the wake notifies at 10-30 minutes, the admiral acts at hours, because a
 // notification that turns out to be premature costs a glance and a close that turns
 // out to be premature destroys work.
+import { isForeignRole } from '../lib/roles.mjs'
 import { classify, hostWasAway, isWorker, judgedWorkers, readJobs, verdictKeys,
          workerIdOf } from './wake.mjs'
 
@@ -60,7 +61,35 @@ export { hostWasAway, judgedWorkers, readJobs }
 export const ADMIRAL_TAG = '\u{2693}\u{1F916}' // ⚓🤖
 export const ADMIRAL_NAME = `${ADMIRAL_TAG} obot-admiral`
 
-export const isAdmiral = (job) => String(job?.name ?? '').startsWith(ADMIRAL_TAG)
+/**
+ * Is this job THIS WORKSPACE'S admiral?
+ *
+ * The name is a claim and the workspace is a fact (obot.agent#188). Asking the name
+ * alone is how four sessions spawned by the launcher's own unit suite — real
+ * `claude --bg -n '⚓🤖 obot-admiral'` processes in `mkdtemp` workspaces — held the
+ * singleton against every real launch, collected two
+ * **ADMIRAL KILLED ON A BREACHED BUDGET** headlines on @jwildfire's dashboard and
+ * took a real SIGTERM between them.
+ *
+ * `workspace` is optional and its absence changes nothing: an unknown workspace, or
+ * a job record with no `cwd`, falls back to the name exactly as before. Failing
+ * closed on a missing field would make a real admiral invisible, and an admiral
+ * nothing is watching is the failure obot.agent#181 was written about.
+ */
+export const isAdmiral = (job, { workspace } = {}) =>
+  String(job?.name ?? '').startsWith(ADMIRAL_TAG) && !isForeignRole(job, { workspace })
+
+/**
+ * Sessions wearing a role's name that ran somewhere else.
+ *
+ * Reported rather than merely dropped. Four records vanishing from the singleton,
+ * the budget and the wake with nothing said would be a suppression nobody can see,
+ * which is the same defect as the rows it suppressed — so the section names them and
+ * says where they actually ran.
+ */
+export function foreignRoleSessions(jobs = [], { workspace } = {}) {
+  return jobs.filter((j) => isForeignRole(j, { workspace }))
+}
 
 /**
  * The harness's terminal states, all three of them.
@@ -186,14 +215,15 @@ const clip = (s, n) => {
  * verdict — is NOT a stalled session. Nothing is stuck; the work finished. It is
  * condition 3, and it is reported rather than acted on.
  */
-export function stalledSessions(jobs = [], { now = new Date(), hostWasAway: away = false } = {}) {
+export function stalledSessions(jobs = [], { now = new Date(), hostWasAway: away = false,
+                                            workspace = null } = {}) {
   // A suspended laptop is not a stalled fleet. Same guard the wake uses: a
   // detector cannot run on a host that was not running, and every worker on a lid
   // that was shut for thirteen hours would otherwise read as three hours stalled.
   if (away) return []
   const out = []
   for (const job of jobs) {
-    if (isAdmiral(job)) continue // it never acts on itself, or on its successor
+    if (isAdmiral(job, { workspace })) continue // it never acts on itself, or on its successor
     for (const d of classify(job, now)) {
       if (!(d.kind in ACT_MIN)) continue
       const mins = minsSince(d.at, now)
@@ -356,8 +386,8 @@ export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
  */
 export function triggers({ jobs = [], prs = [], policy = {}, judged = new Set(),
                            judgedReadable = true, now = new Date(),
-                           hostWasAway: away = false } = {}) {
-  const sessions = stalledSessions(jobs, { now, hostWasAway: away })
+                           hostWasAway: away = false, workspace = null } = {}) {
+  const sessions = stalledSessions(jobs, { now, hostWasAway: away, workspace })
   const pulls = stuckPRs(prs, { now })
   const gaps = closeoutGaps(jobs, { now, judged, judgedReadable })
   const conditions = [
@@ -390,6 +420,18 @@ export function signatureOf(conditions = []) {
 
 export const launchLine = (at, signature, why) => `${at} LAUNCH ${signature || '-'} — ${why}`
 export const holdLine = (at, signature, why) => `${at} HOLD ${signature || '-'} — ${why}`
+/**
+ * A launch that was DECIDED and not made, because OBOT_ADMIRAL_SPAWN=0 disarmed the
+ * spawn (obot.agent#188).
+ *
+ * Its own word rather than a LAUNCH line, and that is the whole point of it. The
+ * floors below are read back out of this log, so a stub that wrote LAUNCH would hold
+ * the next REAL launch for an hour on the strength of one that never happened —
+ * a guard silently re-armed by a change that reported success, which is this
+ * codebase's signature failure. `parseAdmiralLog` reads LAUNCH and HOLD only, so a
+ * STUB line is a record for a human and arms nothing.
+ */
+export const stubLine = (at, signature, why) => `${at} STUB ${signature || '-'} — ${why}`
 
 /** Launch and hold entries back out of the log. The signature is a field, never
  *  re-derived from prose — the mistake the ledger work spent a night undoing. */
@@ -410,11 +452,11 @@ export function parseAdmiralLog(text = '') {
  * is broken, which is this house's signature failure.
  */
 export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
-                               hostWasAway: away = false } = {}) {
+                               hostWasAway: away = false, workspace = null } = {}) {
   if (away) return { launch: false, why: 'host was away — a gap in the sweep is not a stalled fleet' }
   if (!trigger?.fired) return { launch: false, why: 'no condition holds — a quiet fleet is not a trigger' }
 
-  const live = jobs.filter((j) => isAdmiral(j) && isLive(j))
+  const live = jobs.filter((j) => isAdmiral(j, { workspace }) && isLive(j))
   if (live.length) {
     return { launch: false, why: `an admiral is already running (job ${live[0].id}, ${live[0].state})` }
   }
@@ -450,10 +492,11 @@ export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
  * be overstated by the session's own account of itself.
  */
 export function overrun(jobs = [], { now = new Date(), ttlMin = ADMIRAL_TTL_MIN,
-                                     hardMin = ADMIRAL_HARD_MIN, startedAt = {} } = {}) {
+                                     hardMin = ADMIRAL_HARD_MIN, startedAt = {},
+                                     workspace = null } = {}) {
   const out = []
   for (const job of jobs) {
-    if (!isAdmiral(job) || !isLive(job)) continue
+    if (!isAdmiral(job, { workspace }) || !isLive(job)) continue
     const started = startedAt[job.id] ?? job.createdAt ?? job.updatedAt
     const mins = minsSince(started, now)
     if (mins === null || mins < ttlMin) continue
@@ -489,7 +532,8 @@ export const UNJUDGED_NOTE =
  * grey text.
  */
 export function admiralSection({ trigger = null, decision = null, overruns = [],
-                               launched = null, error = null } = {}) {
+                               launched = null, error = null, stubbed = null,
+                               foreign = [] } = {}) {
   const lines = ['## Admiral — triggered, acts and exits', '']
   if (error) {
     lines.push(`**ADMIRAL TRIGGER BROKEN** — ${clip(error, 160)}. No condition was evaluated this run; this is not a quiet fleet.`)
@@ -513,6 +557,23 @@ export function admiralSection({ trigger = null, decision = null, overruns = [],
   for (const o of overruns) {
     if (o.killed) lines.push(`**ADMIRAL KILLED ON A BREACHED BUDGET** — ${o.line} · ${o.killed}`)
     else lines.push(o.hard ? `**ADMIRAL BUDGET BREACHED** — ${o.line}` : `admiral overrun — ${o.line}`)
+  }
+
+  // A launcher that has been disarmed reports as loudly as one that is broken, and
+  // for the same reason: a section saying it considered the fleet and declined is
+  // what a WORKING launcher says, so a silent stub would be indistinguishable from
+  // health. DOWN rather than DISARMED because the dashboard's alarm regex is keyed
+  // on GAP/FINDING/BREACHED/FAILED/DOWN/BROKEN and would render anything else grey.
+  if (stubbed) lines.push(`**ADMIRAL LAUNCH DOWN** — ${clip(stubbed, 220)}`)
+
+  // Said, never merely dropped. These are the records the singleton, the budget and
+  // the wake stopped counting, and a suppression nobody can see is the same defect
+  // as the rows it suppressed (obot.agent#188).
+  if (foreign.length) {
+    lines.push(`not this workspace: ${foreign.length} session(s) carrying a role's name ran elsewhere — ` +
+               `ignored by the singleton, the budget and the wake · ` +
+               foreign.slice(0, 3).map((j) => `${j.id} in ${clip(j.cwd, 70)}`).join(' · ') +
+               (foreign.length > 3 ? ` · …and ${foreign.length - 3} more` : ''))
   }
 
   if (!trigger.fired) {

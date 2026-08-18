@@ -165,3 +165,86 @@ export const restsWhenIdle = (name) => roleOf(name)?.lifecycle === STANDING;
  * first of them fired at all.
  */
 export const mustExit = (name) => roleOf(name)?.lifecycle === TRIGGERED;
+
+// ---- question 3: is this session one of MY roles? ---------------------------
+//
+// The two questions above are asked of a NAME, and that was enough for as long as
+// only this workspace's launchers ever produced a session carrying a role's tag.
+// obot.agent#188 ended that: the admiral launcher's own unit suite ran the real
+// launcher against a `mkdtemp` workspace, reached the launch branch, and put four
+// genuine `⚓🤖 obot-admiral` sessions into the machine's real job ledger. Every
+// consumer asked the name and every consumer said yes — so the Agents tab pinned a
+// fixture into the admiral's slot as RUNNING, `overrun` put two ADMIRAL KILLED
+// headlines on the dashboard and sent a real SIGTERM, the singleton held every real
+// launch behind them, and the wake raised four WAITING detections. Two agents
+// diagnosed a runaway launcher off that row before the launch log settled it.
+//
+// A NAME IS A CLAIM; A WORKSPACE IS A FACT. The exclusion could have been written
+// as a name match — the fixtures' temp prefixes, or a "probe" marker in the session
+// name — and it would have held exactly until the next fixture chose different ones.
+// The same population already carried two names and two prefixes: four admirals from
+// `fleetws-*`, and an earlier sandboxed session under the retired `🚦🤖 obot-fleet`
+// tag from `~/.claude/jobs/<id>/tmp/sweep-sandbox`. What all five share is the one
+// thing a fixture cannot dress up: they were not running in this workspace. All 110
+// job records on the machine carry `cwd`, and 104 of them are the workspace or a
+// directory inside it.
+//
+// POSITIVE, LIKE EVERY OTHER CONDITION HERE. A session IS this workspace's role when
+// it runs inside this workspace — never "is not one of the known fixture shapes".
+// And UNKNOWN IS A THIRD ANSWER: a record with no cwd, or a caller that names no
+// workspace, falls back to the name exactly as before. Failing closed there would
+// drop a real role out of the pinned band the first time a field went missing, and
+// an absent role row reads as health — the failure obot.agent#181 was about.
+import { resolve, sep } from 'node:path'
+import { realpathSync } from 'node:fs'
+
+// Symlinks, because macOS hands back both spellings of the same directory: the
+// harness records `/private/var/folders/…` for a session started in `/var/folders/…`,
+// and a lexical comparison of those two says "different workspace" about one
+// directory. Resolved when the path still exists; a deleted temp directory cannot be
+// resolved and keeps its lexical form, which is still not inside the workspace.
+const real = (p) => { try { return realpathSync(p) } catch { return p } }
+
+/**
+ * Is this session running inside the workspace?
+ *
+ * `true` inside, `false` provably outside, `null` when either path is unknown —
+ * three answers, because the caller must be able to tell "somewhere else" from
+ * "nobody said", and only the first of those is ever a finding.
+ */
+export function inWorkspace(cwd, workspace) {
+  if (!cwd || !workspace) return null
+  const a = real(resolve(String(cwd)))
+  const b = real(resolve(String(workspace)))
+  // The separator matters: `obot2-worktrees` starts with `obot2` and is not in it.
+  return a === b || a.startsWith(b.endsWith(sep) ? b : b + sep)
+}
+
+/** A session's name, from a job record (`name`) or a dashboard row (`label`). */
+const sessionName = (session) => session?.name ?? session?.label ?? ''
+
+/**
+ * The role this SESSION is — its name AND where it ran.
+ *
+ * Returns null for a session that wears a role's name from outside the workspace,
+ * so every consumer that already asks "which role is this" inherits the guard
+ * without asking a second question and without a list of fixtures to maintain.
+ */
+export function roleOfSession(session, { workspace } = {}) {
+  const role = roleOf(sessionName(session))
+  if (!role) return null
+  return inWorkspace(session?.cwd, workspace) === false ? null : role
+}
+
+/**
+ * A session wearing a role's name from outside this workspace.
+ *
+ * Its own question rather than `!roleOfSession(...)`, because the two are different
+ * things and only this one is worth saying out loud: a suppression nobody can see is
+ * the same defect as the row it suppressed. Whatever drops these from the band, the
+ * singleton and the wake should be able to report that it did.
+ */
+export function isForeignRole(session, { workspace } = {}) {
+  if (!roleOf(sessionName(session))) return false
+  return inWorkspace(session?.cwd, workspace) === false
+}

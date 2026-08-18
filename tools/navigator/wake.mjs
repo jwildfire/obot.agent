@@ -67,7 +67,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 // Which sessions this file is entitled to call dead. The registry declares each
 // role's lifecycle; this file asks the liveness question and never the pinning one
 // (obot.agent#181, tools/lib/roles.mjs).
-import { mustExit, roleOf } from '../lib/roles.mjs'
+import { isForeignRole, mustExit, roleOf } from '../lib/roles.mjs'
 
 /** The tags whose sessions are workers. Matches tools/lib/worker_ledger.py. */
 export const WORKER_TAGS = ['\u{1F46F}\u{1F916}', '\u{1F9BE}\u{1F916}'] // 👯🤖 🦾🤖
@@ -186,11 +186,19 @@ const clip = (s, n) => {
  * prompt twenty hours later. They need different actions, so they are different
  * detections rather than one summarised line.
  */
-export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
+export function classify(job, now = new Date(), { hostWasAway = false, workspace = null } = {}) {
   // Workers, and roles that must exit inside a budget. A role that RESTS when idle
   // is skipped — and it is skipped for that reason, never for being on the list of
   // roles @jwildfire pins, which is the conflation that lost the admiral.
-  const budgeted = mustExit(job?.name)
+  //
+  // A session wearing a role's name from OUTSIDE this workspace is not that role and
+  // has no budget here, so it is not a budgeted job (obot.agent#188). Four fixture
+  // admirals in `mkdtemp` workspaces produced four WAITING detections this way, on a
+  // channel whose whole value is that a detection means something. Where the record
+  // says nothing — no cwd, or no workspace given — the name is trusted exactly as
+  // before, because a detector that goes quiet on a missing field is worse than one
+  // that occasionally speaks up.
+  const budgeted = mustExit(job?.name) && !isForeignRole(job, { workspace })
   if (!isWorker(job) && !budgeted) return []
   const out = []
   const quiet = minsSince(job.updatedAt, now)
@@ -275,10 +283,11 @@ export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
  * judged stays pending on purpose — the re-wake floor spaces it out, and the only
  * thing that silences it is the verdict it is asking for.
  */
-export function pending(jobs = [], { now = new Date(), judged = new Set(), hostWasAway = false } = {}) {
+export function pending(jobs = [], { now = new Date(), judged = new Set(), hostWasAway = false,
+                                    workspace = null } = {}) {
   const out = []
   for (const job of jobs) {
-    for (const d of classify(job, now, { hostWasAway })) {
+    for (const d of classify(job, now, { hostWasAway, workspace })) {
       if (d.kind === 'stopped' && verdictKeys(job).some((k) => judged.has(k))) continue
       out.push(d)
     }
@@ -410,6 +419,11 @@ export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) 
       needs: s.needs ?? '',
       updatedAt: s.updatedAt ?? null,
       firstTerminalAt,
+      // Where the session actually ran. The one field that can tell this
+      // workspace's role from something else wearing its name (obot.agent#188): a
+      // name is a claim, a working directory is a fact, and all 110 records on this
+      // machine carry one.
+      cwd: s.cwd ?? null,
       children: s.children || [],
     })
   }
