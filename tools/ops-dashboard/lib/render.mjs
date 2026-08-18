@@ -475,6 +475,8 @@ const DASHBOARD_CSS = `
   .iq-res.fail { color:var(--crit); }
   .iq-res.refused { color:var(--warn); }
   .iq-warn { font-size:0.72rem; color:var(--warn); margin:0.5rem 0 0; }
+  .iq-card { margin:0 0 0.9rem; font-size:0.8rem; }
+  .iq-card a { text-decoration:none; border-bottom:1px solid var(--accent-soft); }
 
   /* Triage: one bar, in the sidebar, for whatever is selected. */
   .triage { border-top:1px solid var(--line); margin-top:0.7rem; padding-top:0.5rem; }
@@ -1143,6 +1145,20 @@ ${integrityBanner(integrity)}
     const meta = el('p', 'iq-meta', [iq.id, iq.filed ? 'filed ' + iq.filed : null, iq.verified ? 'verified ' + iq.verified : null].filter(Boolean).join(' · '));
     box.appendChild(meta);
     if (iq.claim) { const c = el('p', 'iq-res fail', 'critical · ' + iq.claim); box.appendChild(c); }
+    // The same item written as a page he can read rather than a form he has to
+    // decode (jwildfire/obot.roadmap#263). It opens beside this panel rather than
+    // replacing it: the fields stay until he has read one of these and said which
+    // he wants, which is a decision the requirement leaves to him.
+    if (iq.id) {
+      const p = el('p', 'iq-card');
+      const a = document.createElement('a');
+      a.href = '/config/' + encodeURIComponent(iq.id);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'Read this as a page \u2192';
+      p.appendChild(a);
+      box.appendChild(p);
+    }
 
     for (const f of iq.fields) {
       const wrap = el('div', 'iq-f');
