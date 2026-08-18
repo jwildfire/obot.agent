@@ -55,6 +55,11 @@ import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
+// How current each config item's claim is (obot.agent#262, under
+// jwildfire/obot.roadmap#264). The reading is shared with the Navigator sweep and with
+// decision-artifact premises, so the page, the card and the sweep cannot describe the
+// same check in three different ways.
+import { configCurrency } from '../navigator/currency.mjs';
 import { buildCard, readCardSource, renderCard, CARD_ID_RE } from './lib/config-card.mjs';
 import { collectConfig } from './lib/collect.mjs';
 import { criticalClaim } from './lib/rank.mjs';
@@ -236,12 +241,31 @@ async function page(args, lastLook = null) {
   // showing whether it has ever been proved rather than starting blank.
   const checks = readChecks(args.workspace);
   const check = (i) => checks[i.id ?? i.key];
-  const withChecks = (g) => ({ ...g, items: (g.items ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)) });
+  // The check's verdict AND how old it is, on every config row. A pass/fail with no
+  // age is the same assertion-without-a-date the config list was making before any of
+  // this: it says what was true at some moment nobody names.
+  const stamp = (i) => (i.kind === 'config'
+    ? { ...i, check: check(i) ?? null, currency: configCurrency(i, checks) }
+    : (check(i) ? { ...i, check: check(i) } : i));
+  // An item its own check proves done leaves the queue. Nothing is written to the
+  // config list to make that happen — the list keeps the record and this is a view
+  // over it — and nothing is closed on GitHub either. It is named below the group so
+  // an item cannot vanish silently, which would be its own kind of lie.
+  const cleared = new Map();
+  const open = (items) => (items ?? []).map(stamp).filter((i) => {
+    if (i.kind !== 'config' || !i.currency?.done) return true;
+    cleared.set(i.id ?? i.key, { id: i.id ?? i.key, ago: i.currency.ago });
+    return false;
+  });
+  // Both lists are drained before either is handed over, because a critical item is
+  // one that was lifted out of the config group and it clears the same way.
+  const criticalItems = open(queue.critical);
+  const configItems = open(queue.config.items);
   return render({
     queue: {
       ...queue,
-      config: withChecks(queue.config),
-      critical: (queue.critical ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)),
+      config: { ...queue.config, items: configItems, cleared: [...cleared.values()] },
+      critical: criticalItems,
     },
     answers: currentAnswers(args.workspace, { hub: hub.root }),
     deliverer: delivererState(args.workspace),
@@ -431,7 +455,8 @@ export function serve(args) {
         if (list.error && !list.absent) return send(500, 'text/plain', `the config list could not be read: ${list.error}`);
         const item = list.items.find((it) => String(it.id ?? '').toLowerCase() === cardId);
         if (!item) return send(404, 'text/plain', `${cardId} is not an open item on the config list`);
-        const card = buildCard({ ...item, criticalClaim: criticalClaim(item) }, readCardSource(args.workspace, cardId));
+        const card = buildCard({ ...item, criticalClaim: criticalClaim(item) }, readCardSource(args.workspace, cardId),
+          { currency: configCurrency(item, readChecks(args.workspace)) });
         return send(200, 'text/html; charset=utf-8', renderCard(card));
       }
 

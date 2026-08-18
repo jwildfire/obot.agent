@@ -69,6 +69,12 @@ import { brokenRecord, buildStamp, renderSelfUpdate, selfUpdate } from './selfup
 // actually is; see localwatch.mjs for why age plus absence of an owner, and never
 // dirtiness, is what makes it a finding.
 import { collectLocal, localSection } from './localwatch.mjs'
+// Claim currency (obot.agent#262, under jwildfire/obot.roadmap#264 and #266). Every
+// other reading above asks whether something happened; this asks whether something
+// still written down is still true. Two artifact classes state claims — the config
+// list and the decision artifacts — and until now nothing re-checked either after the
+// day it was written. One mechanism, because #266 asked for one by name.
+import { readCurrency } from './currency.mjs'
 // The wake (hub#212). The sweep already knew a worker had stopped; what it could not
 // do was get the Navigator's attention, so workers stopped and then waited — twenty
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
@@ -184,7 +190,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null, local = null, identity = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null, local = null, identity = null, currency = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -265,6 +271,14 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push((identity && identity.trim())
     ? identity.trimEnd()
     : '## Commit identity — agent commits wearing the wrong name\n\n**COMMIT IDENTITY READING BROKEN** — no checkout was scanned this sweep. Attribution is unknown, not clean.', '')
+
+  // Whether what is written down is still true (obot.agent#262). It sits above the
+  // queue rather than below it because its findings are about the things IN the queue:
+  // a config item whose claim has gone stale and a decision page whose premise has
+  // expired are both discovered here, before he goes to the keyboard rather than at it.
+  lines.push((currency && currency.trim())
+    ? currency.trimEnd()
+    : '## Claim currency — what has been re-checked, and when\n\n**CLAIM CHECK BROKEN** — no claim was re-checked this sweep, so nothing here says a config item is still outstanding or that a decision page still frames a live question. Unknown, not clean.', '')
 
   lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
@@ -681,6 +695,15 @@ const safeIdentity = (repos, sweptAt) => {
   return renderIdentity(reports, { stamp: `[git ${sweptAt.slice(-5)}]` })
 }
 
+// The claim-currency pass (obot.agent#262). It runs commands, so it is the reading
+// most able to hang — every command is bounded, the pass is bounded, and the whole
+// thing is contained here so a slow `gh` call costs a section rather than the sweep.
+const safeCurrency = async () => {
+  try { return (await readCurrency(WS, HUB)).section } catch (e) {
+    return `## Claim currency — what has been re-checked, and when\n\n**CLAIM CHECK BROKEN** — ${String(e.message).slice(0, 160)}. No config item's claim and no decision premise was checked this run; this is not a current record.\n`
+  }
+}
+
 const safeAdmiral = () => {
   try { return runAdmiral() } catch (e) {
     return `## Admiral — triggered, acts and exits\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
@@ -695,7 +718,7 @@ const safeWake = (jobs, opts) => {
   }
 }
 
-function main() {
+async function main() {
   const sweptAt = nowStamp()
   const sweptIso = new Date().toISOString()
   let prevWrap = { lastGoodAt: null, snapshot: {}, events: [] }
@@ -729,7 +752,7 @@ function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), identity: null }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), identity: null, currency: await safeCurrency() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -842,7 +865,8 @@ function main() {
   // it launches will read the state file this run is about to write.
   const admiral = safeAdmiral()
   const local = safeLocal(repos)
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate, local, identity }))
+  const currency = await safeCurrency()
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate, local, identity, currency }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
@@ -862,4 +886,9 @@ function main() {
   log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()
+// `main` awaits the claim-currency pass, so it returns a promise. A rejection here has
+// to be loud: a sweep that dies after writing nothing looks exactly like a sweep that
+// never fired, and the stale rule would then blame the observer.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch(e => { log(`FAILED sweep threw: ${String(e?.stack ?? e).slice(0, 400)}`); process.exitCode = 1 })
+}

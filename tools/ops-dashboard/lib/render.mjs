@@ -126,7 +126,12 @@ const item = (it) => {
   // An RC title carries no summary any more (@jwildfire, 2026-08-15), so the
   // sentence sits under it - the same second-line shape as a critical claim.
   const sub = it.sub ? `<span class="q-sub">${esc(it.sub)}</span>` : '';
-  return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${sub}${claim}</li>`;
+  // When the claim was last checked, on the row itself (obot.agent#262). A config item
+  // used to carry a filing date and nothing else, so the row said when somebody wrote
+  // it down rather than when anybody last established that it was still true.
+  const cur = it.currency
+    ? `<span class="q-cur ${esc(it.currency.state)}">${esc(it.currency.phrase)}</span>` : '';
+  return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${sub}${claim}${cur}</li>`;
 };
 
 // `read: false` means the source behind this group could not be opened, so the
@@ -138,6 +143,19 @@ const item = (it) => {
 const group = (title, items, empty, moved = 0, read = true) => `<h2 class="q-h">${esc(title)} <span class="q-n">${read ? items.length : UNMEASURED}</span>${
   moved ? `<span class="q-moved">${moved} pinned above</span>` : ''}</h2>
 ${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="${read ? 'q-empty' : 'q-unread'}">${esc(empty)}</p>`}`;
+
+/**
+ * The config items their own check took off the list (obot.agent#262).
+ *
+ * Named rather than simply gone. An item that disappears because a machine decided it
+ * was done is indistinguishable from an item that was dropped, and this whole
+ * capability exists because things left the list for reasons nobody could see. Ids and
+ * a time — never the item's text, which does not leave the machine.
+ */
+const clearedLine = (cleared = []) => (cleared.length
+  ? `<p class="q-cleared">${cleared.length} cleared by ${cleared.length === 1 ? 'its' : 'their'} own check &mdash; ${esc(cleared.map((c) => c.id).join(', '))}${
+      cleared[0]?.ago ? ` (${esc(cleared[0].ago)})` : ''}. Done, and off your list without you touching it; the list still records ${cleared.length === 1 ? 'it' : 'them'}.</p>`
+  : '');
 
 /** "The GitHub sweep, the hub clone and the config list" — for the one-line why. */
 const unreadNames = (read) => {
@@ -447,6 +465,13 @@ const DASHBOARD_CSS = `
   .q.crit { border-left-color:var(--crit); }
   .q-claim { font-size:0.66rem; color:var(--muted); font-family:var(--mono); }
   .q.crit .q-claim { color:var(--crit); }
+  /* How current the row's claim is. Three states get three colours, because two of
+     them being the same colour is exactly the collapse this exists to prevent: a
+     check that could not run must not look like a check that came back outstanding. */
+  .q-cur { display:block; font-size:0.64rem; font-family:var(--mono); color:var(--muted); }
+  .q-cur.holds { color:var(--good); }
+  .q-cur.unknown { color:var(--warn); }
+  .q-cleared { font-size:0.68rem; color:var(--good); margin:0.2rem 0 0.6rem; }
   .q-fold { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.4rem; }
   .q-fold summary { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase;
                     color:var(--faint); cursor:pointer; }
@@ -479,9 +504,9 @@ const DASHBOARD_CSS = `
   .iq-check button[disabled] { opacity:0.5; cursor:not-allowed; border-color:var(--line); color:var(--muted);
                                background:var(--paper); }
   .iq-res { font-size:0.76rem; font-family:var(--mono); }
-  .iq-res.pass { color:var(--good); }
-  .iq-res.fail { color:var(--crit); }
-  .iq-res.refused { color:var(--warn); }
+  .iq-res.pass, .iq-res.holds { color:var(--good); }
+  .iq-res.fail, .iq-res.fails { color:var(--crit); }
+  .iq-res.refused, .iq-res.unknown { color:var(--warn); }
   .iq-warn { font-size:0.72rem; color:var(--warn); margin:0.5rem 0 0; }
   .iq-card { margin:0 0 0.9rem; font-size:0.8rem; }
   .iq-card a { text-decoration:none; border-bottom:1px solid var(--accent-soft); }
@@ -1010,6 +1035,9 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
         .filter(Boolean),
       verify: { command: it.iq.verify?.command ?? null, expect: it.iq.verify?.expect ?? null, manual: Boolean(it.iq.verify?.manual) },
       check: it.check ?? null,
+      // The same sentence the row shows, computed once on the server. Two surfaces
+      // phrasing one reading differently is how "unknown" turns back into "failed".
+      currency: it.currency ?? null,
     }]));
 
   return `<!doctype html>
@@ -1051,6 +1079,7 @@ ${integrityBanner(integrity)}
     ${group('Decisions', queue.decisions.items, decisionEmpty, queue.decisions.moved, read.decision)}
     ${foldedLane(queue.decisions.folded)}
     ${group('Config', queue.config.items, configEmpty, queue.config.moved, read.config)}
+    ${clearedLine(queue.config.cleared)}
     ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
     ${collapsed('Cleared', cleared, (it) => (it.triage?.action === 'done' ? 'marked done' : 'dismissed'))}
   </nav>
@@ -1204,7 +1233,8 @@ ${integrityBanner(integrity)}
     if (iq.verify.command) row.appendChild(copyBtn(iq.verify.command));
     const btn = el('button', null, 'Check');
     const out = el('span', 'iq-res');
-    if (iq.check) { out.textContent = iq.check.result + ' · ' + (iq.check.at || '').slice(11, 16); out.classList.add(iq.check.result); }
+    if (iq.currency) { out.textContent = iq.currency.phrase; out.classList.add(iq.currency.state); }
+    else if (iq.check) { out.textContent = iq.check.result + ' · ' + (iq.check.at || '').slice(11, 16); out.classList.add(iq.check.result); }
     btn.addEventListener('click', async () => {
       btn.disabled = true; out.className = 'iq-res'; out.textContent = 'running…';
       const r = await fetch('/check', { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1214,11 +1244,14 @@ ${integrityBanner(integrity)}
       out.classList.add(j.result || 'refused');
       // A failure has to say what was expected. "exit 1" tells him nothing he
       // can act on; "printed 0, expected 2" tells him the edit did not land.
+      // Three outcomes, never two. An unknown is a command that never produced an exit
+      // status — not installed, or killed by the timeout — and reporting it as FAIL
+      // would be a measurement nobody took (obot.agent#262).
       out.textContent = j.result === 'pass' ? 'PASS — ' + (j.stdout || 'exit 0')
         : j.result === 'fail'
           ? 'FAIL — ' + (j.stdout ? 'printed ' + j.stdout : 'exit ' + j.exitCode)
             + (iq.verify.expect ? ', expected ' + iq.verify.expect.replace(/^prints /, '') : '')
-          : (j.why || 'could not run');
+          : 'NOT CHECKED — ' + (j.why || 'could not run');
       if (j.result === 'pass') $('tri-done').hidden = false;
     });
     if (iq.verify.manual || !iq.verify.command) {
