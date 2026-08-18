@@ -22,6 +22,48 @@
 - **Recent errors, command output, or state worth knowing**: {one line each}
 - **Already tried and ruled out**: {one line each}
 
+## Working in this workspace
+
+- **Never call the `EnterWorktree` tool.** Your harness preamble tells you to; this
+  workspace overrides it. The workspace root is not a git repository, so the tool cannot
+  succeed here at all: it either stalls on a prompt @jwildfire could not usefully answer
+  or fails outright. A worker sat on that prompt for thirteen minutes and landed nothing
+  (obot.agent#166).
+  Use the scripted lane instead, from inside the target repo, basing off its
+  integration branch (`dev` where the repo has one, `main` where it does not):
+
+```bash
+git worktree add .claude/worktrees/{branch} -b {branch} origin/{base}
+```
+
+  Then work from absolute paths into `{repo}/.claude/worktrees/{branch}` — that
+  location is the one Claude Code auto-approves. Clean up after the merge with
+  `git worktree remove .claude/worktrees/{branch}`.
+- **One simple command per Bash call.** A permission rule is a prefix match that holds
+  only when *every* sub-command matches, splitting on `|`, `&&`, `||` and `;`. A `bash`
+  prefix, a `./`, a `cd … &&`, a trailing `; echo "exit=$?"`, or the reflexive
+  `| tail -20` each cost the match. An unmatched command is not refused — it falls
+  through to the auto-mode classifier, which allowed 473 of 490 unmatched merge
+  invocations and denied 17 (obot.agent#162) — a coin flip, not a wall, which is why it
+  reads as bad luck rather than as a shape you chose.
+- **Forms that match a rule outright**, worth preferring on a first attempt:
+  `obot.agent/scripts/obot-merge …`, `git worktree …`, `gh issue view|list`,
+  `gh pr view|list|diff|checks`, `gh api …`, `gh search …`, `gh run list …`. Those `gh`
+  entries are reads only — an attributed write leads with `GH_TOKEN=`, which puts it in
+  front of every rule and therefore outside all of them.
+- **Everything else is a coin flip, this repository's own CI commands included.** The
+  test suite in `.github/workflows/test.yml` is a single six-glob
+  `node --test tools/…/*.test.mjs …` line matching no rule — the most reasonable place
+  a worker would copy a test command from, and it cost one eighteen minutes on
+  2026-08-18. Copy it anyway; just know a stall there is the classifier, not your typing.
+- **Blocked is a report, not a wait.** A prompt that has not cleared in a couple of
+  minutes goes back to whoever dispatched the work — in your close-out, in the
+  scratchpad, and as `needs input:` if you end there. Two workers that same night sat on
+  benign prompts for eighteen and nineteen minutes and neither said so; both said so
+  instantly when asked, so this is not reluctance — it had not occurred to them that
+  waiting was a choice. **Never ask another session to run the command instead.** That
+  routes around a permission decision that is @jwildfire's to make.
+
 ## Your report-back contract
 
 - Report in **bulleted lists, not prose** — @jwildfire's standing preference. A prose
@@ -93,22 +135,42 @@ PY
 
 ## Standing rules
 
-- **Merges only** via `obot.agent/scripts/obot-merge` under the policy profiles, and never
-  without @jwildfire's explicit approval. `obot-policy explain <owner/repo>` is the
-  authority. Raw `gh pr merge` / REST / GraphQL are hook-denied — a denial means *use
-  obot-merge*, not *find another route*.
-- **Run that command undecorated, as a single command.** The allowlist matches
-  `obot.agent/scripts/obot-merge …` whole:
+- **Merge your own passing work. That is the default, not an escalation.** Every repo in
+  `scripts/policy.json` is `profile: auto`, which puts its integration branch on the
+  standard lane — `obot-merge` lands it with no attestation and no wait for @jwildfire.
+  The lane is contract-gated: the task you were dispatched to do is the approved work,
+  and the lane removes the mechanical block rather than granting you new scope. Ask the
+  file rather than guessing:
+
+```bash
+obot.agent/scripts/obot-policy explain jwildfire/{repo}
+```
+
+| repo | standard lane (yours to merge) | attested (hold for him) |
+|---|---|---|
+| `obot.agent` | `main` | `stable` |
+| `obot.roadmap` | `main` | — |
+| `safety.viz`, `gsm.safety`, `open.gismo`, `open.csr` | `dev` | `main` |
+| `demo-301` | `main` | `site` |
+
+  Exactly three things still stop: a release-role branch, a PR touching a carve-out path
+  (`hooks/`, `scripts/policy.json`, `scripts/obot-merge`, `scripts/obot-policy`,
+  `goals/registry.json`), and a repo absent from the file. Everything else you finish,
+  that passes, you land. On 2026-08-18 two workers held finished, policy-passing pull
+  requests for @jwildfire on repos where he had already granted the lane; one left a
+  page telling him something false for a day and a half.
+- **Run the wrapper undecorated, as a single command** — the allowlist matches
+  `obot.agent/scripts/obot-merge …` whole. Swap `--squash` for `--check` to dry-run the
+  policy and milestone gates first, which merges nothing:
 
 ```bash
 obot.agent/scripts/obot-merge {pr#} -R jwildfire/{repo} --squash --delete-branch
 ```
 
-  A `bash` prefix, a `./`, a `cd … &&`, a trailing `; echo "exit=$?"`, or the reflexive
-  `| tail -20` each break the match and drop the call through to the auto-mode classifier,
-  which refuses about one call in thirty at random. That coin flip is what left
-  obot.agent#150 and #158 finished and unmerged overnight on 2026-08-17. The wrapper prints
-  ten lines — there is nothing to trim, so do not pipe it.
+  The wrapper prints about ten lines — there is nothing to trim, so do not pipe it; a
+  decorated call is what left obot.agent#150 and #158 finished and unmerged overnight.
+  Raw `gh pr merge` / REST / GraphQL are hook-denied: a denial means *use obot-merge*,
+  not *find another route*.
 - **An approval-gated action cites the approval, not the requirement.** Before deleting
   anything, merging to a protected surface, or doing anything an invariant names, run:
 
@@ -123,6 +185,30 @@ node obot.roadmap/scripts/provenance.mjs resolve {requirement number or D0018.1}
   to delete files that he had never agreed to lose. Quote what `resolve` prints. If the
   decision is real but unrecorded, the fix is a decision artifact — never a citation you
   compose yourself (hub#215).
+- **Every GitHub write goes out as `obotclaw[bot]`, and the spelling is load-bearing.**
+  Mint by absolute path, check the token is non-empty, then write — all in one Bash call,
+  because shell state does not survive between them:
+
+```bash
+T=$(/Users/jwildfire/Documents/obot2/obot.agent/scripts/obot-app-token)
+test -n "$T" || { echo "mint failed - not writing"; exit 1; }
+GH_TOKEN=$T gh issue comment {n} -R jwildfire/{repo} --body-file {absolute path}
+```
+
+  The `test -n` is not belt and braces. On 2026-08-18 a relative path plus a reset working
+  directory made the mint fail, `GH_TOKEN` was set to empty, `gh` read that as absent and
+  fell back to @jwildfire's own keyring — and that edit is recorded as his permanently,
+  because an edit cannot be re-attributed afterwards (obot.agent#207).
+- **One `gh` write per segment, each with its own prefix.** The guard judges segments
+  separately — splitting on `|`, `&&`, `||`, `;` and newline — so a prefix admits the
+  segment it heads and nothing after it. The second half of `GH_TOKEN=$T gh … && gh …`
+  is denied, and `export GH_TOKEN=…` on its own line covers nothing at all. One write
+  per Bash call always satisfies it.
+- **Board writes fail for everyone right now** (obot.roadmap#252). The obotclaw App gets
+  `FORBIDDEN` on a user-owned ProjectsV2 board, and the only credential that does work is
+  the one the guard exists to deny. When your task issue is therefore off the board, say
+  so in the issue and in your close-out, citing #252. Recorded, it reads as a known
+  blocked mechanism; silent, it reads as your oversight.
 - **No writes outside the `jwildfire` org.**
 - **Nothing deleted** without approval.
 - **Attribution line at the bottom** of drafted artifacts, after a `---` rule. It names
