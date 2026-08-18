@@ -116,14 +116,18 @@ test('a checkout on a feature branch is left alone — somebody is working there
   assert.match(r.reason, /w0038-admiral/)
 })
 
-test('a linked worktree is never moved — a worker owns it', () => {
+test('a linked worktree is never moved, even one sitting on main — a worker owns it', () => {
   const { origin, clone } = pair()
   advance(origin, 'two\n')
+  // The worktree has to be the one holding `main`, since that is the only case where
+  // a fast-forward would otherwise look reasonable. Git allows exactly one worktree on
+  // a branch at a time, so the main clone moves off it first.
+  git(clone, 'checkout', '-q', '-b', 'parked')
   const wt = path.join(clone, '.claude', 'worktrees', 'w0038')
-  git(clone, 'worktree', 'add', '-q', wt, '-b', 'w0038')
-  git(wt, 'checkout', '-q', '-B', 'main')
+  git(clone, 'worktree', 'add', '-q', wt, 'main')
   const state = readCheckout(wt)
   assert.equal(state.linked, true)
+  assert.equal(state.branch, 'main', 'the case worth guarding is the worktree that IS on main')
   assert.equal(fastForward(wt).code, 'linked-worktree')
 })
 
