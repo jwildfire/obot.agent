@@ -42,8 +42,13 @@ const GH_WRITE = new RegExp(
   String.raw`)`,
 );
 
-/** Already attributed: routed through a wrapper, or carrying an explicit token. */
-const ATTRIBUTED = /obot-(?:gh|merge)\b|(?:GH_TOKEN|GITHUB_TOKEN)=/;
+/** Already attributed: routed through a wrapper, or carrying a token that is not
+ *  empty. `GH_TOKEN=` with nothing after it used to pass this check on the strength
+ *  of the letters — the same mistake the guard itself made, and the one that put a
+ *  write in @jwildfire's history (#207): `gh` reads an empty token as no token and
+ *  falls back to his credential, so a fenced line spelling it teaches exactly the
+ *  write this file exists to keep out of the documentation. */
+const ATTRIBUTED = /obot-(?:gh|merge)\b|(?:GH_TOKEN|GITHUB_TOKEN)=(?!\s|$|""|'')\S/;
 
 function docs(dir, rel = '') {
   const out = [];
@@ -85,6 +90,21 @@ test('no fenced command writes to GitHub on the ambient token', () => {
   assert.deepEqual(offenders, [],
     'these fenced commands write to GitHub as @jwildfire — route them through ' +
     'obot.agent/scripts/obot-gh (obot.agent#197):\n' + offenders.join('\n'));
+});
+
+test('an empty token does not count as attribution in the documentation either', () => {
+  // The doc check and the guard have to agree about what a credential is, or the
+  // repo can document a command the guard refuses - or worse, one it admits and
+  // should not. These are the strings, run against the same rules the sweep uses.
+  const flagged = (line) => GH_WRITE.test(line) && !ATTRIBUTED.test(line);
+  assert.equal(flagged('GH_TOKEN= gh issue edit 1 --add-label bug'), true);
+  assert.equal(flagged('GH_TOKEN="" gh issue edit 1 --add-label bug'), true);
+  assert.equal(flagged("GITHUB_TOKEN='' gh label create x"), true);
+  assert.equal(flagged('gh issue edit 1 --add-label bug'), true);
+  // ...and the forms the briefing actually teaches stay clean.
+  assert.equal(flagged('GH_TOKEN=$T gh issue comment 1 --body-file /tmp/b.md'), false);
+  assert.equal(flagged('obot.agent/scripts/obot-gh issue edit 1 --add-label bug'), false);
+  assert.equal(flagged('gh issue view 1 --json title'), false);
 });
 
 test('a failed mint stops the write instead of emptying the token (#207)', () => {
