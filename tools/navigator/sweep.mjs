@@ -53,6 +53,7 @@ import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWo
 // What counts as a release candidate now lives beside this file rather than in it,
 // because the Operations Dashboard has to answer the same question and used to answer
 // it differently. Re-exported so this module's callers and tests are unaffected.
+import { misattributed, renderIdentity, scanCommits } from '../lib/identity.mjs'
 import { classifyRC, discoverRepos, POLICY_FILE } from './classify.mjs'
 import { refreshMetrics } from './metrics.mjs'
 // The checkout this machine runs from, and the consumers that read it
@@ -94,6 +95,10 @@ const METRICS_TTL_MIN = 60
 // the same hourly ride the metrics take, and every position it prints says how old it
 // is, which is the call selfupdate.mjs already made for the checkout position.
 const LOCALWATCH_CACHE = join(WS, '.claude/session-hub/cache/localwatch.json')
+// How far back the commit-identity scan reads. Bounded so a five-minute job never walks
+// months of history; the backlog it does not cover is the 301 commits already counted on
+// obot.agent#241, which is a cleanup question rather than a detection one.
+const IDENTITY_WINDOW_DAYS = 14
 // The wake channel (hub#212). Append-only: the sweep writes, the Navigator's Monitor
 // tails, and the last entry per key is its own debounce — no separate state file.
 const WAKE_LOG = join(WS, '.claude/session-hub/navigator-wake.log')
@@ -179,7 +184,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null, local = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null, local = null, identity = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -251,6 +256,15 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push((local && local.trim())
     ? local.trimEnd()
     : '## Local-only work — what exists on this machine and not on GitHub\n\n**LOCAL WORK READING BROKEN** — the local-state reading did not run this sweep, so nothing here says that stranded worktrees, unproposed branches or stale checkouts were looked for.', '')
+
+  // Who the commits under all of that say they were made by (obot.agent#241, under
+  // jwildfire/obot.roadmap#260). It sits beside the checkout stamp for the same reason:
+  // both are readings of this machine rather than of his queue. A wrong id still renders
+  // the right name in `git log` and in the GitHub UI, so this section is the only place
+  // the failure is visible at all.
+  lines.push((identity && identity.trim())
+    ? identity.trimEnd()
+    : '## Commit identity — agent commits wearing the wrong name\n\n**COMMIT IDENTITY READING BROKEN** — no checkout was scanned this sweep. Attribution is unknown, not clean.', '')
 
   lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
@@ -650,6 +664,23 @@ const safeLocal = (repos) => {
   }
 }
 
+// Commit attribution across the checkouts on this machine (obot.agent#241). Every
+// repo is read independently: one unreadable checkout reports itself as unread and the
+// rest still report, because a directory that is not a repository is unknown rather
+// than clean (jwildfire/obot.roadmap#215).
+const safeIdentity = (repos, sweptAt) => {
+  const reports = repos.map(({ repo }) => {
+    const name = repo.split('/').pop()
+    const dir = join(WS, name)
+    try {
+      return { repo: name, ...misattributed(scanCommits(dir, { sinceDays: IDENTITY_WINDOW_DAYS })) }
+    } catch (e) {
+      return { repo: name, error: String(e.message).split('\n')[0].slice(0, 120) }
+    }
+  })
+  return renderIdentity(reports, { stamp: `[git ${sweptAt.slice(-5)}]` })
+}
+
 const safeAdmiral = () => {
   try { return runAdmiral() } catch (e) {
     return `## Admiral — triggered, acts and exits\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
@@ -698,7 +729,7 @@ function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), identity: null }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -762,6 +793,11 @@ function main() {
   try { workers = auditWorkers() } catch (e) { errors.push(`workers: ${String(e.message).slice(0, 120)}`) }
   let delivery = null
   try { delivery = readDelivery() } catch (e) { errors.push(`delivery: ${String(e.message).slice(0, 120)}`) }
+  // Commit attribution across the checkouts. It runs here, with the other readings and
+  // before `ok` is decided, so a scan that throws is an error on the sweep rather than a
+  // silently missing section.
+  let identity = null
+  try { identity = safeIdentity(repos, sweptAt) } catch (e) { errors.push(`identity: ${String(e.message).slice(0, 120)}`) }
   let checks = null
   let backlog = 0
   let backlogCapped = true // until a run proves otherwise, the queue is a floor
@@ -806,7 +842,7 @@ function main() {
   // it launches will read the state file this run is about to write.
   const admiral = safeAdmiral()
   const local = safeLocal(repos)
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate, local }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate, local, identity }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

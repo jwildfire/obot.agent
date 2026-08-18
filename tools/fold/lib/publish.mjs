@@ -15,6 +15,8 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
+import { identityArgs } from '../../lib/identity.mjs'
+
 const git = (cwd, args, extra = {}) =>
   execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'], ...extra,
@@ -110,11 +112,10 @@ export function publishEntry(hub, { date, paths, mintToken, message }) {
 
   try {
     git(hub, ['add', ...paths])
-    git(hub, [
-      '-c', 'user.name=obotclaw[bot]',
-      '-c', 'user.email=219968887+obotclaw[bot]@users.noreply.github.com',
-      'commit', '-q', '-m', message,
-    ])
+    // Resolved, never typed. Until 2026-08-18 this line carried a hand-written id
+    // that belongs to a real GitHub user, so every fold commit rendered the bot's
+    // name and linked to nobody (obot.agent#241).
+    git(hub, [...identityArgs(), 'commit', '-q', '-m', message])
     out.committed = true
     out.sha = git(hub, ['rev-parse', 'HEAD']).trim().slice(0, 7)
   } catch (e) {
