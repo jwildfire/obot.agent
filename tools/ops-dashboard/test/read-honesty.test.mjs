@@ -211,3 +211,20 @@ test('a machine that has simply never swept still says so in its own words', () 
   assert.equal(r.read, false);
   assert.match(r.error, /no sweep script/);
 });
+
+// --- the banner has to look like one -----------------------------------------
+
+test('the fault banner is styled on the surface it appears on', () => {
+  // It shipped in #215 using a rule that lived only in the Navigator's sheet, so on
+  // the dashboard — the surface it is most likely to appear on — it rendered as plain
+  // grey text. A page-level alarm that looks like a caption is not an alarm.
+  const dash = page({ integrity: { intact: false, replaced: ['fs.readFileSync'] } });
+  assert.match(dash, /\.dead \{/, 'the dashboard must carry the rule, not just the markup');
+  assert.match(dash, /class="dead"/);
+});
+
+test('the Navigator still carries it exactly once', async () => {
+  const { navigatorShell } = await import('../lib/render.mjs');
+  const nav = navigatorShell({ unreadable: { absent: false, code: 'EIO', why: 'the disk went away' } });
+  assert.equal((nav.match(/\.dead \{/g) ?? []).length, 1, 'moved to the shared sheet, not duplicated into it');
+});
