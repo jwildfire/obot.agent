@@ -2,12 +2,12 @@
 name: session-init
 description: "Open a working session by rendering the previous wrapup's hand-off immediately — first paint in under a minute — then delegating the GitHub delta, the ideas sweep, and any free-text focus recon to one background sibling that revises the list when it lands. Use at the start of any coding session — 'session init', 'session overview', 'prioritized list of open tasks', 'what's on deck'. With --auto (hub #18, launched via obot-auto), the same init then selects the top eligible increment and proceeds as a fully autonomous dev session instead of stopping at the list. Do NOT use mid-session (session-todo re-renders the persisted list) or for closing out (that is session-wrapup)."
 argument-hint: "Optional: session focus — weighted at Tier 2 by the recon sibling, never investigated inline"
-allowed-tools: Bash(bash obot.agent/tools/session-init/handoff.sh)
+allowed-tools: Bash(obot.agent/tools/session-init/handoff.sh)
 ---
 
 ## Tier-0 hand-off bundle (pre-read — paint directly from this, zero tool calls)
 
-!`bash obot.agent/tools/session-init/handoff.sh`
+!`obot.agent/tools/session-init/handoff.sh`
 
 # Session Init
 
@@ -80,7 +80,7 @@ inline chain. The whole read is ~40ms locally, so any latency here is round
 trips, not I/O:
 
 ```bash
-cd {workspace root} && bash obot.agent/tools/session-init/handoff.sh
+cd {workspace root} && obot.agent/tools/session-init/handoff.sh
 ```
 
 The script is the single source of truth for the Tier-0 read, and it is

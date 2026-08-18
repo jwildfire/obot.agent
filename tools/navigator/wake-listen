@@ -3,7 +3,7 @@
 #
 # Run this from the Navigator session as a persistent Monitor:
 #
-#   Monitor(command: "bash obot.agent/tools/navigator/wake-listen",
+#   Monitor(command: "obot.agent/tools/navigator/wake-listen",
 #           description: "worker stop-states", persistent: true)
 #
 # Every line it prints becomes one notification inside that session, and a

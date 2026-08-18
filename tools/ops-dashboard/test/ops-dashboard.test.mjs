@@ -14,7 +14,7 @@ import {
 import { ensureStore, readCache, writeCache, SENTINEL } from '../lib/store.mjs';
 import {
   recordAnswer, readAnswers, currentAnswers, pendingAnswers, deliverAnswers,
-  markApplied, resolveDecision, answersSection, OVERDUE_MIN,
+  markApplied, resolveAnswerRef, resolveDecision, answersSection, OVERDUE_MIN,
 } from '../lib/answers.mjs';
 import { artifactPath, parseArgs, serve } from '../ops-dashboard.mjs';
 import { render, sessionShell, sessionLogShell, navigatorShell, navigatorRecordShell, foldedLane, standardLane, TABS, esc } from '../lib/render.mjs';
@@ -1028,6 +1028,106 @@ test('pending is one bounded read an agent can run without a session', () => {
   run('apply', JSON.parse(run('pending', '--json')).pending[0].id, '--evidence', 'https://example.test/1', '--by', 'a sibling');
   assert.equal(JSON.parse(run('pending', '--json')).pending.length, 0);
   assert.match(run('pending'), /nothing/i);
+});
+
+// ---------------------------------------------------------------------------
+// obot.agent#180: apply takes what pending prints.
+//
+// His D0014 answer sat OVERDUE for 26 hours with the work already done, because
+// `pending` leads each row with `D0014` and `apply` matched the record key alone —
+// so the documented way to clear the flag answered the displayed id with
+// "no answer D0014", which reads as "he never decided that". A flag that cannot be
+// cleared by its own documented next step is seen, attempted, failed, then ignored.
+
+/** Every identifier one `pending` block prints for an answer. */
+function idsInPendingBlock(text) {
+  const ids = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const lead = line.match(/^(D\d{4})\s+\S+\s+\[/);
+    if (lead) { ids.push(lead[1]); continue; }
+    const rec = line.match(/^id:\s+(\S+)$/);
+    if (rec) { ids.push(rec[1]); continue; }
+    const art = line.match(/^artifact:\s+(\S+)$/);
+    if (art && art[1] !== '(none)') ids.push(art[1]);
+  }
+  return ids;
+}
+
+test('every identifier pending prints for an answer is one apply accepts', () => {
+  // The guard for the whole class: the two surfaces are held together, so neither
+  // can start naming an answer something the other will not take.
+  const cli = new URL('../../ops-answers', import.meta.url).pathname;
+  for (const id of ['D0003', '2026-08-14-demo-301-site-size', null]) {
+    const ws = tmp();
+    const hub = hubWith([D3]);
+    const run = (...a) => execFileSync(cli, a, { env: { ...process.env, OBOT_WORKSPACE: ws, OBOT_HUB: hub }, encoding: 'utf8' });
+    const { record } = recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+    const printed = idsInPendingBlock(run('pending'));
+    assert.deepEqual(printed, ['D0003', D3.slug, record.id], 'pending prints three names for one answer');
+
+    const use = id ?? record.id;
+    const out = run('apply', use, '--evidence', 'https://example.test/1', '--by', 'a sibling');
+    assert.match(out, /applied/, `apply must accept ${use} — pending printed it`);
+    assert.equal(JSON.parse(run('pending', '--json')).pending.length, 0, 'and the OVERDUE flag actually clears');
+  }
+});
+
+test('a name resolves against the list pending prints from, not against every record', () => {
+  // The six pre-#120 records include two for the same artifact that nothing ever
+  // marked superseded. `pending` collapses them to one row; resolving over every
+  // record instead would call that row's id ambiguous.
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  ensureStore(ws);
+  for (const [n, at] of [['old', '2026-08-15T20:21:57.032Z'], ['new', '2026-08-15T20:22:13.836Z']]) {
+    fs.writeFileSync(path.join(ws, '.claude', 'ops', 'answers', `${n}.json`), JSON.stringify({
+      _note: SENTINEL, id: n, at, status: 'staged', artifact: D3.slug,
+      decisionId: null, verdict: 'adopt-all', questions: {}, words: 'go',
+    }));
+  }
+  assert.deepEqual(pendingAnswers(ws, { hub }).map((a) => a.id), ['new'], 'one row, the newest');
+  assert.equal(resolveAnswerRef(ws, 'D0003', { hub }).record.id, 'new', 'and its id applies');
+  assert.equal(resolveAnswerRef(ws, 'old', { hub }).record.id, 'old', 'a record id still names its own file');
+});
+
+test('an identifier that names nothing, or more than one thing, says which', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  const { record } = recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+
+  const missing = resolveAnswerRef(ws, 'D9999', { hub });
+  assert.equal(missing.record, null);
+  assert.match(missing.reason, /nothing recorded under "D9999"/);
+  assert.match(missing.reason, /record id, a decision id, or an artifact slug/,
+    'the error names the three things it looked for rather than denying the decision exists');
+
+  // A changed mind: the earlier record is kept, and applying it would stamp an
+  // answer he replaced.
+  const second = recordAnswer(ws, { artifact: D3.slug, verdict: 'reject', words: 'no' }, { hub }).record;
+  assert.equal(resolveAnswerRef(ws, 'D0003', { hub }).record.id, second.id, 'the current answer, not the replaced one');
+  const dead = resolveAnswerRef(ws, record.id, { hub });
+  assert.equal(dead.record.id, record.id, 'a superseded record is still readable by its own id');
+
+  // Two artifacts sharing one decision id is the genuinely ambiguous case.
+  const twin = hubWith([D3, { ...D3, slug: 'another-slug' }]);
+  recordAnswer(ws, { artifact: 'another-slug', verdict: 'approve', words: 'yes' }, { hub: twin });
+  const both = resolveAnswerRef(ws, 'D0003', { hub: twin });
+  assert.equal(both.record, null);
+  assert.equal(both.candidates.length, 2, 'the candidates are listed');
+  assert.match(both.reason, /names 2 answers/);
+  assert.doesNotMatch(both.reason, /no answer/i, 'ambiguity is never reported as absence');
+});
+
+test('applying by a name he never sees still records the same evidence', () => {
+  const ws = tmp();
+  const hub = hubWith([D3]);
+  recordAnswer(ws, { artifact: D3.slug, verdict: 'adopt-all', words: 'go' }, { hub });
+  const applied = markApplied(ws, 'D0003', { by: 'W0037', evidence: 'https://example.test/d', hub });
+  assert.equal(applied.status, 'applied');
+  assert.equal(applied.appliedBy, 'W0037');
+  assert.equal(applied.words, 'go', 'resolving by name never rewrites what he said');
+  assert.ok(applied.history.every((h) => !('hub' in h)), 'how it was found is not something that happened to it');
 });
 
 test('an answer written before the join still gets its id from the registry', () => {

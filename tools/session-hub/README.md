@@ -81,8 +81,8 @@ marker through the tool rather than the file, because the file alone cannot tell
 whether the server it names is still running:
 
 ```bash
-node obot.agent/tools/serve-marker           # state: none | unreadable | stale | live
-node obot.agent/tools/serve-marker --url     # the URL, only when live (exit 1 otherwise)
+obot.agent/tools/serve-marker           # state: none | unreadable | stale | live
+obot.agent/tools/serve-marker --url     # the URL, only when live (exit 1 otherwise)
 ```
 
 It records one thing besides serving: **when the live view was last actually opened**, so
@@ -217,7 +217,7 @@ so two claimers can never deliver the same message twice. Any producer works —
 the dashboard is the first client, not the only possible one:
 
 ```bash
-node obot.agent/scripts/obot-chat-wait --arm --session <sessionId>   # opt a session in
+obot.agent/scripts/obot-chat-wait --arm --session <sessionId>   # opt a session in
 ```
 
 ### Two delivery lanes, one inbox
@@ -245,7 +245,7 @@ then, in the session, arm the idle lane (this is the line `session-init` should
 carry once #77's D2 is settled):
 
 ```
-Monitor({ command: 'node obot.agent/scripts/obot-chat-wait --session <sessionId>',
+Monitor({ command: 'obot.agent/scripts/obot-chat-wait --session <sessionId>',
           description: 'dashboard chat messages', persistent: true })
 ```
 

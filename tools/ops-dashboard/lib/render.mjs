@@ -627,7 +627,7 @@ const sweepHead = (state, missing) => {
     // `Could not find service "com.obot.navigator-sweep"` — the absence was stated
     // honestly and the half that says how to fill it was wrong, which is the half
     // this requirement cares about most (jwildfire/obot.roadmap#223).
-    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes once installed: <code>bash obot.agent/tools/navigator/install-launchd</code>, then <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code> to nudge it.</p>`;
+    return `<p class="nav-empty">No sweep file yet — <code>${esc(missing ?? 'navigator-state.md')}</code>. The Navigator writes it every five minutes once installed: <code>obot.agent/tools/navigator/install-launchd</code>, then <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code> to nudge it.</p>`;
   }
   if (state.stale) {
     return `<p class="dead"><strong>The observer is dead</strong> — last swept ${esc(state.sweptAt ?? 'never')}${state.ageMin === null ? '' : ` (${state.ageMin} min ago, cadence ${state.cadenceMin}m)`}. What follows is <strong>not current</strong>. Restart: <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`;
@@ -905,7 +905,7 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
       <textarea id="words" placeholder="In your words — quoted verbatim in the artifact's Decisions section."></textarea>
       <button class="send" id="send" disabled>Record this decision</button>
       <p class="note">${deliverer?.alive === false
-    ? 'Nothing is listening yet — the Navigator sweep is not running on this machine, so an answer recorded here will sit unread until it is installed: <code>bash obot.agent/tools/navigator/install-launchd</code>.'
+    ? 'Nothing is listening yet — the Navigator sweep is not running on this machine, so an answer recorded here will sit unread until it is installed: <code>obot.agent/tools/navigator/install-launchd</code>.'
     : 'Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.'}</p>
       <p class="ok" id="ok" hidden></p>
     </div>

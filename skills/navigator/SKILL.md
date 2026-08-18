@@ -41,7 +41,7 @@ difference between judging a closeout in five minutes and judging it in six hour
 
 ```
 Monitor(description: "worker stop-states", persistent: true, timeout_ms: 3600000,
-        command: "bash obot.agent/tools/navigator/wake-listen")
+        command: "obot.agent/tools/navigator/wake-listen")
 ```
 
 Every line it prints is a worker that stopped, stalled, died or is waiting on an
@@ -73,7 +73,7 @@ to know the state of the world:
 4. The open requirements under the goal being worked, from GitHub, bounded to that
    goal's children.
 
-The first three arrive in one bundle from `bash obot.agent/tools/prime-rehydrate`,
+The first three arrive in one bundle from `obot.agent/tools/prime-rehydrate`,
 which the `/s-navigator` command pre-reads. Reuse it unchanged and read-only.
 
 ## One role, two mechanisms

@@ -52,11 +52,11 @@ echo "=== DECISION ANSWERS (he decided; nobody has applied it yet — obot.agent
 # The question prime must be able to answer without being asked: "has he decided
 # anything I haven't acted on?" One bounded read of the local ops store, states
 # and ages included. Local only — never published, never committed.
-answers="$(cd "$WS" 2>/dev/null && node obot.agent/tools/ops-answers pending 2>/dev/null)"
+answers="$(cd "$WS" 2>/dev/null && obot.agent/tools/ops-answers pending 2>/dev/null)"
 if [ -n "$answers" ]; then
   printf '%s\n' "$answers"
 else
-  echo "(ops-answers unavailable — check node obot.agent/tools/ops-answers pending by hand)"
+  echo "(ops-answers unavailable — check obot.agent/tools/ops-answers pending by hand)"
 fi
 
 echo "=== SESSION LOG (two newest day-files — what happened; corrections fold newest-wins) ==="

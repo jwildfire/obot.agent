@@ -209,7 +209,7 @@ will actually merge, without merging anything.
 6. **Record every action** as a `call` line, actor-stamped.
 7. **Log a close-out line** to the shared scratchpad:
    ```bash
-   bash ~/Documents/obot2/obot.agent/tools/scratchpad-log '🚦🤖 obot-fleet' '<what you did, with links>'
+   ~/Documents/obot2/obot.agent/tools/scratchpad-log '🚦🤖 obot-fleet' '<what you did, with links>'
    ```
 8. **Exit**, inside the deadline, with a terminal `result:` line.
 

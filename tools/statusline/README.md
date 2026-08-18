@@ -26,7 +26,7 @@ link is never dead. Start the loop with `--serve` (the `/session-dashboard` skil
 Only the machine's real dashboard writes that marker: a server started on an explicit
 non-default `--port` declines it, so an agent testing a change cannot move this link
 ([#142](https://github.com/jwildfire/obot.agent/issues/142)). The pid check here is the
-same rule read from the other side — `node obot.agent/tools/serve-marker` reports it as
+same rule read from the other side — `obot.agent/tools/serve-marker` reports it as
 `stale` rather than handing back a URL that no longer answers.
 
 Same script for every agent — lead sessions, spawned siblings, ultracode jobs —

@@ -39,7 +39,7 @@ If the port rolled forward (7326 was taken), the chosen URL is the first line of
 that did not get the dashboard's port is not the dashboard, so it declines the marker and
 says so in the log ([obot.agent#142](https://github.com/jwildfire/obot.agent/issues/142)).
 Same for a deliberate `--port 7399` test server — serve it, poke it, kill it; the status
-line never moves. Ask `node obot.agent/tools/serve-marker` what the marker actually says
+line never moves. Ask `obot.agent/tools/serve-marker` what the marker actually says
 (`none` / `unreadable` / `stale` / `live`) rather than reading the file.
 
 The session tab needs the session hub's watch loop running to have anything to show

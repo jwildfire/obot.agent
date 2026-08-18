@@ -480,9 +480,9 @@ replaced all of it with a pipeline that says who has his answer:
 Agents read the queue with one bounded command (`prime-rehydrate` bundles it):
 
 ```bash
-node obot.agent/tools/ops-answers pending          # what he decided that nobody applied
-node obot.agent/tools/ops-answers pending --json   # same, machine-readable
-node obot.agent/tools/ops-answers apply <id> --evidence <url> --by "a sibling"
+obot.agent/tools/ops-answers pending          # what he decided that nobody applied
+obot.agent/tools/ops-answers pending --json   # same, machine-readable
+obot.agent/tools/ops-answers apply <id> --evidence <url> --by "a sibling"
 ```
 
 An answer unapplied for more than an hour is marked `OVERDUE` in the Navigator's
