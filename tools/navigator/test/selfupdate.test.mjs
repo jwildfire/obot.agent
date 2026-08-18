@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import {
   CONSUMER_POLICY, QUIET_MS, buildStamp, fastForward, lastLookMs, planFastForward,
   planRestart, previousProcess, readCheckout, recordPath, renderSelfUpdate, restartDashboard,
-  restartEnv, selfUpdate,
+  restartEnv, selfUpdate, takeLock,
 } from '../selfupdate.mjs'
 import { parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
 
@@ -227,6 +227,71 @@ test('the newest look across every surface is the one that counts', () => {
   const store = { surfaces: { '/': '2026-08-17T20:00:00Z', '/live.html': '2026-08-17T20:59:00Z' } }
   assert.equal(lastLookMs(store, now), 60000)
   assert.equal(lastLookMs({ surfaces: {} }, now), null, 'an empty store is unknown, never "long ago"')
+})
+
+// ---- the module's OWN uses of `alive` (obot.agent#229, an #223 regression) ----
+//
+// WHY THESE EXIST, and it is the useful half. obot.agent#223 replaced this module's
+// local `alive` with `export { alive } from '../lib/killconfirm.mjs'`. That is a pure
+// re-export: it forwards the binding to consumers and creates NO local binding here,
+// so both internal uses — the `isAlive` default parameter and the lock-staleness
+// check — threw `ReferenceError: alive is not defined`. The module imported cleanly,
+// 1,028 tests passed, and the machine stopped fast-forwarding its own checkout for
+// four hours.
+//
+// The suite could not have caught it, because EVERY existing case injects `isAlive`
+// and none contends the lock. A default parameter that is always overridden is never
+// evaluated, and an injectable seam hides the binding it defaults to. So these two
+// cases deliberately inject NOTHING at the seam under test.
+
+test('restartDashboard resolves its own liveness default — nothing injected', () => {
+  // No `isAlive`. The default has to be a real binding in this module's scope, and
+  // that is the whole assertion; the outcome underneath it is incidental.
+  const r = restartDashboard({
+    root: '/repo', workspace: '/ws', pid: 2147483000, start: false,
+    spawnFn: () => { throw new Error('the case ends before the spawn') }, sleep: () => {},
+  })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'gone', 'a pid nothing is running is read as gone, via the default')
+})
+
+test('and resolves it on the branch where the process IS alive', () => {
+  // The other side of the same default, so a binding that only works for the falsy
+  // branch cannot pass. This process is certainly running.
+  const sent = []
+  const r = restartDashboard({
+    root: '/repo', workspace: '/ws', pid: process.pid,
+    kill: (pid, sig) => { sent.push(sig); return true }, sleep: () => {}, waitMs: 200,
+    spawnFn: () => ({ pid: 1 }),
+  })
+  assert.deepEqual(sent, ['SIGTERM'], 'it signalled, which means it read the pid as alive')
+  assert.equal(r.code, 'would-not-exit', 'and it read it as still alive afterwards')
+})
+
+test('the lock-staleness check resolves `alive` — the second call site', () => {
+  // The path launchd exercises and the suite did not. A contended lock is the only
+  // way to reach it: uncontended, `held?.pid` short-circuits before `alive` is ever
+  // evaluated, which is why a probe that merely took the lock reported it healthy.
+  const ws = tmp()
+  const first = takeLock(ws)
+  assert.equal(first.held, true)
+  const second = takeLock(ws)
+  assert.equal(second.held, false, 'a live holder keeps the lock')
+  assert.match(second.reason, new RegExp(`pid ${process.pid}`), 'and is named by the pid it read')
+  first.release()
+})
+
+test('a lock held by a pid that is gone is taken, not deferred to forever', () => {
+  // The same call site, opposite branch: `alive` must be able to return false here or
+  // a crashed sweep would hold the lock until the staleness window expires.
+  const ws = tmp()
+  fs.mkdirSync(path.join(ws, '.claude', 'session-hub', 'cache'), { recursive: true })
+  const file = path.join(ws, '.claude', 'session-hub', 'cache', 'selfupdate.lock')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify({ pid: 2147483000, at: new Date().toISOString() }))
+  const lock = takeLock(ws)
+  assert.equal(lock.held, true, 'the holder is gone, so the lock is takeable')
+  lock.release()
 })
 
 // ---- the second termination path in this repo (jwildfire/obot.roadmap#251) ----

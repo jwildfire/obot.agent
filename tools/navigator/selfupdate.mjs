@@ -49,6 +49,7 @@
 // guard that demanded a spotless tree would refuse every run and be true exactly once.
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
+import { alive } from '../lib/killconfirm.mjs'
 import { join, dirname, resolve } from 'node:path'
 
 // The reads come from the module that already answers "what commit is this", rather
@@ -349,10 +350,18 @@ const sleepMs = (ms) => { try { execFileSync(process.execPath, ['-e', `setTimeou
 
 /** Is that pid still running? `EPERM` counts: alive, just not ours to signal.
  *
- *  Re-exported from tools/lib/killconfirm.mjs since obot.agent#223 rather than
- *  written twice. Two liveness answers that could disagree would be worse than
- *  either, and this file's whole restart decision rests on this one. */
-export { alive } from '../lib/killconfirm.mjs'
+ *  From tools/lib/killconfirm.mjs since obot.agent#223 rather than written twice.
+ *  Two liveness answers that could disagree would be worse than either, and this
+ *  file's whole restart decision rests on this one.
+ *
+ *  IMPORTED AT THE TOP AND EXPORTED HERE, never `export … from` (obot.agent#229).
+ *  The one-line form is a pure re-export: it forwards the binding to consumers and
+ *  creates NO local binding in this module, so the two uses below it — the `isAlive`
+ *  default parameter and the lock-staleness check in `takeLock` — threw
+ *  `ReferenceError: alive is not defined`, and this machine stopped fast-forwarding
+ *  its own checkout for four hours while 1,028 tests passed. The module imports
+ *  cleanly either way; only a path that evaluates the name can tell them apart. */
+export { alive }
 
 /**
  * Stop the old dashboard, start one from the current checkout, and prove it answers.
