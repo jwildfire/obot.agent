@@ -361,6 +361,46 @@ obot.agent/tools/config-count --dry-run   # print it, write nothing
 obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
 ```
 
+## The hub's code runs in its own process
+
+This page runs the hub's own decision collector rather than a copy of it, so the page and the
+published site cannot disagree about what "open" means. It runs it **out of process**, and that
+is not a performance choice.
+
+The hub is a public build. To satisfy [obot.roadmap#203](https://github.com/jwildfire/obot.roadmap/issues/203)
+— the config list must be structurally unable to reach a published surface — its generators
+import `scripts/lib/local-only-guard.mjs`, which on import replaces the content-reading surface
+of `node:fs`, `node:fs/promises` and `node:child_process` for the whole process and refuses any
+read outside the hub repo. That guard is right, and it stays exactly as it is.
+
+It is also a monkey-patch on a module singleton, so it has no idea who imported it. When this
+server imported the hub's collector in-process, the guard arrived down the import graph and
+disarmed the dashboard: ten open config items and a three-minute-old Navigator sweep, both on
+disk, both refused with `ELOCALONLY`, and both reported to him as ordinary emptiness. It hid
+because the guard deliberately leaves `existsSync`/`stat` alone (every existence check still
+said yes) and leaves writes alone (the server kept writing its caches while unable to read its
+inputs). See [#206](https://github.com/jwildfire/obot.agent/issues/206).
+
+**The rule: no module under this tool imports anything from the hub.** `lib/hub-collect.mjs` is
+the only file that may name a hub module path, and it only ever hands it to a child process
+(~35ms, including node's own start-up). `test/hub-isolation.test.mjs` asserts the effect rather
+than the wiring — a stand-in hub that arms a guard on import must not be able to stop the config
+list being read a line later — and a second case fails on any dynamic import appearing in this
+tool at all.
+
+## A read that failed is not a source that is empty
+
+`lib/absent.mjs` holds both halves of the honesty rule. The first is the older one: a surface may
+print a figure only when it read the file the figure comes from. The second is `readFailure`, and
+it exists because the first is not enough — a page can read nothing, admit it, and still describe
+the failure in the words of an absence.
+
+`ENOENT` is the only thing that means "not there". Every other failure keeps its errno and renders
+as a fault: in colour, not in a hover title, because he reads this page on a phone. The sentence
+says the list is *unread* rather than *empty*, and it withholds the first-morning remedy — telling
+him to capture his first config item is actively misleading when ten of them are sitting in a file
+this process could not open.
+
 ## One site, several tabs
 
 @jwildfire, 2026-08-15: *"I want the ops db and orginal ops hub to be merged. just make
