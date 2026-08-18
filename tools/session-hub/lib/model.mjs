@@ -86,6 +86,8 @@ export function resolveBoundary({ scratchpad, jobs, date, tzOffsetMinutes }) {
       startIso: new Date(utcMs).toISOString(),
       sessionNumber: marker.sessionNumber ?? 1,
       anchor: `session-init marker @ ${marker.time}`,
+      degraded: false,
+      why: null,
     };
   }
   if (marker?.jobId && Array.isArray(jobs?.data)) {
@@ -95,13 +97,24 @@ export function resolveBoundary({ scratchpad, jobs, date, tzOffsetMinutes }) {
         startIso: anchorJob.createdAt,
         sessionNumber: marker.sessionNumber ?? 1,
         anchor: `session-init marker → job ${marker.jobId}`,
+        degraded: false,
+        why: null,
       };
     }
   }
+  // The fallback RETURNS A VALUE. That is what made this silent: nothing throws,
+  // the page renders, and the panels quietly widen from "this session" to "today"
+  // while their labels keep saying session. Two weeks passed that way. So the
+  // fallback now carries its own verdict, and the caller is expected to say it
+  // out loud (obot.agent#201).
   return {
     startIso: fallback,
     sessionNumber: marker?.sessionNumber ?? 1,
     anchor: marker ? 'session-init marker (no time, job unresolved) → local midnight' : 'no marker → local midnight',
+    degraded: true,
+    why: marker
+      ? 'the day boundary could not be resolved from the marker, so the panels below are scoped to the whole day rather than to this session'
+      : 'no day boundary was written today, so the panels below are scoped to the whole day rather than to this session',
   };
 }
 
@@ -246,6 +259,9 @@ export function buildModel({ collected, workspace, date, mode, generatedAtIso, t
       scratchpad: scratchpad?.notice ?? null,
       nextSession: nextSession?.notice ?? null,
       ghSweep: ghSweep?.notice ?? (ghSweep?.data?.stale ? 'gh sweep failed — showing stale cache' : null),
+      // Enumerated here on purpose: this object lists its keys explicitly, so a
+      // degradation that is not named here renders nowhere at all.
+      boundary: boundary.degraded ? boundary.why : null,
     },
     sweepFetchedAt: ghSweep?.data?.fetchedAt ?? null,
   };
