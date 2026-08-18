@@ -417,3 +417,217 @@ test('the section prints the stamp line as written, without double-bolding it', 
   const clean = checksSection({ site: siteVersionFreshness(STAMP(), JUST_AFTER) }, JUST_AFTER)
   assert.match(clean, /hub build stamp: v2\.12\.0 built/)
 })
+
+// -------------------------------------- what a merged pull request may use as proof
+//
+// The check's own rule is that a merged pull request is covered when it closes an
+// issue, because the issue is what carries the link to a requirement. The rule is
+// right; the signal it reads is not available to correctly written work here.
+// `closingIssuesReferences` is recorded only for a pull request targeting the
+// default branch, so no release candidate can ever have one, and the house
+// convention forbids `Closes` on partial work so that the issue stays open. Nine
+// merged pull requests were findings on 2026-08-18 and not one of them carried a
+// closing keyword (jwildfire/obot.agent#225).
+//
+// So a pull request may prove its parent with a linking keyword its author wrote —
+// anchored at the start of a line with the reference immediately after it, which is
+// what separates a declaration from a mention. It proves nothing else: the named
+// issue must itself be parented, or the finding stands.
+
+test('statedIssueRefs: an anchored keyword with the reference next to it is a stated link', async () => {
+  const { statedIssueRefs } = await import('../checks.mjs')
+  const body = [
+    'Refs #202.',
+    '',
+    'Part of jwildfire/obot.roadmap#203',
+    'Follows [#215](https://github.com/jwildfire/obot.agent/issues/215) — a defect in what that shipped.',
+    '- Closes #45 — the metrics phase',
+  ].join('\n')
+  assert.deepEqual(statedIssueRefs(body, 'jwildfire/obot.agent').map((r) => `${r.repo}#${r.number}`), [
+    'jwildfire/obot.agent#202',
+    'jwildfire/obot.roadmap#203',
+    'jwildfire/obot.agent#215',
+    'jwildfire/obot.agent#45',
+  ])
+})
+
+test('statedIssueRefs: a reference in prose is still not a link', async () => {
+  const { statedIssueRefs } = await import('../checks.mjs')
+  // Every one of these is real body text from a merged pull request in these repos.
+  const prose = [
+    "Found while answering the Navigator's question on [obot.agent#201](https://github.com/jwildfire/obot.agent/issues/201): is anything lost?",
+    '[#195](https://github.com/jwildfire/obot.agent/pull/195) changed the route table and this README kept describing the old one.',
+    'A one-line follow-up to #171, from a review of it.',
+    'Closes nothing on its own; #224 stays closed by #225.',
+    'the point of the shared spine (jwildfire/obot.roadmap#203).',
+  ]
+  for (const line of prose) {
+    assert.deepEqual(statedIssueRefs(line, 'jwildfire/obot.agent'), [], `prose counted as a link: ${line}`)
+  }
+})
+
+test('statedIssueRefs: a bare repo#N is not a reference — GitHub does not link it either', async () => {
+  const { statedIssueRefs } = await import('../checks.mjs')
+  assert.deepEqual(statedIssueRefs('Refs roadmap#243', 'jwildfire/obot.agent'), [])
+})
+
+test('a merged pull request that states an issue with a requirement above it is covered', async () => {
+  const { shapeRepo } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: { nodes: [{ number: 186, title: 'the checkout tracks main', closedAt: day(2), parent: { number: 243 } }] },
+      pullRequests: {
+        nodes: [{ number: 193, title: 'the page says when it restarted', mergedAt: day(1), body: 'Refs #186', closingIssuesReferences: { nodes: [] } }],
+      },
+    },
+  })
+  assert.deepEqual(orphanedWork(items, NOW), [])
+})
+
+test('the stated issue must itself be parented — naming an orphan does not launder one', async () => {
+  const { shapeRepo } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: { nodes: [{ number: 89, title: 'fast sessions', closedAt: day(30), parent: null }] },
+      pullRequests: {
+        nodes: [{ number: 99, title: 'release candidate v0.4.0', mergedAt: day(1), body: 'Closes #89', closingIssuesReferences: { nodes: [] } }],
+      },
+    },
+  })
+  const found = orphanedWork(items, NOW)
+  assert.deepEqual(found.map((f) => f.number), [99])
+  assert.match(found[0].line, /#89/, 'the row must name the issue that can actually be repaired')
+})
+
+test('a stated reference nothing could resolve is reported as unverified, never as covered', async () => {
+  const { shapeRepo } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: { nodes: [] },
+      pullRequests: {
+        nodes: [{ number: 250, title: 'a session record is back', mergedAt: day(1), body: 'Refs #238', closingIssuesReferences: { nodes: [] } }],
+      },
+    },
+  })
+  const found = orphanedWork(items, NOW)
+  assert.equal(found.length, 1)
+  assert.match(found[0].line, /#238/)
+  assert.match(found[0].line, /could not (?:be )?resolve/i, 'unverifiable must not read like a verdict on the issue')
+})
+
+test('a resolution supplied by the caller settles a reference the repo query could not see', async () => {
+  const { shapeRepo } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.roadmap', {
+    repository: {
+      issues: { nodes: [] },
+      pullRequests: {
+        nodes: [{ number: 250, title: 'a session record is back', mergedAt: day(1), body: 'Refs #238', closingIssuesReferences: { nodes: [] } }],
+      },
+    },
+  })
+  const resolved = new Map([['jwildfire/obot.roadmap#238', { kind: 'issue', parent: { number: 73 } }]])
+  assert.deepEqual(orphanedWork(items, NOW, resolved), [])
+})
+
+test('a stated reference to a pull request is not coverage — a pull request has no parent to reach', async () => {
+  const { shapeRepo } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: { nodes: [] },
+      pullRequests: {
+        nodes: [
+          { number: 171, title: 'pin agents', mergedAt: day(3), body: '', closingIssuesReferences: { nodes: [{ number: 9 }] } },
+          { number: 175, title: 'make the band marker required', mergedAt: day(1), body: 'Follows #171', closingIssuesReferences: { nodes: [] } },
+        ],
+      },
+    },
+  })
+  assert.deepEqual(orphanedWork(items, NOW).map((f) => f.number), [175])
+})
+
+test('the asymmetry is deliberate: the same sentence in an issue body is still a finding', async () => {
+  const { shapeRepo } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: {
+        nodes: [
+          { number: 180, title: 'the requirement', closedAt: day(3), parent: { number: 1 } },
+          { number: 118, title: 'dashboard pass', closedAt: day(1), parent: null, body: 'Part of jwildfire/obot.agent#180' },
+        ],
+      },
+      pullRequests: { nodes: [] },
+    },
+  })
+  // An issue has a structural parent field, and using it is one click. A merged pull
+  // request has no such field at all, which is the whole reason the rule differs.
+  assert.deepEqual(orphanedWork(items, NOW).map((f) => f.number), [118])
+})
+
+test('the bounded count uses the same coverage rule, or the backlog number inflates instead', async () => {
+  const { shapeRepo, orphansOutsideWindow } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: { nodes: [{ number: 186, title: 'req', closedAt: day(WINDOW_DAYS + 9), parent: { number: 243 } }] },
+      pullRequests: {
+        nodes: [{ number: 193, title: 'old but covered', mergedAt: day(WINDOW_DAYS + 8), body: 'Refs #186', closingIssuesReferences: { nodes: [] } }],
+      },
+    },
+  })
+  assert.equal(orphansOutsideWindow(items, NOW), 0)
+})
+
+test('unresolvedRefs names exactly what needs a lookup, and says what it dropped', async () => {
+  const { shapeRepo, unresolvedRefs, REF_LOOKUP_CAP } = await import('../checks.mjs')
+  const items = shapeRepo('jwildfire/obot.agent', {
+    repository: {
+      issues: { nodes: [{ number: 186, title: 'seen', closedAt: day(2), parent: { number: 243 } }] },
+      pullRequests: {
+        nodes: [
+          { number: 1, title: 'covered locally', mergedAt: day(1), body: 'Refs #186', closingIssuesReferences: { nodes: [] } },
+          { number: 2, title: 'needs a lookup', mergedAt: day(1), body: 'Refs jwildfire/obot.roadmap#238', closingIssuesReferences: { nodes: [] } },
+          { number: 3, title: 'also #238', mergedAt: day(1), body: 'Part of jwildfire/obot.roadmap#238', closingIssuesReferences: { nodes: [] } },
+        ],
+      },
+    },
+  })
+  const { refs, dropped } = unresolvedRefs(items, NOW)
+  assert.deepEqual(refs.map((r) => `${r.repo}#${r.number}`), ['jwildfire/obot.roadmap#238'], 'deduped, and only what is unseen')
+  assert.equal(dropped, 0)
+  assert.ok(REF_LOOKUP_CAP > 0)
+})
+
+test('the live query asks for the pull request body — a rule reading an unfetched field is a silent no-op', async () => {
+  const { ORPHAN_QUERY } = await import('../checks.mjs')
+  const prs = ORPHAN_QUERY.slice(ORPHAN_QUERY.indexOf('pullRequests(states:MERGED'))
+  assert.match(prs, /\bbody\b/, 'the merged-PR selection must request the body')
+})
+
+test('refLookupQuery: one aliased call for every reference, and nothing unsafe reaches it', async () => {
+  const { refLookupQuery } = await import('../checks.mjs')
+  const q = refLookupQuery([
+    { repo: 'jwildfire/obot.roadmap', number: 238 },
+    { repo: 'jwildfire/obot.agent', number: 202 },
+    { repo: 'bad name/x"){}', number: 1 },
+  ])
+  assert.match(q, /a0: repository\(owner:"jwildfire", name:"obot\.roadmap"\)/)
+  assert.match(q, /issueOrPullRequest\(number:202\)/)
+  assert.doesNotMatch(q, /bad name/, 'a malformed repo is dropped rather than interpolated')
+  assert.equal(refLookupQuery([]), null, 'nothing to look up means no call at all')
+})
+
+test('parseRefLookup: an alias that came back empty is left unread, not recorded as parentless', async () => {
+  const { parseRefLookup } = await import('../checks.mjs')
+  const refs = [
+    { repo: 'jwildfire/obot.roadmap', number: 238 },
+    { repo: 'jwildfire/obot.agent', number: 9 },
+    { repo: 'jwildfire/obot.agent', number: 171 },
+  ]
+  const out = parseRefLookup(refs, {
+    a0: { issueOrPullRequest: { __typename: 'Issue', parent: { number: 73 } } },
+    a1: { issueOrPullRequest: null },
+    a2: { issueOrPullRequest: { __typename: 'PullRequest' } },
+  })
+  assert.deepEqual([...out.keys()], ['jwildfire/obot.roadmap#238', 'jwildfire/obot.agent#171'])
+  assert.deepEqual(out.get('jwildfire/obot.roadmap#238'), { kind: 'issue', parent: { number: 73 } })
+  assert.equal(out.get('jwildfire/obot.agent#171').kind, 'pr')
+})

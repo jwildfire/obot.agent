@@ -47,8 +47,9 @@ import { fileURLToPath } from 'node:url'
 
 import { answersSection, deliverAnswers, pendingAnswers } from '../ops-dashboard/lib/answers.mjs'
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
-         orphansAccepted, orphansOutsideWindow, parseIndexRows, readJson, registryDisagreement,
-         shapeRepo, siteVersionFreshness } from './checks.mjs'
+         orphansAccepted, orphansOutsideWindow, parseIndexRows, parseRefLookup, readJson,
+         refLookupQuery, registryDisagreement, shapeRepo, siteVersionFreshness,
+         unresolvedRefs } from './checks.mjs'
 // What counts as a release candidate now lives beside this file rather than in it,
 // because the Operations Dashboard has to answer the same question and used to answer
 // it differently. Re-exported so this module's callers and tests are unaffected.
@@ -406,6 +407,24 @@ function runChecks(repos, jobs = []) {
     }
   }
 
+  // A pull request can state its issue and the per-repo query can still not have
+  // returned that issue: the hub alone has 113 open and the query takes 100. One
+  // aliased call settles every such reference at once (obot.agent#225). A reference
+  // this fails to settle stays unverified in the row rather than counting as covered,
+  // and what the cap dropped is named here rather than swallowed.
+  const now = new Date()
+  let resolved = new Map()
+  const { refs: toLookUp, dropped } = unresolvedRefs(items, now)
+  if (dropped) errors.push(`${dropped} stated reference(s) not looked up this sweep — the lookup is capped; those rows read as unresolved rather than covered`)
+  const lookup = refLookupQuery(toLookUp)
+  if (lookup) {
+    try {
+      resolved = parseRefLookup(toLookUp, JSON.parse(gh(['api', 'graphql', '-f', `query=${lookup}`])).data)
+    } catch (e) {
+      errors.push(`stated-reference lookup: ${String(e.message).slice(0, 90)} — ${toLookUp.length} reference(s) unverified, reported as such`)
+    }
+  }
+
   // The decision registry against the index the site publishes from (hub#196): two
   // files answer "has he decided this" and until now nothing compared them.
   let registry = []
@@ -440,16 +459,15 @@ function runChecks(repos, jobs = []) {
   // quoted rather than recomputed here (hub#224).
   const site = siteVersionFreshness(readSiteVersion(), new Date())
 
-  const now = new Date()
   return {
     backlog,
     backlogCapped,
     section: checksSection({
       audit,
       site,
-      orphans: orphanedWork(items, now),
-      orphansOutsideWindow: orphansOutsideWindow(items, now),
-      orphansAccepted: orphansAccepted(items),
+      orphans: orphanedWork(items, now, resolved),
+      orphansOutsideWindow: orphansOutsideWindow(items, now, resolved),
+      orphansAccepted: orphansAccepted(items, resolved),
       registry,
       closeouts,
       errors,
