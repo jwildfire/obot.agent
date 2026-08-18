@@ -171,6 +171,99 @@ export function readCheckout(root, { git = gitRead, remote = 'origin', branch = 
 }
 
 /**
+ * Where the checkout actually STANDS, measured independently of any update attempt.
+ *
+ * obot.agent#231. The section used to carry one fact — what the update did — and a
+ * reader takes it as a statement about the code on the machine. Those diverge
+ * exactly when it matters: a failed update on a current checkout and a failed update
+ * on a checkout nineteen commits behind rendered identically, and they are not the
+ * same situation.
+ *
+ * TWO PROPERTIES DECIDE THE SHAPE.
+ *
+ * It takes the repo root and nothing else, because the caller that needs it most is
+ * `safeSelfUpdate`'s catch — the path with the least information — and a measurement
+ * the catch cannot make is a measurement that leaves the defect in place under a new
+ * spelling.
+ *
+ * And it NEVER FETCHES. This runs on the failure path, where a broken fetch may be
+ * the very thing that failed; a position established by going to the network would
+ * answer a different question from the one a reader on that path is asking, and it
+ * would hide a broken fetch behind a fresh-looking number. What it reports is what
+ * this machine last knew, and the sentence says so.
+ *
+ * Unknown is its own answer. Zero would read as "current", which is the one thing an
+ * unreadable checkout must never be able to claim.
+ */
+export function checkoutPosition(root, { git = gitRead, remote = 'origin', branch = 'main' } = {}) {
+  const ref = `${remote}/${branch}`
+  const unknown = (reason) => ({ known: false, behind: null, ahead: null, head: null, short: null, branch: null, ref, reason })
+  try {
+    if (git(root, ['rev-parse', '--is-inside-work-tree']) !== 'true') {
+      return unknown(`\`${root}\` could not be read as a git checkout`)
+    }
+    const head = git(root, ['rev-parse', 'HEAD'])
+    const up = git(root, ['rev-parse', ref])
+    if (!head || !up) return unknown(`no \`${ref}\` ref is present locally, so the position could not be measured`)
+    const counts = git(root, ['rev-list', '--left-right', '--count', `${head}...${up}`])
+    const [ahead, behind] = String(counts ?? '').trim().split(/\s+/).map(Number)
+    if (!Number.isFinite(ahead) || !Number.isFinite(behind)) {
+      return unknown(`\`git rev-list\` could not count this checkout against \`${ref}\``)
+    }
+    return { known: true, behind, ahead, head, short: head.slice(0, 7), ref,
+             branch: git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || null, reason: null }
+  } catch (e) {
+    return unknown(`the position could not be measured — ${String(e.message).slice(0, 80)}`)
+  }
+}
+
+/**
+ * The position as a clause, for the one line a reader actually reads.
+ *
+ * Absent and unknown are kept apart on purpose: a record written before obot.agent#231
+ * carries no position at all, and a long-running dashboard can read one. An absent
+ * field is absent, never zero.
+ */
+export function positionSentence(position) {
+  if (!position) return 'its position against the remote was not measured this run'
+  const ref = position.ref ?? 'origin/main'
+  if (!position.known) return `its position against \`${ref}\` could not be established — ${position.reason}`
+  const where = `\`${position.short}\`${position.branch ? ` on \`${position.branch}\`` : ''}`
+  const plural = (n) => `${n} commit${n === 1 ? '' : 's'}`
+  if (position.behind > 0) return `at ${where}, ${plural(position.behind)} behind \`${ref}\` as last fetched`
+  if (position.ahead > 0) return `at ${where}, ${plural(position.ahead)} ahead of \`${ref}\` as last fetched`
+  return `at ${where}, level with \`${ref}\` as last fetched`
+}
+
+/**
+ * The record for a sweep whose update step threw.
+ *
+ * It lives here rather than in the sweep's catch because of what the old catch got
+ * wrong: it synthesised a checkout record out of nothing and the renderer appended
+ * "The checkout is untouched" as a fixed string. The catch had discarded the real
+ * result and could not know — and on 2026-08-18 it was false, because the
+ * fast-forward runs BEFORE the throw, so every failed sweep asserted the checkout
+ * was untouched while it had just moved.
+ *
+ * A catch-path builder that can itself throw would take the sweep down, so nothing
+ * in here is allowed to.
+ */
+export function brokenRecord({ root, stamp = null, error, now = () => new Date() } = {}) {
+  let position = null
+  try { position = checkoutPosition(root) } catch { /* unknown is an answer; a throw here is not */ }
+  return {
+    at: now().toISOString(),
+    sweep: stamp,
+    consumers: [],
+    checkout: {
+      ok: false, code: 'broken', branch: null, root: root ?? null,
+      reason: `the update step failed outright — ${String(error?.message ?? error).slice(0, 140)}`,
+    },
+    position,
+  }
+}
+
+/**
  * May this checkout be fast-forwarded, and if not, why — in a sentence a page can print.
  *
  * Pure on purpose. Every refusal in D2 is a branch here, so the refusals are testable
@@ -541,6 +634,10 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
   const record = {
     at,
     sweep: stamp ?? null,
+    // Measured, not inferred from `checkout` above. On a clean run the two agree and
+    // the section prints one sentence; they diverge precisely when the update did not
+    // do what it set out to, which is when a reader needs both (obot.agent#231).
+    position: checkoutPosition(root),
     checkout: {
       root, branch: checkout.branch ?? null, ok: checkout.ok, code: checkout.code,
       moved: Boolean(checkout.moved), from: checkout.from ?? null, to: checkout.to ?? null,
@@ -631,9 +728,13 @@ export function renderSelfUpdate(record, now = new Date()) {
   }
 
   const c = record.checkout ?? {}
+  // On success the line already states the position — `already at origin/main`, or
+  // the ref it fast-forwarded to — so a second sentence would be noise. On failure it
+  // states nothing about the checkout at all, and the fixed string it used to append
+  // was an assertion the catch path had no way to make (obot.agent#231).
   lines.push(c.ok
     ? `checkout: \`${String(c.to ?? '').slice(0, 7)}\` on \`${c.branch}\` — ${c.reason}`
-    : `**AUTO UPDATE FAILED** — ${c.reason}. The checkout is untouched.`)
+    : `**AUTO UPDATE FAILED** — ${c.reason}. The checkout is ${positionSentence(record.position)}.`)
 
   for (const con of record.consumers ?? []) {
     if (!con.ok) lines.push(`**DASHBOARD RESTART FAILED** — ${con.reason}`)
