@@ -44,7 +44,46 @@ export function writeEntry(hub, date, markdown) {
  * must not cost the record, which is already on disk by this point.
  */
 export function publishEntry(hub, { date, paths, mintToken, message }) {
-  const out = { committed: false, pushed: false, why: null, sha: null }
+  const out = { committed: false, pushed: false, why: null, sha: null, fastForwarded: false }
+
+  // FAST-FORWARD FIRST. Found by running this for real: nobody pulls this clone,
+  // and merges land on GitHub, so it sat eleven commits behind. Committing onto a
+  // stale base produced a divergent local main whose push was rejected
+  // non-fast-forward — the entry written, the commit made, and the record still
+  // not published. The fold has no local work here by contract (it refuses below
+  // when the tree carries anything that is not its own), so a fast-forward is
+  // always the right move and a clone that CANNOT fast-forward is a condition to
+  // report rather than to force.
+  // The fetch is BEST EFFORT and its failure never stops the commit. Being unable
+  // to reach GitHub is exactly when the entry most needs saving locally, and the
+  // push below reports the same condition properly a moment later. What DOES stop
+  // it is a clone carrying unpushed local history: building on top of that would
+  // bury somebody's work under a diary entry.
+  let reachable = false
+  try {
+    git(hub, ['fetch', '--quiet', 'origin', 'main'])
+    reachable = true
+  } catch (e) {
+    out.offline = first(e)
+  }
+  if (reachable) {
+    try {
+      const ahead = git(hub, ['rev-list', '--count', 'origin/main..HEAD']).trim()
+      const behind = git(hub, ['rev-list', '--count', 'HEAD..origin/main']).trim()
+      if (ahead !== '0') {
+        out.why = `the hub clone is ${ahead} commit(s) ahead of origin/main — refusing to build on an unpushed local history`
+        return out
+      }
+      if (behind !== '0') {
+        git(hub, ['merge', '--ff-only', '--quiet', 'origin/main'])
+        out.fastForwarded = true
+      }
+    } catch (e) {
+      out.why = `could not bring the hub clone up to date: ${first(e)}`
+      return out
+    }
+  }
+
   try {
     const dirty = git(hub, ['status', '--porcelain', ...paths]).trim()
     if (!dirty) { out.why = 'nothing to commit — the entry was already committed'; return out }

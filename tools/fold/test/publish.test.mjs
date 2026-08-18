@@ -86,3 +86,59 @@ test('nothing staged is reported as nothing, not as success', () => {
   assert.equal(r.pushed, false)
   assert.match(r.why, /nothing to commit/)
 })
+
+test('a clone behind origin is fast-forwarded before anything is committed', () => {
+  const { hub, origin } = pair()
+  // Somebody merged on GitHub since this clone last looked — which is the normal
+  // state here, because nothing pulls it.
+  execFileSync('git', ['-C', origin, 'commit', '-q', '--allow-empty', '-m', 'landed elsewhere'], { stdio: 'ignore' })
+  writeEntry(hub, '2026-08-18', '# entry\n')
+  const r = publishEntry(hub, {
+    date: '2026-08-18', paths: ['diary/2026-08-18.md'],
+    mintToken: () => 'unused-in-this-test', message: 'diary',
+  })
+  assert.equal(r.fastForwarded, true)
+  assert.equal(r.committed, true)
+  const log = execFileSync('git', ['-C', hub, 'log', '--format=%s', '-3'], { encoding: 'utf8' })
+  assert.match(log, /landed elsewhere/, 'the commit sits ON TOP of what was already published')
+})
+
+test('a clone carrying unpushed local history is reported, never forced', () => {
+  const { hub } = pair()
+  execFileSync('git', ['-C', hub, 'commit', '-q', '--allow-empty', '-m', 'somebody was working here'], { stdio: 'ignore' })
+  writeEntry(hub, '2026-08-18', '# entry\n')
+  const r = publishEntry(hub, {
+    date: '2026-08-18', paths: ['diary/2026-08-18.md'],
+    mintToken: () => 'tok', message: 'diary',
+  })
+  assert.equal(r.committed, false)
+  assert.match(r.why, /ahead of origin\/main/)
+})
+
+function pair() {
+  const origin = mkdtempSync(join(tmpdir(), 'origin-'))
+  const g = (d, ...a) => execFileSync('git', ['-C', d, ...a], { stdio: 'ignore' })
+  g(origin, 'init', '-q', '-b', 'main')
+  g(origin, 'config', 'user.email', 't@t'); g(origin, 'config', 'user.name', 't')
+  g(origin, 'config', 'receive.denyCurrentBranch', 'ignore')
+  mkdirSync(join(origin, 'diary'), { recursive: true })
+  writeFileSync(join(origin, 'diary/README.md'), '# diary\n')
+  g(origin, 'add', '-A'); g(origin, 'commit', '-q', '-m', 'init')
+
+  const hub = mkdtempSync(join(tmpdir(), 'clone-'))
+  execFileSync('git', ['clone', '-q', origin, hub], { stdio: 'ignore' })
+  g(hub, 'config', 'user.email', 't@t'); g(hub, 'config', 'user.name', 't')
+  return { hub, origin }
+}
+
+test('an unreachable origin does not stop the record landing locally', () => {
+  const hub = repo()   // no remote at all — the offline case
+  writeEntry(hub, '2026-08-18', '# entry\n')
+  const r = publishEntry(hub, {
+    date: '2026-08-18', paths: ['diary/2026-08-18.md'],
+    mintToken: () => '', message: 'diary',
+  })
+  assert.equal(r.committed, true, 'being unable to reach GitHub is when the entry most needs saving')
+  assert.equal(r.pushed, false)
+  assert.ok(r.offline, 'and the fold says it could not reach origin')
+})
