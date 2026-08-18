@@ -322,23 +322,23 @@ test('the first sweep records a baseline rather than announcing week-old RCs as 
   assert.equal(diff({}, open).filter((e) => e.type === 'rc-new').length, 2)
 })
 
-// ---- the fleet section (obot.agent#167) -------------------------------------
+// ---- the admiral section (obot.agent#167) -------------------------------------
 
-test('the fleet section reaches the state file, directly beneath the wake', () => {
-  // The wake says a worker stopped; the fleet section says what was done about it.
+test('the admiral section reaches the state file, directly beneath the wake', () => {
+  // The wake says a worker stopped; the admiral section says what was done about it.
   // Reading one without the other is how six stalled sessions and seven open pull
   // requests stayed visible for two days while nothing moved.
   const md = renderState({
     snapshot: {}, events: [], meta,
     wake: '## Wake — workers that stopped\n\nnothing pending\n',
-    fleet: '## Fleet — the triggered manager\n\nfleet: nothing to act on\n',
+    admiral: '## Admiral — the triggered manager\n\nadmiral: nothing to act on\n',
   })
-  assert.match(md, /## Fleet — the triggered manager/)
-  assert.ok(md.indexOf('## Wake') < md.indexOf('## Fleet'), 'the wake comes first')
-  assert.ok(md.indexOf('## Fleet') < md.indexOf('## RC queue'), 'both come before his queue')
+  assert.match(md, /## Admiral — the triggered manager/)
+  assert.ok(md.indexOf('## Wake') < md.indexOf('## Admiral'), 'the wake comes first')
+  assert.ok(md.indexOf('## Admiral') < md.indexOf('## RC queue'), 'both come before his queue')
 })
 
-test('a sweep that could not read the policy STILL renders the fleet section', () => {
+test('a sweep that could not read the policy STILL renders the admiral section', () => {
   // The call site it is easy to miss. A check wired only into the happy path
   // vanishes exactly when things are broken, which is when it is worth having —
   // and its absence reads as a page with nothing to report.
@@ -346,21 +346,21 @@ test('a sweep that could not read the policy STILL renders the fleet section', (
     snapshot: {}, events: [],
     meta: { sweptAt: '2026-08-17 08:00', cadenceMin: 5, repoCount: 0, ok: false,
             errors: ['policy.json: ENOENT'], lastGoodAt: null },
-    fleet: '## Fleet — the triggered manager\n\n**FLEET TRIGGER BROKEN** — policy unreadable\n',
+    admiral: '## Admiral — the triggered manager\n\n**ADMIRAL TRIGGER BROKEN** — policy unreadable\n',
   })
   assert.match(md, /\*\*FAILED\*\*/)
-  assert.match(md, /\*\*FLEET TRIGGER BROKEN\*\*/)
+  assert.match(md, /\*\*ADMIRAL TRIGGER BROKEN\*\*/)
 })
 
-test('no fleet reading renders no fleet section rather than an empty heading', () => {
-  const md = renderState({ snapshot: {}, events: [], meta, fleet: null })
-  assert.doesNotMatch(md, /## Fleet/)
+test('no admiral reading renders no admiral section rather than an empty heading', () => {
+  const md = renderState({ snapshot: {}, events: [], meta, admiral: null })
+  assert.doesNotMatch(md, /## Admiral/)
 })
 
-test('EVERY renderState call site passes fleet — including the policy-failure one', () => {
+test('EVERY renderState call site passes admiral — including the policy-failure one', () => {
   // A source-level guard, deliberately, because the ordinary tests cannot catch this:
-  // renderState defaults `fleet` to null, so a call site that forgets it renders a
-  // page with no fleet section and no error, which reads as nothing to report. The
+  // renderState defaults `admiral` to null, so a call site that forgets it renders a
+  // page with no admiral section and no error, which reads as nothing to report. The
   // failure path is the one that gets forgotten and the one where it matters most —
   // a broken sweep is exactly when you want to know whether anything is stuck.
   // Same shape as scripts/test/merge-invocation.test.mjs, which guards a call form
@@ -370,7 +370,7 @@ test('EVERY renderState call site passes fleet — including the policy-failure 
   assert.ok(calls.length >= 2, `expected at least 2 renderState call sites, found ${calls.length}`)
   for (const [i, call] of calls.entries()) {
     const args = call.slice(0, call.indexOf('}'))
-    assert.match(args, /\bfleet\b/, `renderState call site ${i + 1} does not pass fleet`)
+    assert.match(args, /\badmiral\b/, `renderState call site ${i + 1} does not pass admiral`)
     assert.match(args, /\bwake\b/, `renderState call site ${i + 1} does not pass wake`)
   }
 })

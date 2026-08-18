@@ -4,7 +4,7 @@
 // (fleet for short) by default." Task jwildfire/obot.agent#169.
 //
 // THE DEFAULT IS DERIVED, NEVER LISTED. Nothing in this file names prime, the
-// Navigator or fleet — the default set is "every standing role", read off the role
+// Navigator or the admiral — the default set is "every standing role", read off the role
 // registry in roster-view.mjs. Two failures that buys, both of them the same bug in
 // opposite directions:
 //

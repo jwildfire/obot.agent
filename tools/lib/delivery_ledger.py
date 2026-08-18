@@ -41,18 +41,28 @@ VERDICTS = ("confirmed", "drift", "none")
 # Actors that may record a CALL but never a VERDICT (obot.agent#167, under
 # jwildfire/obot.roadmap#236, correction 1).
 #
-# The fleet manager writes its own actions here so its work is judged by the same
+# The admiral writes its own actions here so its work is judged by the same
 # standard as any worker's - an overseer whose actions are invisible is the failure
 # it exists to prevent. It does NOT judge delivery. Judging stays the Navigator's,
 # and a second writer of verdicts makes this record two-sourced, which is precisely
 # the defect this programme spent two days removing from the decisions registry, the
 # dashboard queue and the roadmap page.
 #
-# Enforced here rather than only in the fleet manager's skill file, because a rule
+# Enforced here rather than only in the admiral's skill file, because a rule
 # that lives only in prose is a rule an agent can talk itself out of at three in the
-# morning. Matched on the actor prefix so the sub-ids a manager might claim are
+# morning. Matched on the actor prefix so the sub-ids an admiral might claim are
 # covered too.
-CALL_ONLY_ACTORS = ("fleet",)
+#
+# "fleet" IS STILL LISTED, AND IS NOT A LEFTOVER. This tuple is a bar, not a label:
+# every name in it is refused. The role was renamed from fleet to admiral in
+# obot.agent#182, and dropping the old name would have made the rename a silent
+# widening of what may write a verdict — anything still running with
+# OBOT_ACTOR=fleet, from a session started before the rename or a skill file read
+# from an older checkout, would have sailed straight through a guard that used to
+# stop it. A bar costs nothing by listing a name nobody uses any more, and costs
+# the whole guard by dropping one somebody still does. Old names stay here
+# permanently; only new ones are ever added.
+CALL_ONLY_ACTORS = ("admiral", "fleet")
 
 
 def is_call_only(who):
@@ -117,9 +127,9 @@ def named_actor(who):
 
     A bare session id (`session:b510658b`) means nothing to a human reader and would
     be noise on every line, so it stays in the journal where the joining is done. A
-    NAMED actor - `fleet`, or a worker id - is what a reader needs, because it
+    NAMED actor - `admiral`, or a worker id - is what a reader needs, because it
     answers "who decided this on my behalf" in the case where the answer is not the
-    officer he expects. jwildfire/obot.roadmap#236: the manager's own actions go in
+    officer he expects. jwildfire/obot.roadmap#236: the admiral's own actions go in
     this record actor-stamped, judged by the same standard as any worker's, because
     an overseer whose actions are invisible is the failure it exists to prevent.
     """

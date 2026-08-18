@@ -37,7 +37,7 @@
 // has no deliverable to judge, so it is shown apart rather than ranked as if it had
 // produced nothing. Grouping on the id would have buried ten real workers, which is
 // the same failure in the other direction.
-import { PINNED_ROLES } from '../../lib/roles.mjs';
+import { PINNED_ROLES, ROLE_TAGS, roleOf } from '../../lib/roles.mjs';
 import { esc } from './esc.mjs';
 import { WORKER_TAGS, PRICE_NOTE, ID_NOTE, DEAD_SHOWN, emptyRoster } from './roster.mjs';
 
@@ -57,11 +57,11 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
  * the whole registry on purpose, so a fourth role arrives pinned without anyone
  * remembering to pin it.
  *
- * IT IS NOT THE LIVENESS ANSWER, and it must never be used as one. Fleet is on this
- * list — @jwildfire asked for it pinned beside prime and the Navigator — and it is
- * NOT a session for which stopping is the resting state: it is triggered, budgeted,
- * and a blocked one is dead. Reading pinning as liveness is exactly how a fleet
- * manager sat blocked for ten hours with nothing looking (obot.agent#181). The
+ * IT IS NOT THE LIVENESS ANSWER, and it must never be used as one. The admiral is on
+ * this list — @jwildfire asked for it pinned beside prime and nav — and it is NOT a
+ * session for which stopping is the resting state: it is triggered, budgeted, and a
+ * blocked one is dead. Reading pinning as liveness is exactly how an admiral sat
+ * blocked for ten hours with nothing looking (obot.agent#181). The
  * liveness question is `restsWhenIdle` / `mustExit` in tools/lib/roles.mjs, off the
  * `lifecycle` each role declares in the same registry.
  *
@@ -72,14 +72,15 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
  */
 export const STANDING_ROLES = PINNED_ROLES;
 
-export const STANDING_TAGS = STANDING_ROLES.map((r) => r.tag);
+// Every tag a standing role answers to, current and retired — so a row tagged with a
+// role's former name still classifies as that role rather than falling through to
+// "other" (obot.agent#182).
+export const STANDING_TAGS = ROLE_TAGS;
 
 const startsWithAny = (s, tags) => tags.some((t) => String(s ?? '').startsWith(t));
 
 /** Which standing role a row is, or null when it is not one. */
-export const standingRoleOf = (row) => STANDING_ROLES.find(
-  (r) => String(row?.label ?? '').startsWith(r.tag),
-) ?? null;
+export const standingRoleOf = (row) => roleOf(row?.label);
 
 /**
  * What kind of agent this row is — which decides how it is judged, not where it

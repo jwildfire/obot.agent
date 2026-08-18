@@ -143,7 +143,7 @@ test('the tools this rule is about really are executable and really do carry a s
   // would quietly become wrong, and every doc corrected under it would be broken.
   for (const rel of ['tools/ops-answers', 'tools/prime-rehydrate', 'tools/scratchpad-log',
                      'tools/blocker-log', 'tools/worker-id', 'tools/delivery-log',
-                     'scripts/obot-merge', 'scripts/obot-fleet', 'tools/navigator/wake-listen']) {
+                     'scripts/obot-merge', 'scripts/obot-admiral', 'tools/navigator/wake-listen']) {
     const file = path.join(ROOT, rel);
     assert.ok(fs.statSync(file).mode & 0o111, `${rel} must be executable for the bare path to work`);
     assert.match(fs.readFileSync(file, 'utf8').split('\n')[0], /^#!/, `${rel} must name its own interpreter`);

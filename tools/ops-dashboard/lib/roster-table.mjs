@@ -32,8 +32,9 @@
 // column pinned so a row never loses its name.
 import { esc } from './esc.mjs';
 import { PRICE_NOTE, ID_NOTE, DEAD_SHOWN } from './roster.mjs';
-import { STANDING_ROLES, kindOf } from './roster-view.mjs';
+import { STANDING_ROLES, kindOf, standingRoleOf } from './roster-view.mjs';
 import { emptyPins, pinState, pinnedRoles } from './pins.mjs';
+import { tagsOf } from '../../lib/roles.mjs';
 
 const money = (n) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -452,7 +453,7 @@ export function unattributedRow(u) {
 /**
  * A row for a pinned role that has no session on this machine at all.
  *
- * The fleet manager is short-lived by design (obot.agent#167): it launches when a
+ * The admiral is short-lived by design (obot.agent#167): it launches when a
  * condition fires, acts, and exits, so ABSENT is its ordinary state. A pinned role
  * with no row leaves a gap, and a gap cannot say whether the role is resting or
  * broken — which is the same failure as a pin that drops its subject on death, one
@@ -486,7 +487,13 @@ export function restingRow(role) {
 
 /** One resting row per pinned role the roster has no row for. */
 export function restingRows(rows = [], pins = emptyPins()) {
-  const present = (role) => rows.some((r) => String(r.label ?? '').startsWith(role.tag));
+  // Present under ANY tag the role has carried, not just its current one — otherwise
+  // a role renamed today gets both a live row under the old tag and a "not running"
+  // row under the new one, which is two rows saying opposite things about one role
+  // (obot.agent#182).
+  const present = (role) => rows.some(
+    (r) => tagsOf(role).some((t) => String(r.label ?? '').startsWith(t)),
+  );
   return pinnedRoles(pins).filter((role) => !present(role)).map(restingRow);
 }
 
@@ -883,8 +890,26 @@ export function agentsTableHtml(model, { now = new Date(), pins = emptyPins() } 
 
   // Pinned first, and the order inside each block is the order the sort produced —
   // pinning changes which block a row is in, never how a block is ranked.
-  const pinned = rows.filter((r) => pinState(r.row, pins).pinned);
-  const rest = rows.filter((r) => !pinState(r.row, pins).pinned);
+  //
+  // ONE ROW PER ROLE IN THE BAND. A role that has been renamed has sessions under
+  // more than one tag, and all of them resolve to it, so without this the band showed
+  // four rows for three roles the day the admiral was renamed — one saying RUNNING
+  // under the new tag and one saying DIED under the old, about the same role
+  // (obot.agent#182). The band answers "what is each of my roles doing"; the rows are
+  // already sorted newest-first, so the first one a role produces is its current
+  // session and the older ones drop to the table below rather than out of the page.
+  const seen = new Set();
+  const claimsBand = (r) => {
+    const role = standingRoleOf(r.row);
+    if (!role) return true;
+    if (seen.has(role.tag)) return false;
+    seen.add(role.tag);
+    return true;
+  };
+  const pinnedAll = rows.filter((r) => pinState(r.row, pins).pinned);
+  const pinned = pinnedAll.filter(claimsBand);
+  const demoted = new Set(pinnedAll.filter((r) => !pinned.includes(r)));
+  const rest = rows.filter((r) => !pinState(r.row, pins).pinned || demoted.has(r));
   const bodies = pinned.length
     ? `<tbody class="at-b" data-sec="pinned">
         ${secRow('Pinned', 'always here, whatever their status', '<span class="at-sechid" id="at-pinhid" hidden></span>')}

@@ -1,4 +1,4 @@
-// The fleet launcher — the singleton rule, the launch flags, and the guarantee
+// The admiral launcher — the singleton rule, the launch flags, and the guarantee
 // that a dry run writes nothing (obot.agent#167, under jwildfire/obot.roadmap#236).
 //
 // The launcher is the one component that CAUSES something. Everything else in the
@@ -18,10 +18,10 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const LAUNCHER = join(REPO, 'scripts', 'obot-fleet')
+const LAUNCHER = join(REPO, 'scripts', 'obot-admiral')
 
 const jobsDir = (jobs) => {
-  const root = mkdtempSync(join(tmpdir(), 'fleetjobs-'))
+  const root = mkdtempSync(join(tmpdir(), 'admiraljobs-'))
   for (const [id, state] of Object.entries(jobs)) {
     mkdirSync(join(root, id), { recursive: true })
     writeFileSync(join(root, id, 'state.json'), JSON.stringify(state))
@@ -30,7 +30,7 @@ const jobsDir = (jobs) => {
 }
 
 const workspace = () => {
-  const root = mkdtempSync(join(tmpdir(), 'fleetws-'))
+  const root = mkdtempSync(join(tmpdir(), 'admiralws-'))
   mkdirSync(join(root, '.claude/session-hub/cache'), { recursive: true })
   return root
 }
@@ -44,7 +44,11 @@ const run = (args = [], { jobs = {}, ws = workspace(), env = {} } = {}) => ({
   }),
 })
 
-const fleetLog = (ws) => join(ws, '.claude/session-hub/fleet.log')
+// The launch log under the name it carries since obot.agent#182. Left pointing at
+// the old fleet.log, every "writes NOTHING" assertion below would go on passing
+// against a file the launcher no longer writes — silent success, which is the shape
+// this suite exists to catch.
+const admiralLog = (ws) => join(ws, '.claude/session-hub/admiral.log')
 
 test('preflight prints the launch command, with every flag the design named', () => {
   const { r } = run(['--preflight-only'])
@@ -52,12 +56,12 @@ test('preflight prints the launch command, with every flag the design named', ()
   assert.match(r.stdout, /--bg/)
   assert.match(r.stdout, /--permission-mode auto/)
   assert.match(r.stdout, /--model opus/)
-  assert.match(r.stdout, /\/s-fleet /)
-  assert.match(r.stdout, /🚦🤖 obot-fleet/)
+  assert.match(r.stdout, /\/s-admiral /)
+  assert.match(r.stdout, /⚓🤖 obot-admiral/)
 })
 
-test('the manager launches UNBRIDGED — dropping the flag alone would be a no-op', () => {
-  // Remote Control is for the roles he talks to from a phone. The manager talks to
+test('the admiral launches UNBRIDGED — dropping the flag alone would be a no-op', () => {
+  // Remote Control is for the roles he talks to from a phone. The admiral talks to
   // nobody. The flag is OR-ed with the global setting, so it must be overridden
   // explicitly rather than merely omitted (obot.agent#116/#117).
   const { r } = run(['--preflight-only'])
@@ -66,13 +70,14 @@ test('the manager launches UNBRIDGED — dropping the flag alone would be a no-o
 })
 
 test('the session name is stable across launches — a pinned role cannot carry a slug', () => {
-  // @jwildfire, 2026-08-17: pin prime, nav and fleet by default. A pinned row whose
-  // name changes every run cannot be pinned.
+  // @jwildfire, 2026-08-17: pin prime, nav and fleet by default. The last of those
+  // is the admiral since obot.agent#182, later the same day. A pinned row whose name
+  // changes every run cannot be pinned.
   const a = run(['--preflight-only']).r.stdout
   const b = run(['--preflight-only']).r.stdout
   const name = (s) => /-n '([^']+)'/.exec(s)?.[1]
   assert.equal(name(a), name(b))
-  assert.equal(name(a), '🚦🤖 obot-fleet')
+  assert.equal(name(a), '⚓🤖 obot-admiral')
   assert.doesNotMatch(name(a), /\d{4}-\d{2}-\d{2}/, 'no date, no per-run slug')
 })
 
@@ -84,8 +89,8 @@ test('a dry run against the live fleet writes NOTHING', () => {
     jobs: { j1: { name: '👯🤖 W0099 x', state: 'blocked', tempo: 'blocked', needs: 'a ruling', updatedAt: '2020-01-01T00:00:00Z' } },
   })
   assert.equal(r.status, 0, r.stderr)
-  assert.match(r.stdout, /## Fleet/)
-  assert.equal(existsSync(fleetLog(ws)), false, 'a dry run must not append to the fleet log')
+  assert.match(r.stdout, /## Admiral/)
+  assert.equal(existsSync(admiralLog(ws)), false, 'a dry run must not append to the admiral log')
 })
 
 test('a dry run says it is a dry run, and never describes a refusal it did not make', () => {
@@ -98,8 +103,8 @@ test('a dry run says it is a dry run, and never describes a refusal it did not m
 test('a quiet fleet reports, launches nothing, and says why', () => {
   const { ws, r } = run(['--check'], { jobs: {} })
   assert.match(r.stdout, /nothing to act on/)
-  assert.match(r.stdout, /an empty fleet never launches a manager/)
-  assert.equal(existsSync(fleetLog(ws)), false)
+  assert.match(r.stdout, /an empty fleet never launches an admiral/)
+  assert.equal(existsSync(admiralLog(ws)), false)
 })
 
 test('--json is a reading, never an action', () => {
@@ -107,32 +112,32 @@ test('--json is a reading, never an action', () => {
   const out = JSON.parse(r.stdout)
   assert.equal(out.trigger.fired, false)
   assert.deepEqual(out.trigger.operational, ['jwildfire/obot.agent', 'jwildfire/obot.roadmap'])
-  assert.equal(existsSync(fleetLog(ws)), false)
+  assert.equal(existsSync(admiralLog(ws)), false)
 })
 
-test('an unreadable policy is FLEET TRIGGER BROKEN, never a quiet fleet', () => {
+test('an unreadable policy is ADMIRAL TRIGGER BROKEN, never a quiet fleet', () => {
   // The failure direction that matters, and the bug this actually caught: the first
   // draft read branch roles from a key the policy file spells differently, found no
   // operational repo, and had to be prevented from reporting that as nothing to do.
   // Silent success is this house's recurring defect.
-  const { ws, r } = run(['--check'], { env: { OBOT_FLEET_POLICY: '/nonexistent/policy.json' } })
-  assert.match(r.stdout, /\*\*FLEET TRIGGER BROKEN\*\*/)
+  const { ws, r } = run(['--check'], { env: { OBOT_ADMIRAL_POLICY: '/nonexistent/policy.json' } })
+  assert.match(r.stdout, /\*\*ADMIRAL TRIGGER BROKEN\*\*/)
   assert.match(r.stdout, /this is not a quiet fleet/)
   assert.doesNotMatch(r.stdout, /nothing to act on/)
-  assert.equal(existsSync(fleetLog(ws)), false)
+  assert.equal(existsSync(admiralLog(ws)), false)
 })
 
 test('a policy with no OPERATIONAL repo is broken too, not clean', () => {
-  // Distinct from unreadable: the file parses, and every lane in it is clinical. A
-  // manager must never be launched for those, and reporting "clean" would hide that
+  // Distinct from unreadable: the file parses, and every lane in it is clinical. An
+  // admiral must never be launched for those, and reporting "clean" would hide that
   // the operational lanes went unread.
   const ws = workspace()
   const p = join(ws, 'clinical-only.json')
   writeFileSync(p, JSON.stringify({ repos: {
     'jwildfire/gsm.safety': { profile: 'auto', class: 'clinical', branches: { integration: 'dev' } },
   } }))
-  const { r } = run(['--check'], { ws, env: { OBOT_FLEET_POLICY: p } })
-  assert.match(r.stdout, /\*\*FLEET TRIGGER BROKEN\*\*/)
+  const { r } = run(['--check'], { ws, env: { OBOT_ADMIRAL_POLICY: p } })
+  assert.match(r.stdout, /\*\*ADMIRAL TRIGGER BROKEN\*\*/)
   assert.doesNotMatch(r.stdout, /nothing to act on/)
 })
 
@@ -142,25 +147,25 @@ test('an unknown argument is refused rather than silently ignored', () => {
   assert.match(r.stderr, /unknown argument/)
 })
 
-test('singleton: a live manager holds the launch and names the job holding it', () => {
+test('singleton: a live admiral holds the launch and names the job holding it', () => {
   const { ws, r } = run([], {
     jobs: {
-      mgr1: { name: '🚦🤖 obot-fleet', state: 'working', updatedAt: new Date().toISOString(), createdAt: new Date().toISOString() },
+      mgr1: { name: '⚓🤖 obot-admiral', state: 'working', updatedAt: new Date().toISOString(), createdAt: new Date().toISOString() },
       j1: { name: '👯🤖 W0099 x', state: 'blocked', tempo: 'blocked', needs: 'a ruling', updatedAt: '2020-01-01T00:00:00Z' },
     },
   })
-  assert.match(r.stdout, /held: a manager is already running \(job mgr1/)
-  assert.doesNotMatch(r.stdout, /launched manager/)
+  assert.match(r.stdout, /held: an admiral is already running \(job mgr1/)
+  assert.doesNotMatch(r.stdout, /launched admiral/)
   // The hold IS logged — a log that records only what happened cannot answer the
   // question asked of it the morning after, which is why nothing ran.
-  assert.match(readFileSync(fleetLog(ws), 'utf8'), /HOLD .* already running/)
+  assert.match(readFileSync(admiralLog(ws), 'utf8'), /HOLD .* already running/)
 })
 
 test('the relaunch floor holds a second launch inside the hour', () => {
   const ws = workspace()
   const recent = new Date(Date.now() - 5 * 60000).toISOString()
   mkdirSync(join(ws, '.claude/session-hub'), { recursive: true })
-  writeFileSync(fleetLog(ws), `${recent} LAUNCH some-other-signature — a previous run\n`)
+  writeFileSync(admiralLog(ws), `${recent} LAUNCH some-other-signature — a previous run\n`)
   const { r } = run([], {
     ws,
     jobs: { j1: { name: '👯🤖 W0099 x', state: 'blocked', tempo: 'blocked', needs: 'a ruling', updatedAt: '2020-01-01T00:00:00Z' } },
@@ -168,23 +173,23 @@ test('the relaunch floor holds a second launch inside the hour', () => {
   assert.match(r.stdout, /held: last launch \d+m ago, floor is 60m/)
 })
 
-test('an overrunning manager is reported, and a DRY RUN never kills', () => {
+test('an overrunning admiral is reported, and a DRY RUN never kills', () => {
   const old = new Date(Date.now() - 90 * 60000).toISOString()
   const { r } = run(['--check'], {
-    jobs: { mgr1: { name: '🚦🤖 obot-fleet', state: 'working', createdAt: old, updatedAt: old } },
+    jobs: { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old } },
   })
-  assert.match(r.stderr, /manager job mgr1 has run \d+m against a 30m budget/)
+  assert.match(r.stderr, /admiral job mgr1 has run \d+m against a 30m budget/)
   assert.doesNotMatch(r.stderr, /SIGTERM/, '--check reports; it never acts')
 })
 
-test('the hard ceiling is ARMED by default and OBOT_FLEET_KILL=0 disarms it', () => {
+test('the hard ceiling is ARMED by default and OBOT_ADMIRAL_KILL=0 disarms it', () => {
   // The Navigator's call, 2026-08-17: a kill that ships disarmed is documentation.
   // The job id here matches nothing in `claude agents`, so the kill path runs and
   // reports that it found no pid rather than terminating anything real.
   const old = new Date(Date.now() - 90 * 60000).toISOString()
-  const mgr = { mgr1: { name: '🚦🤖 obot-fleet', state: 'working', createdAt: old, updatedAt: old } }
+  const mgr = { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old } }
   const armed = run([], { jobs: mgr })
-  assert.match(armed.r.stderr, /killed overrunning manager mgr1/)
-  const disarmed = run([], { jobs: mgr, env: { OBOT_FLEET_KILL: '0' } })
-  assert.doesNotMatch(disarmed.r.stderr, /killed overrunning manager/)
+  assert.match(armed.r.stderr, /killed overrunning admiral mgr1/)
+  const disarmed = run([], { jobs: mgr, env: { OBOT_ADMIRAL_KILL: '0' } })
+  assert.doesNotMatch(disarmed.r.stderr, /killed overrunning admiral/)
 })

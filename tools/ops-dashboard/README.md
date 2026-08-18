@@ -375,13 +375,14 @@ the table because a column was clicked.
 **Pinning** (`lib/pins.mjs`, task
 [#169](https://github.com/jwildfire/obot.agent/issues/169)) puts a band at the top of
 the table — *"also let me pin agents. pin prime, nav and fleet manager (fleet for short)
-by default"* (@jwildfire, 2026-08-17). Every row carries the control, and four rules make
-it a pin rather than a decoration:
+by default"* (@jwildfire, 2026-08-17; renamed the same evening — the fleet manager is
+the admiral, and `short` is `admiral` rather than `fleet`). Every row
+carries the control, and four rules make it a pin rather than a decoration:
 
 - **The default is derived, not listed.** The pinned-by-default set is *every standing
   role*, read off `STANDING_ROLES` in `lib/roster-view.mjs` — the same registry that
   decides what a row's kind is. Nothing in `pins.mjs` names prime, the Navigator or the
-  fleet manager. Declaring a fourth standing role is one line in that registry and it
+  admiral. Declaring a fourth standing role is one line in that registry and it
   arrives pinned; a worker that has run for a month and spent the most money still
   cannot drift into the band, because it is not a role.
 - **A pinned row is never dropped.** The scope rules and the cap on deaths both consult
@@ -390,7 +391,7 @@ it a pin rather than a decoration:
   health. When a filter he ticked hides one, the band says so rather than looking
   complete.
 - **A pinned role with no session still gets a row**, reading `not running` with the
-  reason. The fleet manager is short-lived by design ([#167](https://github.com/jwildfire/obot.agent/issues/167)):
+  reason. The admiral is short-lived by design ([#167](https://github.com/jwildfire/obot.agent/issues/167)):
   absent is its ordinary state, and an empty slot cannot say whether it is resting or
   broken.
 - **Pins are his preference state**, kept in `.claude/ops/pins.json` with the store's

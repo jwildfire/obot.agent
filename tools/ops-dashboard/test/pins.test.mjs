@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { STANDING_ROLES, kindOf } from '../lib/roster-view.mjs';
+import { STANDING_ROLES, kindOf, standingRoleOf } from '../lib/roster-view.mjs';
 import {
   emptyPins, isPinned, labelIsPinned, pinKey, pinState, pinnedByDefault, readPins, writePin,
 } from '../lib/pins.mjs';
@@ -43,8 +43,8 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pins-'));
 // ---- the principle, not the three names -----------------------------------
 
 test('every standing role in the registry is pinned by default', () => {
-  // The test is written over the REGISTRY rather than over prime, the Navigator and
-  // fleet by name: a fourth standing role added to the registry has to arrive
+  // The test is written over the REGISTRY rather than over prime, nav and the
+  // admiral by name: a fourth standing role added to the registry has to arrive
   // pinned without anyone editing this file or the pin code.
   assert.ok(STANDING_ROLES.length >= 3, 'the registry should hold the standing roles');
   for (const r of STANDING_ROLES) {
@@ -65,23 +65,76 @@ test('the pin code names no role: the default follows what an agent IS', () => {
   }
 });
 
-test('the fleet manager role stays in step with the launcher that spawns it', async () => {
-  // The registry declares the fleet manager's tag; `tools/navigator/fleet.mjs`
-  // declares the same tag for the session it launches (obot.agent#167). Two
-  // declarations of one fact can half-land — a rename in one place and not the other
-  // makes the manager render as a probe and quietly stop being pinned, which is a
-  // silent no-op rather than a failure. This holds them together the moment that
-  // module exists, and says nothing while it does not.
-  let fleet = null;
-  try {
-    fleet = await import('../../navigator/fleet.mjs');
-  } catch {
-    return; // not on this branch yet — nothing to compare against
+test('the admiral role stays in step with the launcher that spawns it', async () => {
+  // The registry declares the admiral's tag; `tools/navigator/admiral.mjs` declares
+  // the same tag for the session it launches (obot.agent#167). Two declarations of
+  // one fact can half-land — a rename in one place and not the other makes the
+  // admiral render as a probe and quietly stop being pinned, which is a silent no-op
+  // rather than a failure.
+  //
+  // HARDENED IN THE RENAME (obot.agent#182), because the rename is the exact event
+  // this guard exists to catch and the guard would have slept through it. It used to
+  // swallow an import failure with `catch { return }` and compare each field only
+  // `if` the export was truthy — so renaming ADMIRAL_TAG away, or breaking the
+  // module outright, produced a passing test and an unpinned admiral. A guard that
+  // cannot fail is not a guard. The module is not optional any more: if it will not
+  // import, that is the finding.
+  const admiral = await import('../../navigator/admiral.mjs');
+  const role = STANDING_ROLES.find((r) => r.short === 'admiral');
+  assert.ok(role, 'the registry should carry the admiral');
+  assert.ok(admiral.ADMIRAL_TAG, 'admiral.mjs should export ADMIRAL_TAG');
+  assert.ok(admiral.ADMIRAL_NAME, 'admiral.mjs should export ADMIRAL_NAME');
+  assert.equal(role.tag, admiral.ADMIRAL_TAG);
+  assert.equal(role.name, admiral.ADMIRAL_NAME);
+});
+
+test('the three standing roles are the ones he named: prime, admiral and nav', () => {
+  // @jwildfire, 2026-08-17: "I think we should call the fleet manager the admiral.
+  // prime, admiral and nav." The short forms are what he says out loud and what the
+  // dashboard prints, so they are asserted rather than left to drift back into
+  // "the Navigator" and "the fleet manager" the next time someone edits the registry.
+  assert.deepEqual(STANDING_ROLES.map((r) => r.short).sort(), ['admiral', 'nav', 'prime']);
+});
+
+test('a renamed role keeps its own history: prior tags still resolve to it', () => {
+  // The failure this catches is silent in both directions. When the third role was
+  // renamed from fleet to admiral (obot.agent#182) its tag moved from the traffic
+  // signal to the anchor, and every session that had already run under the old tag
+  // — including its first real launch and the run that wedged for eleven hours —
+  // stopped classifying as a standing role and fell through to `other`. Nothing
+  // errored, and the pinned band still showed three roles the whole time, because
+  // the resting row is derived from the registry rather than from any session. So
+  // the obvious acceptance check passed while the role's record was being lost.
+  for (const r of STANDING_ROLES) {
+    for (const prior of r.priorTags ?? []) {
+      const old = row({ label: `${prior} obot-${r.short}` });
+      assert.equal(kindOf(old), 'standing', `a session tagged ${prior} should still be ${r.short}`);
+      assert.equal(standingRoleOf(old)?.short, r.short);
+      assert.equal(pinKey(old), `role:${r.tag}`, 'an old-tag row must share the pin key of the role it belongs to');
+    }
   }
-  const role = STANDING_ROLES.find((r) => r.short === 'fleet');
-  assert.ok(role, 'the registry should carry the fleet manager');
-  if (fleet.MANAGER_TAG) assert.equal(role.tag, fleet.MANAGER_TAG);
-  if (fleet.MANAGER_NAME) assert.equal(role.name, fleet.MANAGER_NAME);
+});
+
+test('a renamed role gets ONE row in the band, not one per tag it has carried', () => {
+  // The day the admiral was renamed the band showed four rows for three roles: a live
+  // row under the new tag and a dead one under the old, both resolving to the same
+  // role and saying opposite things about it. Rows are sorted newest-first before the
+  // band is cut, so the role's current session claims the slot and its older ones drop
+  // to the table below rather than off the page (obot.agent#182).
+  const role = STANDING_ROLES.find((r) => (r.priorTags ?? []).length);
+  assert.ok(role, 'this guard needs a role that has carried more than one tag');
+  const model = {
+    rows: [
+      row({ label: role.name, createdAt: '2026-08-18T00:00:00Z' }),
+      row({ label: `${role.priorTags[0]} obot-old`, createdAt: '2026-08-17T00:00:00Z' }),
+      row({ label: STANDING_ROLES[0].name, createdAt: '2026-08-16T00:00:00Z' }),
+    ],
+  };
+  const html = agentsTableHtml(model, { pins: emptyPins() });
+  const band = html.slice(html.indexOf('data-sec="pinned"'), html.indexOf('data-sec="rest"'));
+  assert.ok(band.includes(role.name), "the role's current session is in the band");
+  assert.ok(!band.includes('obot-old'), 'its older tag is not a second row in the band');
+  assert.ok(html.includes('obot-old'), 'and it is still on the page, below the band');
 });
 
 test('a long-lived worker never drifts into the pinned set', () => {
@@ -212,7 +265,7 @@ test('a pinned role whose session ended cleanly before the ledger epoch still ge
 });
 
 test('a pinned role that has never run at all renders a resting row rather than nothing', () => {
-  // The fleet manager is short-lived by design (obot.agent#167): it launches when a
+  // The admiral is short-lived by design (obot.agent#167): it launches when a
   // condition fires and exits. So its usual state is absent, and an absent pinned
   // role must say "not running" rather than leave a gap — a quiet system must not
   // look like a broken one, and an empty slot cannot say which it is.

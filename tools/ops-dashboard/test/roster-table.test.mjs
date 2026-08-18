@@ -609,7 +609,7 @@ test('the priced day is used only when nothing on this machine timed the agent',
 });
 
 test('a transport failure is not the agent\'s account of its own work', () => {
-  // Also found on the live page: fleet's row read "closed out: API Error: Unable to
+  // Also found on the live page: the admiral's row read "closed out: API Error: Unable to
   // connect to API: SSL certificate hostname mismatch", under a label saying that was
   // the agent's own account of what it finished. The agent accounted for nothing; a
   // connection failed, and the status column beside it already read `died`. It stays
