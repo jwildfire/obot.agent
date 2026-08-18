@@ -3,7 +3,7 @@
 @jwildfire's **local** page: his todo list — release candidates, decisions, config —
 and the place he answers decision artifacts instead of reading them on the public site
 and typing the answer somewhere else. It is also the site's default view: the session
-hub lives on the second tab of the same server.
+hub lives on the Agents tab of the same server.
 
 Requirement: [jwildfire/obot.roadmap#180](https://github.com/jwildfire/obot.roadmap/issues/180) ·
 decision that produced it: [Recording your decisions](https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-15-decision-recording/).
@@ -27,14 +27,21 @@ node obot.agent/tools/ops-dashboard/ops-dashboard.mjs --serve   # http://127.0.0
 node obot.agent/tools/ops-dashboard/ops-dashboard.mjs           # render once to stdout
 ```
 
-| Route | View |
-|---|---|
-| `/` | the Operations Dashboard — the default view |
-| `/live.html`, `/session` | the Agents table — one row per agent, with a filter sidebar |
-| `/session/log` | the full record: what changed, the roster by outcome, every verdict |
-| `/session/frame` | the session hub's own render, served unchanged |
-| `/navigator` | what the 🧭🤖 Navigator sweep has seen |
-| `/artifact/<slug>/` | a decision artifact from the hub clone |
+The first four tabs are the **shared spine** (jwildfire/obot.roadmap#203): the same four
+entities, in the same order, as the public hub's roadmap sub-nav, so a reader who knows one
+surface can navigate the other without being told. A divider follows them, and everything
+after it is this surface's own.
+
+| Route | Tab | View | On the hub |
+|---|---|---|---|
+| `/` | Queue | his todo list — what needs him | `roadmap.html` |
+| `/wire.html`, `/wire` | Wire | what changed, and how much since he last looked | `wire.html` |
+| `/live.html`, `/session` | Agents | the Agents table — one row per agent, with a filter sidebar | the NOW strip, counts only |
+| — | Catalog | links out; this surface does not duplicate the record | `catalog.html` |
+| `/navigator` | Navigator | what the 🧭🤖 Navigator sweep has seen | — |
+| `/session/log` | — | the full record: the roster by outcome, every verdict | — |
+| `/session/frame` | — | the session hub's own render, served unchanged | — |
+| `/artifact/<slug>/` | — | a decision artifact from the hub clone | — |
 
 | Option | Meaning |
 |---|---|
@@ -322,7 +329,39 @@ decision log and the index. Anything able to write to the hub on his behalf hold
 real capability; a browser page that also renders artifact content is the wrong place
 to keep it.
 
-## One site, two tabs
+## The Wire, and the one break in the symmetry
+
+The what-changed feed used to live two clicks down, inside the Agents tab's full record. It
+is the same entity the public hub calls the Wire, so it now sits in the same slot under the
+same name (#203) — and it is the one surface that can answer the harder half of the question.
+
+This server sees every request, so it reads the real per-surface visit record (#205) and
+answers **what changed since you last looked**. The hub is static and records nothing per
+visitor, and per-visitor tracking has no place on a public page, so it answers **what changed
+recently** against a fixed 7-day window. Both pages say so and each names the other.
+
+Degrading honestly is inherited whole from #205: no prior visit renders "first look", an
+unreadable record says so, and an event with no timestamp counts as *old* — undercounting
+tells him to look, overcounting tells him not to, and only the second can hide something.
+
+## Config counts reach the hub; config text never does
+
+`obot.agent/tools/config-count` writes `<hub>/data/config-count.json`: two integers and a
+date, nothing else. It is a separate tool rather than a line in this page on purpose — the
+code that may see config text and the code that may cross the boundary should not be the same
+code. It asserts its own payload shape before writing, and refuses to write at all when the
+list cannot be read, because a count that cannot be measured is not zero.
+
+The hub validates it again on arrival and refuses the whole payload on any field that is not
+a number or a date. That reader is the half that survives someone editing this one.
+
+```bash
+node obot.agent/tools/config-count             # write it
+node obot.agent/tools/config-count --dry-run   # print it, write nothing
+node obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
+```
+
+## One site, several tabs
 
 @jwildfire, 2026-08-15: *"I want the ops db and orginal ops hub to be merged. just make
 them 2 different tabs on the same (local) site for now. new ops db should be default
