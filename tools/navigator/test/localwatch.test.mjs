@@ -397,6 +397,33 @@ test('the fetch age is on the page, because a number that is quietly an hour old
   assert.match(md, /47m|48m/)
 })
 
+test('a fetch that FAILED is said out loud too — otherwise a stale number hides behind a fresh stamp', () => {
+  // The first version stamped `fetchedAt` on every run and dropped the failures, so
+  // the header read "last fetched 0m ago" over a repo whose fetch had just failed and
+  // whose position was hours old. That is the house failure mode with a timestamp on it.
+  const md = localSection({
+    worktrees: [], branches: { findings: [], excluded: 0, tooYoung: 0 }, clones: [],
+    claimants: [], fetchedAt: new Date(now - 5 * MIN).toISOString(), fetchFailed: ['gsm.safety'],
+  }, now)
+  assert.ok(md.includes(ALARM_BROKEN), md.slice(0, 300))
+  assert.match(md, /gsm\.safety/)
+})
+
+test('branches whose pull requests could not be listed are unread, never "excluded"', () => {
+  // Counting them as exclusions put them in the same sentence as gh-pages — skipped
+  // because they are machine-written — when the truth is that nobody could tell.
+  const r = unproposedBranches([branch('org-chart-237', 5, { unread: 'pull requests could not be listed' })], { now })
+  assert.equal(r.findings.length, 0)
+  assert.equal(r.unread, 1)
+  assert.equal(r.excluded, 0)
+  const md = localSection({
+    worktrees: [], branches: r, clones: [], claimants: [],
+    fetchedAt: new Date(now - 5 * MIN).toISOString(),
+  }, now)
+  assert.ok(md.includes(ALARM_BROKEN))
+  assert.match(md, /could not be checked for a pull request/)
+})
+
 test('a fetch that never happened is said out loud rather than rendered as fresh', () => {
   const md = localSection({
     worktrees: [], branches: { findings: [], excluded: 0, tooYoung: 0 }, clones: [],
