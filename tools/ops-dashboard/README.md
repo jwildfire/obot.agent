@@ -176,7 +176,27 @@ flight, and how long since the last one finished. The probe is excluded from its
 accounting, which is the whole mechanism rather than a nicety — a health check that
 counted itself as traffic would reset the idle clock every five minutes and the restart
 would never fire. A build too old to have the endpoint falls back to the last-look
-record; when neither can answer, the restart is refused and says so.
+record; when neither can answer, the restart waits and says so.
+
+**Only in-flight counts, and the wait has an end.** Those two numbers are not
+interchangeable. A restart kills a request that is *in flight* — the marker's exit hook
+calls `process.exit` without draining — and nothing else: the pages here fetch nothing
+from this origin, so a closed response is complete on the wire. Time since the last
+response is a guess about the future, and it was a twenty-second bar until
+[#258](https://github.com/jwildfire/obot.agent/issues/258): anything that watched the
+page starved the restart for as long as it kept watching, and on 18 August the checkout
+stood at `7482007` while this server served `0832443`. Two seconds of it survive, for
+the one thing it knows — a click is two requests. And every deferral is counted on the
+record: after `DEFERRAL_LIMIT` (3, a fifteen-minute ceiling at this cadence) the restart
+goes ahead regardless. A dropped request announces itself and a refresh repairs it; a
+stale page is not visible as a fault at all.
+
+**Restarted means this process is serving, not that the port answers.** The port
+answering is a question the process being replaced answers perfectly well, so the check
+compares the pid and the commit from `/healthz` against the replacement just spawned. A
+replacement that never took the port is stopped rather than left running. And the check
+only ever asks `/healthz` — asking for the page is traffic, and would seed the next
+deferral.
 
 A crashed dashboard is started again on the next sweep, and one he stopped on purpose is
 not: `pkill` sends SIGTERM, the marker's release hook runs, and a released marker reads

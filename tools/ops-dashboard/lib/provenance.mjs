@@ -264,6 +264,23 @@ export function autoUpdate(workspace, now = new Date()) {
     moved: Boolean(checkout.moved),
     head: checkout.to ? String(checkout.to).slice(0, 7) : null,
     restartedAt: restarted?.at ?? null,
-    deferred: (rec.consumers ?? []).find((c) => c.code === 'busy')?.reason ?? null,
+    // The deferral, with the count that says when it ends. Keyed on the consumer's own
+    // `deferred` flag rather than on the code string `busy`, because there are three
+    // codes a restart can be held off under and matching one of them told the page
+    // nothing was waiting during the other two (jwildfire/obot.agent#258).
+    deferred: deferral(rec)?.reason ?? null,
+    deferrals: deferral(rec)?.deferrals ?? null,
+    deferralLimit: deferral(rec)?.limit ?? null,
   };
+}
+
+/**
+ * The consumer whose restart this machine wants and is not doing.
+ *
+ * A record written before #258 has no `deferred` flag and its only deferral code was
+ * `busy`, so that spelling is still read — an old record must not silently report
+ * "nothing waiting" when what it means is "written by an older sweep".
+ */
+function deferral(rec) {
+  return (rec?.consumers ?? []).find((c) => c?.deferred || (c?.deferred === undefined && c?.code === 'busy')) ?? null;
 }

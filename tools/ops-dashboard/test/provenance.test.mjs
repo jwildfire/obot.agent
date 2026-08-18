@@ -221,10 +221,33 @@ test('a healthy run reports the commit it landed on and when the page restarted'
 test('a stale build with the sweep armed is told to wait, not told to run pkill', () => {
   const html = provenanceLine({
     code: { short: 'abc1234', ageMin: 30, behind: 3 },
-    update: { state: 'ok', ageMin: 1, head: 'def5678', deferred: 'the page was opened 4s ago' },
+    update: { state: 'ok', ageMin: 1, head: 'def5678', deferred: '1 request is in flight', deferrals: 2, deferralLimit: 3 },
   });
-  assert.match(html, /waiting for the page to be idle/);
+  assert.match(html, /waiting for the page to settle/);
   assert.doesNotMatch(html, /pkill/, 'telling him to restart a page that restarts itself is how a true line becomes noise');
+  // The wait has to carry its own end. "Waiting for the page to be idle" was an
+  // unbounded wait written as an imminent one, and the person reading it was the
+  // reason it was waiting (jwildfire/obot.agent#258).
+  assert.match(html, /deferral 2 of 3/);
+  assert.match(html, /restarts regardless/);
+});
+
+test('and the promise underneath it is bounded too, since it is the one he acts on', () => {
+  const html = provenanceLine({
+    code: { short: 'abc1234', ageMin: 30, behind: 3 },
+    update: { state: 'ok', ageMin: 1, head: 'def5678', deferred: null },
+  });
+  assert.match(html, /within fifteen whether it does or not/,
+    'the old line promised a restart "once nobody is reading it", which is a promise a reader falsifies by reading');
+});
+
+test('a record from before the count existed still reports the deferral, rather than reporting nothing', () => {
+  const u = autoUpdate(wsWith(ok({
+    consumers: [{ id: 'ops-dashboard', act: 'skip', code: 'busy', ok: true, reason: 'the page was opened 4s ago' }],
+  })));
+  assert.equal(u.state, 'ok');
+  assert.match(String(u.deferred), /the page was opened/);
+  assert.equal(u.deferrals, null, 'an old record has no count, and a count must never be invented');
 });
 
 test('a stale build with no updater still names the command, and warns', () => {

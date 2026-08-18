@@ -18,9 +18,9 @@ import { execFileSync } from 'node:child_process'
 import {
   CONSUMER_POLICY, QUIET_MS, buildStamp, fastForward, lastLookMs, planFastForward,
   planRestart, previousProcess, readCheckout, recordPath, renderSelfUpdate, restartDashboard,
-  restartEnv, selfUpdate, takeLock, checkoutPosition, brokenRecord,
+  restartEnv, selfUpdate, takeLock, checkoutPosition, brokenRecord, DEFERRAL_LIMIT,
 } from '../selfupdate.mjs'
-import { parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
+import { ALARM_RE, parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'selfupd-'))
 
@@ -185,11 +185,11 @@ test('a request in flight defers the restart — killing it is worse than five m
   assert.match(r.reason, /in flight/)
 })
 
-test('a page opened seconds ago defers the restart too', () => {
-  const r = planRestart({ marker: live(), health: { inflight: 0, idleMs: 3000, code: { sha: 'old' } }, headSha: 'new' })
-  assert.equal(r.act, 'skip')
-  assert.equal(r.code, 'busy')
-})
+// A page opened seconds ago used to defer as well, on a twenty-second quiet bar. It
+// no longer does, and the change is obot.agent#258: a completed response is not a
+// request in flight, the served pages fetch nothing from this origin, and the bar was
+// therefore standing in for "somebody might ask again", which is what a poller starves
+// forever. What survives it is the settling window, asserted below.
 
 test('a quiet server on old code is restarted', () => {
   const r = planRestart({ marker: live(), health: { inflight: 0, idleMs: QUIET_MS + 1000, code: { sha: 'old', short: 'old1234' } }, headSha: 'new' })
@@ -210,10 +210,15 @@ test('a build with no health endpoint falls back to when he last opened a page',
   assert.equal(busy.code, 'busy')
 })
 
-test('when neither source can say whether it is busy, it is left running and reported', () => {
+test('when neither source can say whether it is busy, it waits — but as a counted deferral', () => {
+  // This was `refuse`, which the record turned into a **DASHBOARD RESTART FAILED**
+  // alarm. It is not a failure: nothing was attempted and nothing went wrong. It is a
+  // deferral like any other, and obot.agent#258 gives it the same bound, so a build
+  // too old to have a health endpoint cannot hold the machine off its own update.
   const r = planRestart({ marker: live(), health: null, headSha: 'new', lastLookMs: null })
-  assert.equal(r.act, 'refuse')
+  assert.equal(r.act, 'skip')
   assert.equal(r.code, 'unknown-quiescence')
+  assert.equal(r.deferred, true)
   assert.match(r.reason, /left running/)
 })
 
@@ -617,4 +622,247 @@ test('a restart names what it rescued him from, even when the old build could no
   assert.equal(c.was, null, 'an old build genuinely cannot say, and the record must not invent it')
   assert.match(c.reason, /replacing one up 18h/)
   assert.equal(c.previous.pid, 87091)
+})
+
+// ---- watching the page must not prevent the page updating (obot.agent#258) ----
+//
+// The deferral was right and unbounded, which made it wrong: anything that requested
+// the page — a poll, a monitor, him refreshing while he waited for a merge to appear —
+// held the restart off for as long as it kept looking. Watching for the deploy was
+// what prevented the deploy. Measured on this machine on 2026-08-18: the checkout at
+// `7482007` and the server still serving `0832443`, so `/config/c0016` answered 404
+// on a route that was merged and present in the checkout.
+//
+// Three things are held down here, and they are separable on purpose.
+//
+// WHAT A RESTART ACTUALLY INTERRUPTS. `/healthz` reports `inflight` and `idleMs` as
+// two numbers and only the first is a request a restart would kill. The served pages
+// fetch nothing from this origin — every `src`/`href` in a rendered page is either a
+// navigation link or github.com — so `inflight === 0` means the response is complete
+// and a restart drops nothing at all. `idleMs` was standing in for "somebody might ask
+// again soon", which is a guess about the future and the thing a poller starves.
+//
+// THE BOUND. Even the true signal must terminate: a wedged request that never closes
+// would starve the restart exactly as a poller did. Every deferral is counted and the
+// count is on the record, so the page can show it and the next sweep can act on it.
+//
+// AND THE VERIFICATION MUST NOT REQUEST THE PAGE. A check that fetches `/` to prove
+// the restart worked resets the traffic clock on whatever is serving and seeds the
+// next sweep's deferral — the defect verifying itself into existence.
+
+test('a request in flight defers — that is the one a restart would actually kill', () => {
+  const r = planRestart({ marker: live(), health: { inflight: 1, idleMs: 10 * 60000, code: { sha: 'old' } }, headSha: 'new' })
+  assert.equal(r.act, 'skip')
+  assert.equal(r.deferred, true, 'a deferral must be marked as one — it is not the same as having nothing to do')
+})
+
+test('a page served seconds ago does NOT defer — nothing is in flight and the page fetches nothing', () => {
+  const r = planRestart({ marker: live(), health: { inflight: 0, idleMs: 5000, code: { sha: 'old', short: 'old1234' } }, headSha: 'new' })
+  assert.equal(r.act, 'restart', 'last-request time is a guess about the future; in-flight is the fact')
+})
+
+test('but a response that has only just closed gets the settling window, since a click is two requests', () => {
+  const r = planRestart({ marker: live(), health: { inflight: 0, idleMs: 500, code: { sha: 'old' } }, headSha: 'new' })
+  assert.equal(r.act, 'skip')
+  assert.equal(r.code, 'settling')
+  assert.equal(r.deferred, true)
+})
+
+test('the no-health fallback still leans on the disk record — it has nothing better to lean on', () => {
+  const busy = planRestart({ marker: live(), health: null, headSha: 'new', lastLookMs: 2000 })
+  assert.equal(busy.act, 'skip')
+  assert.equal(busy.deferred, true)
+  const quiet = planRestart({ marker: live(), health: null, headSha: 'new', lastLookMs: QUIET_MS + 1000 })
+  assert.equal(quiet.act, 'restart')
+})
+
+test('a deferral that has already happened DEFERRAL_LIMIT times restarts anyway', () => {
+  const busy = { inflight: 3, idleMs: 0, code: { sha: 'old', short: 'old1234' } }
+  const held = planRestart({ marker: live(), health: busy, headSha: 'new', deferrals: DEFERRAL_LIMIT - 1 })
+  assert.equal(held.act, 'skip', 'under the bound it still waits')
+  const forced = planRestart({ marker: live(), health: busy, headSha: 'new', deferrals: DEFERRAL_LIMIT })
+  assert.equal(forced.act, 'restart')
+  assert.equal(forced.code, 'deferral-bound')
+  assert.equal(forced.forced, true)
+  assert.match(forced.reason, /3 times/, 'the line has to say how long it waited, or the bound is invisible')
+})
+
+test('the bound catches EVERY deferral, including the one that cannot measure quiescence at all', () => {
+  const unknowable = { marker: live(), health: null, headSha: 'new', lastLookMs: null }
+  assert.equal(planRestart({ ...unknowable, deferrals: 0 }).act, 'skip')
+  assert.equal(planRestart({ ...unknowable, deferrals: 0 }).deferred, true,
+    'unknowable quiescence is a deferral, not a failure — a failure implies something to fix')
+  assert.equal(planRestart({ ...unknowable, deferrals: DEFERRAL_LIMIT }).act, 'restart')
+})
+
+test('a state with nothing to do is not a deferral and must never be counted as one', () => {
+  for (const r of [
+    planRestart({ marker: live(), health: { inflight: 0, idleMs: 10 * 60000, code: { sha: 'new' } }, headSha: 'new' }),
+    planRestart({ marker: { state: 'none' }, health: null, headSha: 'new', lastLookMs: null }),
+    planRestart({ marker: live({ port: 7399 }), health: null, headSha: 'new', lastLookMs: 10 * 60000 }),
+    planRestart({ marker: live(), health: { inflight: 0, idleMs: 10 * 60000, code: { sha: 'old' } }, headSha: null }),
+  ]) {
+    assert.equal(r.act, 'skip')
+    assert.notEqual(r.deferred, true, `\`${r.code}\` is nothing to do, not a restart being held back`)
+  }
+})
+
+// ── The count, across sweeps ──────────────────────────────────────────────────────
+
+const held = (over = {}) => ({
+  root: '/repo', workspace: over.workspace, stamp: { short: 'aaa1111', startedAt: new Date().toISOString() },
+  ff: () => ({ ok: true, code: 'current', moved: false, from: 'newsha', to: 'newsha', branch: 'main', reason: 'already at `origin/main`' }),
+  marker: { state: 'live', pid: 87091, port: 7326, site: 'ops-dashboard', startedAt: new Date().toISOString() },
+  health: () => ({ inflight: 1, idleMs: 0, code: { sha: 'oldsha', short: 'oldsha1' } }),
+  restart: () => ({ ok: true, code: 'restarted', verified: true, serving: 'newsha', reason: 'the dashboard answered' }),
+  ...over,
+})
+
+test('consecutive deferrals accumulate on the record, so the next sweep can act on them', () => {
+  const ws = tmp()
+  const first = selfUpdate(held({ workspace: ws }))
+  assert.equal(first.consumers[0].deferrals, 1)
+  const second = selfUpdate(held({ workspace: ws }))
+  assert.equal(second.consumers[0].deferrals, 2)
+  assert.equal(JSON.parse(fs.readFileSync(recordPath(ws), 'utf8')).consumers[0].deferrals, 2)
+})
+
+test('and the count is what fires the bound on a live workspace, not a hand-set argument', () => {
+  const ws = tmp()
+  let acts = []
+  for (let i = 0; i <= DEFERRAL_LIMIT; i += 1) acts.push(selfUpdate(held({ workspace: ws })).consumers[0])
+  assert.deepEqual(acts.map((c) => c.act), [...Array(DEFERRAL_LIMIT).fill('skip'), 'restart'])
+  assert.equal(acts.at(-1).code, 'restarted')
+  assert.equal(acts.at(-1).deferrals, 0, 'a restart clears the count — the next hold starts from zero')
+})
+
+test('a record written before this change carries no count, and is read as zero rather than as missing', () => {
+  const ws = tmp()
+  fs.mkdirSync(path.dirname(recordPath(ws)), { recursive: true })
+  fs.writeFileSync(recordPath(ws), JSON.stringify({ consumers: [{ id: 'ops-dashboard', act: 'skip', code: 'busy' }] }))
+  assert.equal(selfUpdate(held({ workspace: ws })).consumers[0].deferrals, 1)
+})
+
+test('nothing to do clears the count — the hold ended, whether or not a restart happened', () => {
+  const ws = tmp()
+  selfUpdate(held({ workspace: ws }))
+  const clear = selfUpdate(held({ workspace: ws, health: () => ({ inflight: 0, idleMs: 10 * 60000, code: { sha: 'newsha' } }) }))
+  assert.equal(clear.consumers[0].code, 'already-current')
+  assert.equal(clear.consumers[0].deferrals, 0)
+})
+
+test('a locked sweep carries the count forward — it decided nothing, so it must reset nothing', () => {
+  const ws = tmp()
+  selfUpdate(held({ workspace: ws }))
+  selfUpdate(held({ workspace: ws }))
+  // A live lock belonging to a process that exists: this sweep gets no turn at all.
+  fs.writeFileSync(path.join(ws, '.claude', 'session-hub', 'cache', 'selfupdate.lock'),
+    JSON.stringify({ pid: process.pid, at: new Date().toISOString() }))
+  const locked = selfUpdate(held({ workspace: ws }))
+  assert.equal(locked.consumers[0].code, 'locked')
+  assert.equal(locked.consumers[0].deferrals, 2, 'resetting here would let a racing sweep hold the bound off forever')
+})
+
+// ── Proving the restart, without touching the page ────────────────────────────────
+
+const scriptAt = () => {
+  const root = tmp()
+  fs.mkdirSync(path.join(root, 'tools', 'ops-dashboard'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'tools', 'ops-dashboard', 'ops-dashboard.mjs'), '// present\n')
+  return root
+}
+
+test('the verification asks /healthz and NEVER the page — requesting the page is what caused this', () => {
+  const urls = []
+  restartDashboard({
+    root: scriptAt(), workspace: '/ws', pid: null, isAlive: () => false, sleep: () => {}, waitMs: 1000,
+    expect: 'newsha', spawnFn: () => ({ pid: 77, unref: () => {} }),
+    probe: (url) => { urls.push(url); return { status: 200, body: JSON.stringify({ pid: 77, code: { sha: 'newsha', short: 'newsha1' } }) } },
+  })
+  assert.ok(urls.length, 'it must probe something')
+  for (const u of urls) assert.match(u, /\/healthz$/, `${u} is page traffic — it resets the idle clock and seeds the next deferral`)
+})
+
+test('a 200 from a DIFFERENT pid is not a restart — the port answering proves only that something is on it', () => {
+  const killed = []
+  const r = restartDashboard({
+    root: scriptAt(), workspace: '/ws', pid: null, isAlive: () => true, sleep: () => {}, waitMs: 1000,
+    expect: 'newsha', spawnFn: () => ({ pid: 77, unref: () => {} }), kill: (pid, sig) => killed.push([pid, sig]),
+    probe: () => ({ status: 200, body: JSON.stringify({ pid: 20766, code: { sha: 'oldsha', short: 'oldsha1' } }) }),
+  })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'not-ours')
+  assert.match(r.reason, /20766/)
+  assert.deepEqual(killed, [[77, 'SIGTERM']], 'a replacement that never became the server must not be left running')
+})
+
+test('a replacement serving a commit other than the one it was restarted onto is a failure, not a success', () => {
+  const r = restartDashboard({
+    root: scriptAt(), workspace: '/ws', pid: null, isAlive: () => false, sleep: () => {}, waitMs: 1000,
+    expect: 'newsha', spawnFn: () => ({ pid: 77, unref: () => {} }),
+    probe: () => ({ status: 200, body: JSON.stringify({ pid: 77, code: { sha: 'oldsha', short: 'oldsha1' } }) }),
+  })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'wrong-build')
+})
+
+test('a verified restart names the process and the commit, so the claim can be checked afterwards', () => {
+  const r = restartDashboard({
+    root: scriptAt(), workspace: '/ws', pid: null, isAlive: () => false, sleep: () => {}, waitMs: 1000,
+    expect: 'newsha', spawnFn: () => ({ pid: 77, unref: () => {} }),
+    probe: () => ({ status: 200, body: JSON.stringify({ pid: 77, code: { sha: 'newsha', short: 'newsha1' } }) }),
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.verified, true)
+  assert.equal(r.servingPid, 77)
+  assert.equal(r.serving, 'newsha1')
+})
+
+test('a health answer with no pid cannot verify identity, and says so instead of claiming it', () => {
+  const r = restartDashboard({
+    root: scriptAt(), workspace: '/ws', pid: null, isAlive: () => false, sleep: () => {}, waitMs: 1000,
+    expect: null, spawnFn: () => ({ pid: 77, unref: () => {} }),
+    probe: () => ({ status: 200, body: JSON.stringify({ ok: true }) }),
+  })
+  assert.equal(r.ok, true)
+  assert.equal(r.verified, false, 'unverified must not read as verified')
+  assert.match(r.reason, /could not be confirmed/)
+})
+
+// ── What the page says ────────────────────────────────────────────────────────────
+
+test('a deferral renders with its count, and never renders as a failure', () => {
+  const out = renderSelfUpdate({
+    sweep: { short: 'abc1234', startedAt: new Date().toISOString() },
+    checkout: { ok: true, code: 'moved', moved: true, branch: 'main', to: 'deadbeef', reason: 'fast-forwarded 2 commits to `origin/main`' },
+    consumers: [{ id: 'ops-dashboard', act: 'skip', ok: true, code: 'busy', deferred: true, deferrals: 2,
+                  reason: '1 request is in flight — a restart now would kill it' }],
+  })
+  assert.match(out, /deferral 2 of 3/)
+  assert.doesNotMatch(out, /FAILED|BROKEN/, 'deferred and failed must never render the same')
+})
+
+test('a forced restart says it was forced, and how long it had been held off', () => {
+  const out = renderSelfUpdate({
+    sweep: { short: 'abc1234', startedAt: new Date().toISOString() },
+    checkout: { ok: true, code: 'moved', moved: true, branch: 'main', to: 'deadbeef', reason: 'fast-forwarded 2 commits' },
+    consumers: [{ id: 'ops-dashboard', act: 'restart', ok: true, code: 'restarted', forced: true, serving: 'deadbee',
+                  reason: 'the dashboard answered as pid 77 serving `deadbee`' }],
+  })
+  assert.match(out, /ops-dashboard: restarted/)
+})
+
+test('every headline this section can emit matches the alarm vocabulary it is checked against', () => {
+  // Two workers had headlines silently swallowed on 2026-08-18 because they were
+  // written to match a copy of the regex rather than the regex. This asserts against
+  // the imported one, so a headline that cannot render fails here instead of there.
+  const emitted = [
+    renderSelfUpdate(null),
+    renderSelfUpdate({ sweep: null, checkout: { ok: false, code: 'dirty', reason: 'the checkout has uncommitted changes' }, consumers: [] }),
+    renderSelfUpdate({ sweep: null, checkout: { ok: true, code: 'current', branch: 'main', to: 'a' },
+                       consumers: [{ id: 'ops-dashboard', act: 'restart', ok: false, code: 'not-ours', reason: 'pid 20766 is answering, not the replacement' }] }),
+  ].join('\n')
+  const headlines = emitted.match(/\*\*[^*]+\*\*/g) ?? []
+  assert.ok(headlines.length >= 3, 'the three failure headlines must all be reachable')
+  for (const h of headlines) assert.match(h, ALARM_RE, `${h} would render as ordinary grey text`)
 })
