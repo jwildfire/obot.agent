@@ -9,10 +9,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+// Every date on this page is a LOCAL day now (jwildfire/obot.agent#174), so these
+// tests have to know which local. Pinned rather than inherited: this machine runs at
+// UTC-04:00 and CI runs at UTC, and a suite that passes on one and fails on the other
+// would be testing the runner instead of the page. -04:00 is chosen because it is his
+// zone, so the fixtures below are the same rows he is looking at.
+process.env.TZ = 'America/New_York';
+
 import { buildRoster, usageIndex } from '../lib/roster.mjs';
+import { STANDING_ROLES } from '../lib/roster-view.mjs';
 import {
-  TABLE_CSS, TABLE_JS, agentsTableHtml, buildFilters, createdOf, facetsOf, modelText, periodCutoffs,
-  reposOf, tableRows, unattributedRow,
+  TABLE_CSS, TABLE_JS, agentsTableHtml, buildFilters, clip, createdOf, facetsOf, lastOf, localZone,
+  modelText, periodCutoffs, reposOf, TAG_MAX, tableRows, taskOf, unattributedRow,
 } from '../lib/roster-table.mjs';
 import { sessionShell } from '../lib/render.mjs';
 
@@ -367,21 +375,26 @@ test('the pre-ledger row reads unknown, with no date anywhere in what it shows',
   assert.match(pre, /data-created=""/);
 });
 
-test('the created cell carries the day, and the stamp it came from verbatim', () => {
+test('the created cell carries the local day and time, and the stamp it came from verbatim', () => {
   // Verbatim, offset included. Reformatting a local stamp into UTC — or the reverse —
-  // is the same defect as the column mixing clocks, one row at a time.
+  // is the same defect as the column mixing clocks, one row at a time. So the cell
+  // shows his clock and the tooltip keeps the record's own characters, and the test
+  // holds both: 07:40:55+01:00 is 02:40 at UTC-04:00, and the ledger's own text is
+  // still there to be checked against.
   const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00' })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.equal(text(td(agents(html), 'c-created')), '2026-08-16');
+  const cell = td(agents(html), 'c-created');
+  assert.match(cell, /<span class="dt-d">2026-08-16<\/span>/);
+  assert.match(cell, /<span class="dt-t">02:40<\/span>/);
   assert.match(html, /data-created="\d{10,}"/);
-  assert.match(html, /title="[^"]*claimed 2026-08-16T07:40:55\+01:00/);
+  assert.match(html, /title="[^"]*written as 2026-08-16T07:40:55\+01:00/);
 });
 
 test('the evidence row names the record that dated the agent, for the screen with no hover', () => {
   // A tooltip is unreachable on a phone, and the phone is where he reads this.
   const model = { rows: [row({ label: '\u{1F3A9}\u{1F916} obot-prime', startedAt: '2026-08-15T09:00:00.000Z' })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.match(html, /<span class="k">created<\/span>[^<]*first session started 2026-08-15T09:00:00Z/);
+  assert.match(html, /<span class="k">created<\/span>[^<]*first session started 2026-08-15 05:00 UTC-04:00, written as 2026-08-15T09:00:00Z/);
 });
 
 test('the page states its own sort order in the markup, before any script runs', () => {
@@ -484,8 +497,8 @@ test('on a phone the sort key rides in the pinned column, and says the same date
   // sideways swipe. Sorting by a column he cannot see reads as no order at all.
   const model = { rows: [row({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00' })], unattributed: null };
   const html = agentsTableHtml(model, { now: NOW });
-  assert.match(td(agents(html), 'c-name'), /class="ag-born">created 2026-08-16</);
-  assert.equal(text(td(agents(html), 'c-created')), '2026-08-16');
+  assert.match(td(agents(html), 'c-name'), /class="ag-born">created 2026-08-16 02:40</);
+  assert.match(td(agents(html), 'c-created'), /2026-08-16<\/span><span class="dt-t">02:40</);
   // Hidden on a desktop, where the column itself is on screen: the same date twice in
   // one row is noise, not redundancy.
   assert.match(TABLE_CSS, /\.ag-born \{ display:none; \}/);
@@ -494,4 +507,269 @@ test('on a phone the sort key rides in the pinned column, and says the same date
 test('an undated row says so in the pinned column too, rather than going blank', () => {
   const model = { rows: [row({ id: 'W0001' })], unattributed: null };
   assert.match(td(agents(agentsTableHtml(model, { now: NOW })), 'c-name'), /ag-born">created unknown</);
+});
+
+
+// ---- one day boundary, his (jwildfire/obot.agent#178, closing #174) --------
+//
+// The failure these hold shut is a page that dates a row correctly in one column and
+// wrongly in the one beside it, with nothing erroring. Every date, time and period
+// cutoff turns over at the same local midnight now; a test that only checked the
+// displayed date would let a filter keep a UTC boundary and silently drop the rows it
+// had just dated right.
+
+const at = (html, cls) => td(agents(html), cls);
+const one = (o) => ({ rows: [row(o)], unattributed: null });
+
+test('an evening stamp keeps his day, rather than becoming tomorrow in UTC', () => {
+  // 2026-08-18T02:00Z is 22:00 on the 17th at UTC-04:00. This is the live case rather
+  // than a constructed one: every agent claimed on his evening of the 17th read as the
+  // 18th, which is #174 seen from the other end of the day it was reported from.
+  const f = facetsOf(row({ id: 'W0001', claimedAt: '2026-08-18T02:00:00.000Z' }));
+  assert.equal(f.createdDay, '2026-08-17');
+});
+
+test('a session that ran at 00:30 local reads as today, and Today includes it', () => {
+  // #174's own done-when, both halves in one test on purpose. The displayed day and
+  // the period cutoff have to turn over at the same midnight, or the filter drops the
+  // row the column just dated correctly — and a row missing from a filtered list is
+  // the one failure on this page that looks like no failure at all.
+  const now = new Date('2026-08-17T12:00:00Z');              // 08:00 local
+  const ranAt = '2026-08-17T04:30:00.000Z';                  // 00:30 local
+  const f = facetsOf(row({ id: 'W0001', claimedAt: ranAt, lastAt: ranAt }));
+  const cutoff = periodCutoffs(now).d1;
+  assert.equal(f.createdDay, '2026-08-17');
+  assert.equal(f.lastDay, '2026-08-17');
+  assert.equal(cutoff, '2026-08-17');
+  assert.ok(f.lastDay >= cutoff, 'the 1-day period must include a session that ran at 00:30 local');
+});
+
+test('the two records that write different clocks land on one day and one clock', () => {
+  // The trap this column was already bitten by once: the worker ledger writes local
+  // time with an offset, the harness writes UTC. Slicing both strings would print
+  // 07:40 beside 06:40 under one heading and nothing would error. Same instant, two
+  // spellings, one answer — and the instant, not the characters, is what says so.
+  const ledger = facetsOf(row({ id: 'W0001', claimedAt: '2026-08-17T07:40:55+01:00' }));
+  const harness = facetsOf(row({ label: 'probe', startedAt: '2026-08-17T06:40:55.000Z' }));
+  assert.equal(ledger.createdDay, harness.createdDay);
+  assert.equal(ledger.createdTs, harness.createdTs);
+});
+
+test('the page names the zone it is speaking, on the columns and at the foot', () => {
+  // A timestamp whose zone is ambiguous is worse than a date: it invites a wrong
+  // inference rather than no inference. Read at render, never hardcoded — this
+  // machine's own offset moved from +01:00 to -04:00 inside one day of the ledger.
+  const html = agentsTableHtml(one({ id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00' }), { now: NOW });
+  assert.match(html, /Created \(UTC-04:00\)/);
+  assert.match(html, /Last active \(UTC-04:00\)/);
+  assert.match(html, /America\/New_York \(UTC-04:00\)/);
+  assert.equal(localZone(NOW).offset, 'UTC-04:00');
+});
+
+test('times are absolute, because a static render cannot keep a relative one true', () => {
+  const html = agentsTableHtml(one({
+    id: 'W0001', claimedAt: '2026-08-16T07:40:55+01:00', lastAt: '2026-08-17T09:00:00.000Z',
+  }), { now: NOW });
+  assert.match(at(html, 'c-last'), /<span class="dt-t">05:00<\/span>/);
+  assert.doesNotMatch(at(html, 'c-created'), / ago|just now/i);
+  assert.doesNotMatch(at(html, 'c-last'), / ago|just now/i);
+});
+
+test('a row nothing dates gains no plausible time to go with its unknown day', () => {
+  const html = agentsTableHtml(one({ id: 'W0001' }), { now: NOW });
+  assert.match(at(html, 'c-created'), /unknown/);
+  assert.doesNotMatch(at(html, 'c-created'), /\d\d:\d\d/);
+  assert.doesNotMatch(at(html, 'c-last'), /\d\d:\d\d/);
+});
+
+test('a priced UTC day never outranks an instant, however it sorts as a string', () => {
+  // Found on the live page rather than reasoned about. The priced feed counts UTC
+  // days; the column beside it counts local ones. Preferring the priced day whenever
+  // it sorted higher as a string put "2026-08-18, no time recorded" against three
+  // sessions that were running as the page rendered, on his evening of the 17th —
+  // the two-clock trap one level up from the cell it was fixed in.
+  const l = lastOf(row({ id: 'W0001', lastAt: '2026-08-18T02:00:00.000Z', days: ['2026-08-18'] }));
+  assert.equal(l.source, 'record');
+  assert.equal(l.day, '2026-08-17');
+  assert.equal(at(agentsTableHtml(one({ id: 'W0001', lastAt: '2026-08-18T02:00:00.000Z', days: ['2026-08-18'] }), { now: NOW }), 'c-last'),
+    at(agentsTableHtml(one({ id: 'W0001', lastAt: '2026-08-18T02:00:00.000Z' }), { now: NOW }), 'c-last'));
+});
+
+test('the priced day is used only when nothing on this machine timed the agent', () => {
+  // Then it is all there is, and it shows a date with no clock rather than a clock
+  // for a moment nothing recorded.
+  const o = { id: 'W0001', lastAt: null, days: ['2026-08-15', '2026-08-16'] };
+  const l = lastOf(row(o));
+  assert.equal(l.source, 'priced');
+  assert.equal(l.day, '2026-08-16');
+  assert.equal(l.at, null);
+  const html = agentsTableHtml(one(o), { now: NOW });
+  assert.match(at(html, 'c-last'), /2026-08-16/);
+  assert.match(at(html, 'c-last'), /no time recorded/);
+});
+
+test('a transport failure is not the agent\'s account of its own work', () => {
+  // Also found on the live page: fleet's row read "closed out: API Error: Unable to
+  // connect to API: SSL certificate hostname mismatch", under a label saying that was
+  // the agent's own account of what it finished. The agent accounted for nothing; a
+  // connection failed, and the status column beside it already read `died`. It stays
+  // on the page, on expand, labelled as the harness rather than the agent.
+  const o = {
+    id: 'W0001',
+    status: { status: 'died', note: 'stopped — ended before it closed out' },
+    ended: 'API Error: Unable to connect to API: SSL certificate hostname mismatch',
+  };
+  assert.equal(taskOf(row(o)), null);
+  const html = agentsTableHtml(one(o), { now: NOW });
+  assert.doesNotMatch(at(html, 'c-task'), /API Error/);
+  assert.match(html, /<li><span class="k">ended on<\/span> API Error[^<]*<span class="dim">— the harness, not the agent/);
+});
+
+// ---- the task tag (jwildfire/obot.agent#179) -------------------------------
+//
+// @jwildfire: "Can't really tell what the agents are doing... would be nice for each
+// agent to have a short tag (<100 char) describing it's task in the table and then a
+// longer 1-2 sentence summary on expand."
+//
+// The failure these hold shut is a tag that reads plausibly and describes the wrong
+// thing, which is worse than a blank one: the slug rendered as a description, a
+// close-out read as a live status, or template text rendered as either.
+
+const jline = (text, o = {}) => ({ text, at: '2026-08-17T09:30:00.000Z', source: 'job record', ...o });
+const verdict = (produced) => impact({ verdicts: [{ verdict: 'confirmed', produced, note: '' }], empty: false });
+const tagOf = (html) => /<span class="tk tk-[\w-]+"[^>]*><span class="tk-k">[^<]*<\/span>([^<]*)<\/span>/.exec(at(html, 'c-task'))?.[1] ?? null;
+
+test('a live agent says what it is doing now', () => {
+  const t = taskOf(row({
+    id: 'W0001', status: { status: 'running', note: '' },
+    line: jline('resolving merge conflicts: #164 landed'),
+  }));
+  assert.equal(t.kind, 'doing');
+  assert.equal(t.text, 'resolving merge conflicts: #164 landed');
+});
+
+test('a finished agent says what it did, from the record that was checked against GitHub', () => {
+  // Two authored sentences exist for a finished agent and they are not equally good:
+  // the delivery record's is the Navigator's, written at close-out and verified, and
+  // the job record's is the agent's own account of itself.
+  const t = taskOf(row({
+    id: 'W0001',
+    line: jline('shipped and confirmed'),
+    impact: verdict('obot.agent#171 merged — pinning live in main'),
+  }));
+  assert.equal(t.kind, 'delivered');
+  assert.match(t.text, /obot\.agent#171 merged/);
+});
+
+test('an unjudged finished agent falls back to its own close-out line', () => {
+  const t = taskOf(row({ id: 'W0001', line: jline('root cause found: session-reviews chaining logic; fix in PR #163, CI green') }));
+  assert.equal(t.kind, 'closed');
+  assert.match(t.text, /root cause found/);
+});
+
+test('an agent with no session at all still says what it was sent to do', () => {
+  // The honest fallback, and it already exists: 33 of 50 ledger claims carry a
+  // one-line task under 100 characters. An id claimed that never launched has nothing
+  // else, and "no session ever ran" belongs in the status column, not this one.
+  const t = taskOf(row({
+    id: 'W0005', task: 'ops-answers id defect + blocked-fleet detection (oa#180, #181)',
+    status: { status: 'not launched', note: 'burned, not lost' },
+  }));
+  assert.equal(t.kind, 'dispatched');
+  assert.match(t.text, /ops-answers id defect/);
+});
+
+test('the tag is never the worker slug', () => {
+  // "mergegate" and "landseven" are addresses, not descriptions, and a table of them
+  // is what this change exists to remove.
+  const o = { id: 'W0028', slug: 'mergegate', task: 'root-cause the merge gate that stalled two RCs' };
+  assert.match(taskOf(row(o)).text, /root-cause the merge gate/);
+  assert.doesNotMatch(at(agentsTableHtml(one(o), { now: NOW }), 'c-task'), /mergegate/);
+});
+
+test('a row no record describes gets a blank tag and a reason, never a guess', () => {
+  assert.equal(taskOf(row({ id: 'W0001' })), null);
+  const html = agentsTableHtml(one({ id: 'W0001' }), { now: NOW });
+  assert.match(at(html, 'c-task'), /class="tk-none"/);
+  assert.match(html, /no task recorded/);
+});
+
+test('the tag holds under 100 characters and is cut at a word, not mid-word', () => {
+  const long = 'milestone backfill complete across all 17 published releases in 4 repos — 8 milestones created, 9 closed, 52 issues attached';
+  const t = taskOf(row({ id: 'W0001', impact: verdict(long) }));
+  assert.ok(t.text.length <= 100, `tag was ${t.text.length} characters`);
+  assert.match(t.text, /\u2026$/);
+  assert.ok(long.startsWith(t.text.slice(0, -1)), 'the clipped tag must be a prefix of the sentence it came from');
+  assert.equal(clip('short enough').length, 12);
+});
+
+test('the row carries the tag and the expansion carries the whole sentence', () => {
+  const long = 'obot.agent#171 merged 07:13:47Z and #175 merged 07:15:49Z; obot.agent#169 closed — pinning is live with the standing roles pinned by default';
+  const html = agentsTableHtml(one({ id: 'W0001', impact: verdict(long) }), { now: NOW });
+  const tag = tagOf(html);
+  assert.ok(tag.length <= 100);
+  assert.doesNotMatch(tag, /standing roles pinned by default/);
+  assert.match(html, /<li><span class="k">delivered<\/span> [^<]*standing roles pinned by default/);
+});
+
+test('the expansion says what it was sent to do as well as what it did', () => {
+  // What an agent was dispatched to do and what it then did are different facts, and
+  // the row only ever has room for one of them.
+  const html = agentsTableHtml(one({
+    id: 'W0001', task: 'times + one local day boundary on the Agents tab',
+    impact: verdict('obot.agent#178 merged'),
+  }), { now: NOW });
+  assert.match(html, /<li><span class="k">delivered<\/span> obot\.agent#178 merged/);
+  assert.match(html, /<li><span class="k">dispatched to<\/span> times \+ one local day boundary/);
+});
+
+test('roadmap impact and the closeout verdict expand, and stay filters', () => {
+  // @jwildfire: "Roadmap impact can be shown on expand." The verdict came with it —
+  // it is the delivery record's judgement of the very references impact listed, and a
+  // Confirmed chip with nothing beside it to confirm is not a fact anyone can act on.
+  const html = agentsTableHtml(one({
+    id: 'W0001',
+    impact: impact({ moved: [ref('hub#195')], verdicts: [{ verdict: 'confirmed', produced: 'obot.agent#171 merged', note: '' }], empty: false }),
+  }), { now: NOW });
+  assert.doesNotMatch(html, /<th[^>]*data-sort="impact"/);
+  assert.doesNotMatch(html, /<th[^>]*data-sort="verdict"/);
+  assert.doesNotMatch(html, /class="c-im"|class="c-vd"/);
+  assert.match(html, /<li><span class="k">moved<\/span>[^<]*<[^>]*>hub#195/);
+  assert.match(html, /<li><span class="k">verdict confirmed<\/span>/);
+  assert.match(html, /data-group="verdict"/);
+  assert.match(html, /data-group="produced"/);
+});
+
+test('an agent that moved nothing keeps its three separate silences on expand', () => {
+  // Collapsing them told a lie about two, and that stays true in an expansion: a
+  // standing session has no deliverable to have moved, and an agent still working has
+  // not finished producing anything.
+  const running = agentsTableHtml(one({ id: 'W0001', status: { status: 'running', note: 'live' } }), { now: NOW });
+  assert.match(running, /still working \u2014 nothing to judge yet/);
+  const standing = agentsTableHtml(one({ label: '\u{1F3A9}\u{1F916} obot-prime' }), { now: NOW });
+  assert.match(standing, /not judged on delivery/);
+  const done = agentsTableHtml(one({ id: 'W0001' }), { now: NOW });
+  assert.match(done, /nothing moved \u2014 the delivery record has no reference/);
+});
+
+test('the expansion spans exactly the columns the header declares', () => {
+  // A column added or removed without moving COLS with it leaves the evidence row
+  // short or long by one cell, which does not error and does not look wrong until the
+  // table is read on a phone.
+  const html = agentsTableHtml(one({ id: 'W0001' }), { now: NOW });
+  const headers = (html.match(/<th[^>]*data-sort=/g) ?? []).length;
+  const spans = [...html.matchAll(/colspan="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.ok(spans.length > 0, 'there should be at least one spanning row to check');
+  assert.ok(spans.every((n) => n === headers), `header count ${headers} vs colspans ${spans.join(',')}`);
+});
+
+test('every standing role has a resting line short enough to be a task tag', () => {
+  // A pinned role with no session renders its `resting` line as its task tag, so that
+  // string is now a table cell rather than a sentence in a tooltip. Enforced rather
+  // than trusted, at 👯🤖 W0038's suggestion: one of the three was 101 characters and
+  // would have shipped clipped the day this column landed, and the next role will be
+  // written by someone who never saw that exchange.
+  for (const r of STANDING_ROLES) {
+    assert.ok(r.resting.length <= TAG_MAX, `${r.role} resting line is ${r.resting.length} characters`);
+  }
 });

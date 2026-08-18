@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import {
   buildRoster, collectRoster, currentLabels, impactOf, modelFlag, parseDelivery, parseWorkers,
-  readJobs, refUrl, rosterMarkdown, statusOf, timelineClose, usageIndex,
+  cleanDetail, isHarnessError, jobError, jobLine, readJobs, refUrl, rosterMarkdown, statusOf, timelineClose, usageIndex,
 } from '../lib/roster.mjs';
 import {
   agentRow, groupRoster, kindOf, rosterHtml,
@@ -883,4 +883,105 @@ test('an id that never launched has no model, and the roster says nothing about 
     workers: parseWorkers(JOURNAL), jobs: [], usage: usageIndex(null), delivery: [], now: NOW,
   });
   for (const r of m.rows) assert.deepEqual(r.models, []);
+});
+
+
+// ---- what an agent says it is doing (jwildfire/obot.agent#177, #179) -------
+//
+// The harness's `detail` field is the best short description of what an agent is
+// doing that exists on this machine, and it is also where the sibling briefing's
+// opening HTML comment lands — on sixteen entries across ten jobs, and NOT inertly:
+// one of those entries re-asserted `blocked` forty-five seconds before a clean
+// close-out. Any surface that renders the field unchecked renders a template as a
+// session's status, and the Agents tab is one of those surfaces.
+
+const BRIEFING = '<!-- how to use: this is the briefing a lead session hands a spawned sibling. Copy the block below, fill in every `{…}` placeholder -->';
+
+test('template text is refused as a detail, rather than trimmed into a shorter lie', () => {
+  // Null, not a cleaned-up string: there is no salvageable status inside a template,
+  // and half a briefing rendered as a task is the same defect one character shorter.
+  assert.equal(cleanDetail(BRIEFING), null);
+  assert.equal(cleanDetail('<!-- anything at all'), null);
+  assert.equal(cleanDetail('## Your identity'), null);
+  assert.equal(cleanDetail('You are worker {W-id} and it is yours permanently'), null);
+});
+
+test('the state word written as its own detail is not a description of anything', () => {
+  // Every stopped job carries `detail: "stopped"`. Rendered as a task tag that is the
+  // status column's own word, printed twice, in the column that was added to say
+  // something the status column could not.
+  assert.equal(cleanDetail('stopped'), null);
+  assert.equal(cleanDetail('  DONE '), null);
+  assert.equal(cleanDetail('resolving merge conflicts: #164 landed'), 'resolving merge conflicts: #164 landed');
+});
+
+test('the timeline keeps the last real line, not merely the last one', () => {
+  // A session that died on a limit writes the limit message last, and a stopped
+  // session leaves only the state word behind — so reading the newest entry would
+  // give a status column sentence to a task column, or nothing at all. This is what
+  // lets a stopped job still say what it was doing when it stopped.
+  const t = timelineClose([
+    JSON.stringify({ at: '2026-08-17T07:34:26.572Z', state: 'working', detail: 'Reading obot.agent issue 174' }),
+    JSON.stringify({ at: '2026-08-17T07:35:54.962Z', state: 'working', detail: 'reading spawn briefing template' }),
+    JSON.stringify({ at: '2026-08-17T07:36:40.968Z', state: 'done', detail: BRIEFING }),
+    JSON.stringify({ at: '2026-08-17T07:37:05.956Z', state: 'stopped', detail: 'stopped' }),
+  ].join('\n'));
+  assert.equal(t.last, 'stopped');
+  assert.equal(t.detail, 'reading spawn briefing template');
+  assert.equal(t.detailAt, '2026-08-17T07:35:54.962Z');
+});
+
+test('a finished job speaks with its own close-out line, a stopped one with its timeline', () => {
+  const done = jobLine({
+    state: 'done', detail: 'obot.agent#169 merged — pinning live in main (#171, #175)',
+    updatedAt: '2026-08-17T08:17:00.000Z', timeline: { detail: 'wiring tests + cycle evidence' },
+  });
+  assert.equal(done.source, 'job record');
+  assert.match(done.text, /pinning live in main/);
+
+  const stopped = jobLine({
+    state: 'stopped', detail: 'stopped', updatedAt: '2026-08-17T08:20:00.000Z',
+    timeline: { detail: 'wiring tests + cycle evidence', detailAt: '2026-08-17T08:19:00.000Z' },
+  });
+  assert.equal(stopped.source, 'job timeline');
+  assert.equal(stopped.text, 'wiring tests + cycle evidence');
+});
+
+test('a job whose every line is template text speaks not at all', () => {
+  // A blank tag that says why is honest. A tag reading "how to use: this is the
+  // briefing a lead session hands a spawned sibling" is the worst possible version of
+  // this column, on the surface he has just started trusting.
+  const j = jobLine({ state: 'done', detail: BRIEFING, timeline: { detail: null } });
+  assert.equal(j, null);
+});
+
+test('the transport talking about itself is held apart from the agent talking about its work', () => {
+  // Narrow and anchored on purpose: a worker's close-out sentence may well name an
+  // error it found and fixed, and a loose match on the word would take that away.
+  assert.ok(isHarnessError('API Error: Unable to connect to API: SSL certificate hostname mismatch'));
+  assert.ok(isHarnessError("You've hit your session limit · resets 10:20am (Europe/London)"));
+  assert.ok(!isHarnessError('root cause found: session-reviews chaining logic; fix in PR #163, CI green'));
+  assert.ok(!isHarnessError('fixed the API error handling in the wake channel'));
+});
+
+test('a session ended by the transport reports the failure, and claims no work', () => {
+  const job = {
+    state: 'stopped', detail: 'stopped', updatedAt: '2026-08-17T13:52:00.000Z',
+    timeline: {
+      detail: 'checking the trigger condition',
+      detailAt: '2026-08-17T13:50:00.000Z',
+      error: 'API Error: Unable to connect to API: SSL certificate hostname mismatch',
+    },
+  };
+  assert.equal(jobLine(job).text, 'checking the trigger condition');
+  assert.match(jobError(job), /^API Error/);
+});
+
+test('an error is never the last real line, however late it arrives', () => {
+  const t = timelineClose([
+    JSON.stringify({ at: '2026-08-17T13:50:00.000Z', state: 'working', detail: 'checking the trigger condition' }),
+    JSON.stringify({ at: '2026-08-17T13:51:32.000Z', state: 'stopped', detail: 'API Error: Unable to connect to API' }),
+  ].join('\n'));
+  assert.equal(t.detail, 'checking the trigger condition');
+  assert.match(t.error, /^API Error/);
 });

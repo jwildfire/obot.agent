@@ -89,7 +89,11 @@ export const STANDING_ROLES = [
     name: '\u{1F6A6}\u{1F916} obot-fleet',
     short: 'fleet',
     role: 'the fleet manager',
-    resting: 'not running — it launches when a condition fires and exits, so this is its resting state, not a fault',
+    // 101 characters, and the Agents tab now renders this line as a task tag with a
+    // 100-character ceiling (obot.agent#179) — so it shipped clipped by one word. The
+    // shortened text is 👯🤖 W0038's own, agreed in advance of its rename in #182,
+    // so that rebase carries one line rather than a conflict.
+    resting: 'not running — it launches when a condition fires and exits, so this is its resting state',
   },
 ];
 

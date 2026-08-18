@@ -78,26 +78,72 @@ export const PERIODS = [
   { value: 'd30', label: 'Last 30 days', days: 30 },
 ];
 
-const dayString = (d) => d.toISOString().slice(0, 10);
+const pad = (n) => String(n).padStart(2, '0');
 
 /**
- * The day a stamp falls on, from the instant rather than from the characters.
+ * The one day boundary on this page: his, not either record's.
+ *
+ * Every date here used to be a UTC day, so between midnight and 01:00 local a row
+ * read as yesterday — and the rows it misdated were the overnight ones this page
+ * exists to report on (jwildfire/obot.agent#174). These two build a day and a clock
+ * out of the local calendar, and every date, time and period cutoff below goes
+ * through them, so there is one boundary rather than one per column.
+ */
+const dayString = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const clockString = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+/**
+ * The zone the page was rendered in, named rather than implied.
+ *
+ * A timestamp whose zone is ambiguous is worse than a date, because it invites a
+ * wrong inference rather than no inference — and this system genuinely mixes clocks:
+ * the worker ledger writes local time with an offset, the harness writes UTC, the
+ * priced feed counts UTC days. So the page says which one it is speaking, on the
+ * column header and at the foot.
+ *
+ * Read at render, never hardcoded. The machine's own offset moved from +01:00 to
+ * -04:00 inside one day of the ledger this reads, and a zone baked into the source
+ * would have been wrong by five hours without anything erroring.
+ */
+export function localZone(now = new Date()) {
+  let name = '';
+  try { name = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { name = ''; }
+  const mins = -now.getTimezoneOffset();
+  const sign = mins < 0 ? '-' : '+';
+  const abs = Math.abs(mins);
+  const offset = `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return { name, offset, label: name ? `${name} (${offset})` : offset };
+}
+
+/**
+ * The local day a stamp falls on, from the instant rather than from the characters.
  *
  * The two records that date an agent do not write the same clock: the worker ledger
  * writes local time with its offset (`2026-08-17T07:40:55+01:00`) and the harness
  * writes UTC (`2026-08-17T06:40:55.129Z`). Slicing the string would print 07:40 next
- * to 06:40 for one moment, so both go through `Date.parse` and come out as the UTC
- * day the rest of this page already speaks — `days`, `lastDay` and the period cutoffs
- * are all UTC days, and a second date semantics in one table is worse than the
- * hour it would gain.
+ * to 06:40 for one moment and nothing would error, so both go through `Date.parse`
+ * and come out on one calendar.
  */
 const isoDay = (iso) => {
   const t = Date.parse(iso);
   return Number.isNaN(t) ? '' : dayString(new Date(t));
 };
 
-// Milliseconds are noise in a stamp a human reads; the offset is not, and stays.
+/** The local wall clock of an instant, `HH:MM`, or '' if nothing parses. */
+const isoClock = (iso) => {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? '' : clockString(new Date(t));
+};
+
+// Milliseconds are noise in a stamp a human reads; the offset is not, and stays —
+// this is the record's own characters, kept verbatim so provenance survives.
 const stamp = (iso) => String(iso).replace(/\.\d+/, '');
+
+/** A record's stamp as this page reads it: the local day and clock, then the zone. */
+const localStamp = (iso, zone) => {
+  const day = isoDay(iso);
+  return day ? `${day} ${isoClock(iso)} ${zone.offset}` : '';
+};
 
 /**
  * When an agent came into existence, and which record says so.
@@ -130,13 +176,13 @@ export function createdOf(row) {
 }
 
 /** What dated this row, in a sentence, for the cell's tooltip and its evidence. */
-export function createdText(row) {
+export function createdText(row, zone = localZone()) {
   const { at, source } = createdOf(row);
   if (source === 'claim') {
-    return `worker id claimed ${stamp(at)}${row.task ? ` for ${row.task}` : ''}`;
+    return `worker id claimed ${localStamp(at, zone)}, written as ${stamp(at)}${row.task ? ` for ${row.task}` : ''}`;
   }
   if (source === 'session') {
-    return `first session started ${stamp(at)} — this agent never claimed a worker id, so the harness is the only record that dates it`;
+    return `first session started ${localStamp(at, zone)}, written as ${stamp(at)} — this agent never claimed a worker id, so the harness is the only record that dates it`;
   }
   if (row.synthetic) {
     return 'unknown — these agents ran before worker ids existed, and nothing recorded when any one of them started';
@@ -145,15 +191,152 @@ export function createdText(row) {
   return `unknown — no id claim and no session record on this machine${first ? `; the earliest day it was priced on is ${first}, which is not when it started` : ''}`;
 }
 
-/** The cutoff day for each period, resolved once at render so no client does date maths. */
+/**
+ * The cutoff day for each period, resolved once at render so no client does date maths.
+ *
+ * Counted on the local calendar rather than by subtracting multiples of 24 hours: a
+ * period boundary and a displayed date that disagree by an hour is the same defect
+ * as a displayed date and a real one that do, one layer further in. `Today` is since
+ * local midnight, which is what makes a session that ran at 00:30 fall inside it.
+ */
 export function periodCutoffs(now = new Date()) {
   const out = {};
   for (const p of PERIODS) {
     if (!p.days) continue;
-    const t = new Date(now.getTime() - (p.days - 1) * 86400000);
-    out[p.value] = dayString(t);
+    out[p.value] = dayString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (p.days - 1)));
   }
   return out;
+}
+
+/**
+ * When this agent was last seen, and by which record.
+ *
+ * `lastAt` is an instant — the newest of the harness's session stamps and the
+ * ledger's claim — so it can carry a clock. The priced feed cannot: it counts UTC
+ * days and keeps no instants, so on the rare row whose priced activity runs past the
+ * last harness stamp the day is all there is, and that row shows a date with no time
+ * rather than a clock for a moment nothing recorded.
+ */
+export function lastOf(row) {
+  const ts = row.lastAt ? Date.parse(row.lastAt) : NaN;
+  if (!Number.isNaN(ts)) return { at: row.lastAt, ts, day: dayString(new Date(ts)), source: 'record' };
+  // Only when nothing timed this agent at all. The priced days cannot be compared
+  // with the day above them: they are UTC days and that one is local, so `later` is
+  // not a question those two can answer about each other. Preferring the priced day
+  // whenever it sorted higher as a string is the two-clock trap one level up, and it
+  // shipped for one render — every session running on his evening read as tomorrow,
+  // with no time, while it was still working.
+  const pricedDay = (row.days ?? []).at(-1) ?? '';
+  if (pricedDay) return { at: null, ts: null, day: pricedDay, source: 'priced' };
+  return { at: null, ts: null, day: '', source: 'none' };
+}
+
+/** What the last-active cell knows, and how — the sentence its tooltip carries. */
+export function lastText(row, zone = localZone()) {
+  const l = lastOf(row);
+  if (l.source === 'record') {
+    return `last seen ${localStamp(l.at, zone)} — the newest stamp on this agent across the harness job record and the worker ledger, written as ${stamp(l.at)}`;
+  }
+  if (l.source === 'priced') {
+    return `last priced on ${l.day}, a UTC day from the shared usage feed — nothing on this machine timed this agent, and that feed keeps no instants, so this row has a date and no clock`;
+  }
+  if (row.resting) return 'never — this role has no session on this machine at all';
+  return 'unknown — no session stamp and no priced day for this agent';
+}
+
+export const TAG_MAX = 100;
+const SUMMARY_MAX = 300;
+
+/**
+ * A tag that fits a table cell, cut at a word rather than mid-word.
+ *
+ * 100 characters is his number and it is a hard ceiling, not a target: a tag that
+ * overflows its column is a tag that pushed the table sideways on a phone.
+ */
+export function clip(text, n = TAG_MAX) {
+  const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(0, n - 1);
+  const sp = cut.lastIndexOf(' ');
+  const kept = sp > n * 0.55 ? cut.slice(0, sp) : cut;
+  return `${kept.replace(/[\s,;:.\u2013\u2014-]+$/, '')}\u2026`;
+}
+
+// Statuses where the agent is still in the middle of something, so "what is it
+// doing" is a live question with a live answer. `stale` is in here on purpose: an
+// agent that stopped writing heartbeats was doing something when it stopped, and
+// that line is still the last true answer to what it was doing.
+const LIVE_STATUS = new Set(['running', 'waiting', 'stale']);
+
+const TASK_KIND = {
+  doing: 'doing now',
+  delivered: 'delivered',
+  closed: 'closed out',
+  dispatched: 'dispatched to',
+  role: 'its standing job',
+  prior: 'before the ledger',
+};
+
+/**
+ * What this agent is doing, or what it did — the row's task tag.
+ *
+ * The question the tag answers changes with the state, and papering that over with
+ * one source is how a table ends up describing the wrong thing plausibly. Four
+ * authored records answer it, in this order, and each says which one it used:
+ *
+ * 1. A live agent gets the harness's own line for this minute. That is the field
+ *    `claude agents` renders, and it is why that view reads better than this one did.
+ * 2. A finished agent gets the delivery record's `produced` line — written by the
+ *    Navigator at close-out and checked against GitHub, so it is what the agent did
+ *    rather than what it said it did.
+ * 3. Failing that, the close-out line the agent itself wrote into the job record.
+ * 4. Failing that, the one-line task on the worker-ledger claim, which every
+ *    dispatch is meant to carry and 33 of 50 claims already do.
+ *
+ * Nothing here is inferred, and the worker slug is never used: `mergegate` and
+ * `landseven` are addresses, not descriptions, and a table of them is the thing this
+ * change exists to remove. A row no record describes gets no tag — a blank cell that
+ * says why on expand is honest, and a plausible-sounding guess is not.
+ */
+export function taskOf(row) {
+  const live = LIVE_STATUS.has(row.status?.status ?? '');
+  const line = row.line ?? null;
+  const verdict = (row.impact?.verdicts ?? []).at(-1) ?? null;
+  const produced = String(verdict?.produced ?? '').trim();
+  const ledger = String(row.task ?? '').trim();
+  const at = (iso) => (iso ? ` at ${stamp(iso)}` : '');
+
+  const made = (kind, text, source) => ({
+    kind, text: clip(text), full: clip(text, SUMMARY_MAX), source,
+  });
+
+  if (live && line) {
+    return made('doing', line.text, `the harness ${line.source}, written${at(line.at)} — what it is doing now, not what it was sent to do`);
+  }
+  if (produced) {
+    return made('delivered', produced, 'the Navigator delivery record at close-out, checked against GitHub');
+  }
+  if (line) {
+    return made('closed', line.text, `the harness ${line.source}, written${at(line.at)} — the agent's own account of what it finished`);
+  }
+  if (ledger) {
+    return made('dispatched', ledger, 'the task on its worker-ledger claim — what it was sent to do, not a report of what it did');
+  }
+  if (row.resting) {
+    return made('role', row.role?.resting ?? row.status?.note ?? '', 'the standing-role registry — this role has no session to describe');
+  }
+  if (row.synthetic) {
+    return made('prior', 'ran before worker ids existed, so nothing they did can be traced to any one of them', 'the priced feed, which is all that survives of these agents');
+  }
+  return null;
+}
+
+/** Why a row has no tag, said in the place a reader will look for one. */
+export function taskText(row) {
+  const t = taskOf(row);
+  if (t) return `${TASK_KIND[t.kind] ?? t.kind}: ${t.source}`;
+  if (row.status?.status === 'not launched') return 'no task recorded — the id was claimed with no task line and no session ever ran under it';
+  return 'no task recorded — no live line, no close-out verdict, and no task on the ledger claim';
 }
 
 /** Every reference this row touched, across all three impact buckets. */
@@ -200,6 +383,7 @@ export function facetsOf(row) {
 
   const verdicts = [...new Set((i.verdicts ?? []).map((v) => v.verdict))];
   const created = createdOf(row);
+  const last = lastOf(row);
   return {
     kind,
     status,
@@ -207,7 +391,13 @@ export function facetsOf(row) {
     verdict: verdicts.length ? verdicts : ['unjudged'],
     repo: reposOf(row),
     days: row.days ?? [],
-    lastDay: (row.days ?? []).at(-1) ?? '',
+    // The local day it was last seen, from the instant where there is one. It was
+    // the last of the priced UTC days until now, which put the Last active column
+    // on a different calendar from the period filter it feeds (obot.agent#174).
+    lastDay: last.day,
+    lastAt: last.at,
+    lastSource: last.source,
+    task: taskOf(row),
     cost: row.cost?.value ?? null,
     // The instant sorts and the day is what is shown. Sorting on the day alone would
     // leave the top of the table arbitrary inside today, which is where half the
@@ -385,29 +575,20 @@ const refLink = (r) => (r.url
   : `<span class="ref-plain" title="no repository named, so no link can be built without guessing">${esc(r.ref)}</span>`);
 
 /**
- * The impact cell. The three silences stay three: a standing session has no
- * deliverable to have moved, an agent still working has not finished producing
- * anything, and an agent that finished having moved nothing is the row worth
- * reading. Rendering them as one sentence told a lie about two of them.
+ * Why a row moved nothing — the sentence that used to be the impact cell.
+ *
+ * The three silences stay three: a standing session has no deliverable to have
+ * moved, an agent still working has not finished producing anything, and an agent
+ * that finished having moved nothing is the row worth reading. Rendering them as one
+ * sentence told a lie about two of them, and that stays true in an expansion.
  */
-function impactCell(row, f) {
-  const i = row.impact;
-  // A pinned role with no session. It has moved nothing, and saying "nothing moved"
-  // about a role that has not run would read as a failed agent — the same lie the
-  // three silences below were separated to stop telling.
-  if (row.resting) return `<span class="im-none">${esc(row.status.note)}</span>`;
-  if (row.synthetic) return '<span class="im-none">not attributable — no id, so nothing they wrote can be traced to them</span>';
-  if (row.status.status === 'not launched') return '<span class="im-none">no session ever ran under this id</span>';
-  if (i.empty) {
-    if (f.kind === 'standing') return '<span class="im-none">not judged on delivery</span>';
-    if (row.status.status === 'running') return '<span class="im-none">still working</span>';
-    return '<span class="im-none">nothing moved</span>';
-  }
-  const bits = [];
-  if (i.moved.length) bits.push(`<span class="im-moved">${plural(i.moved.length, 'requirement')} moved</span> ${i.moved.map(refLink).join(' ')}`);
-  if (i.closed.length) bits.push(`<span class="im-closed">${i.closed.length} landed</span> ${i.closed.map(refLink).join(' ')}`);
-  if (i.mentioned.length) bits.push(`<span class="im-ref">${i.mentioned.length} named only</span>`);
-  return bits.join('<span class="im-sep"> · </span>');
+function impactNone(row, f) {
+  if (row.resting) return row.status.note;
+  if (row.synthetic) return 'not attributable — no id, so nothing they wrote can be traced to them';
+  if (row.status.status === 'not launched') return 'no session ever ran under this id';
+  if ((f?.kind ?? kindOf(row)) === 'standing') return 'not judged on delivery — standing roles are not closed out against a requirement';
+  if (row.status.status === 'running') return 'still working — nothing to judge yet';
+  return 'nothing moved — the delivery record has no reference for this agent';
 }
 
 /**
@@ -441,25 +622,99 @@ export function modelText(row) {
   return 'unknown — no job record on this machine carries a launch flag for this agent, and the priced feed records no model per agent';
 }
 
-function createdCell(row, f) {
-  const why = createdText(row);
+function createdCell(row, f, zone) {
+  const why = createdText(row, zone);
   if (!f.created) return `<span class="cr-none" title="${esc(why)}">unknown</span>`;
-  return `<span class="cr-${esc(f.createdSource)}" title="${esc(why)}">${esc(f.createdDay)}</span>`;
+  return `<span class="cr-${esc(f.createdSource)}" title="${esc(why)}"><span class="dt-d">${esc(f.createdDay)}</span><span class="dt-t">${esc(isoClock(f.created))}</span></span>`;
 }
 
-const verdictCell = (f) => (f.verdict.includes('unjudged')
-  ? '<span class="vd-none" title="no closeout verdict recorded for this agent">—</span>'
-  : f.verdict.map((v) => `<span class="vd vd-${esc(v)}">${esc(VERDICT_LABEL[v] ?? v)}</span>`).join(' '));
+/**
+ * The last-active cell: a local day, and the clock under it where a record kept one.
+ *
+ * The time is stacked under the date rather than beside it so the column is exactly
+ * as wide as it was before the time existed — which is the whole of the 390px cost
+ * of this change. A row with no instant shows the date alone: a blank where a clock
+ * would be is the honest shape of "this day, and no record of when".
+ */
+function lastCell(row, f, zone) {
+  const why = lastText(row, zone);
+  if (!f.lastDay) return `<span class="cr-none" title="${esc(why)}">\u2014</span>`;
+  const t = f.lastAt ? isoClock(f.lastAt) : '';
+  return `<span class="cr-${esc(f.lastSource)}" title="${esc(why)}"><span class="dt-d">${esc(f.lastDay)}</span>${t ? `<span class="dt-t">${esc(t)}</span>` : '<span class="dt-t dt-none">no time recorded</span>'}</span>`;
+}
 
-/** The evidence under a row — everything the columns had to leave out. */
-function evidence(row) {
+/**
+ * The task tag: the one cell that answers "what is this agent doing".
+ *
+ * The kind chip in front of it is load-bearing rather than decorative. The same
+ * column carries "what it is doing now" for a live agent and "what it did" for a
+ * finished one, and a reader who cannot tell which is being shown will read a
+ * close-out as a live status — which is the failure that made the old table useless
+ * in the other direction.
+ */
+function taskCell(row, f) {
+  const t = f.task;
+  const why = taskText(row);
+  if (!t) return `<span class="tk-none" title="${esc(why)}">\u2014</span>`;
+  return `<span class="tk tk-${esc(t.kind)}" title="${esc(why)}"><span class="tk-k">${esc(TASK_KIND[t.kind] ?? t.kind)}</span>${esc(t.text)}</span>`;
+}
+
+// The verdict chip that used to sit in the table is gone with the impact column it
+// belonged to; `VERDICT_LABEL` still names the sidebar's filter options, which is
+// where a question about verdicts across the whole roster is better asked anyway.
+
+/**
+ * The evidence under a row — everything the columns had to leave out.
+ *
+ * @jwildfire, 2026-08-17: "Roadmap impact can be shown on expand." The principle
+ * under that ask is that the row says what a thing is and what it is doing, and
+ * everything else expands — so the closeout verdict came down here with it. The two
+ * were one concept split across a row and its expansion: the verdict is the delivery
+ * record's judgement of the very references the impact column listed, and reading
+ * `Confirmed` in a table with nothing beside it to confirm is not a fact anyone can
+ * act on. Both stay filterable in the sidebar, which is where a whole-table question
+ * about impact or verdict was always answered better than by a column of chips.
+ */
+function evidence(row, f) {
   const li = [];
+  const t = f?.task ?? taskOf(row);
+  if (t) {
+    li.push(`<li><span class="k">${esc(TASK_KIND[t.kind] ?? t.kind)}</span> ${esc(t.full)} <span class="dim">\u2014 ${esc(t.source)}</span></li>`);
+  } else {
+    li.push(`<li><span class="k">task</span> <span class="dim">${esc(taskText(row))}</span></li>`);
+  }
+  // The dispatched task as well as the tag, whenever the tag came from somewhere
+  // else: what an agent was sent to do and what it then did are different facts, and
+  // the row only ever has space for one of them.
+  const ledger = String(row.task ?? '').trim();
+  if (ledger && t?.kind !== 'dispatched') {
+    li.push(`<li><span class="k">dispatched to</span> ${esc(ledger)} <span class="dim">\u2014 the task on its worker-ledger claim</span></li>`);
+  }
   li.push(`<li><span class="k">status</span> ${esc(row.status.note || row.status.status)}</li>`);
+  // What ended the session, when the transport ended it rather than the work. It is
+  // kept out of the task tag — the agent accounted for nothing, a connection failed —
+  // and it is far too useful to drop on the way out.
+  if (row.ended) li.push(`<li><span class="k">ended on</span> ${esc(row.ended)} <span class="dim">— the harness, not the agent</span></li>`);
   if (row.cost.value === null || row.cost.code !== 'priced') li.push(`<li><span class="k">cost</span> ${esc(row.cost.text)}</li>`);
+  // The demoted impact column keeps its three separate silences down here. They were
+  // separated because collapsing them told a lie about two: a standing session has
+  // no deliverable to have moved, an agent still working has not finished producing
+  // anything, and an agent that finished having moved nothing is the row worth
+  // reading. Losing that distinction on the way out of the table would have made
+  // this change a regression dressed as a demotion.
+  if (row.impact.empty) li.push(`<li><span class="k">roadmap impact</span> <span class="dim">${esc(impactNone(row, f))}</span></li>`);
   for (const m of row.impact.moved) li.push(`<li><span class="k">moved</span> ${refLink(m)}</li>`);
   for (const c of row.impact.closed) li.push(`<li><span class="k">${esc(c.verb ?? 'landed')}</span> ${refLink(c)}</li>`);
   for (const n of row.impact.mentioned) li.push(`<li><span class="k">named only</span> ${refLink(n)} <span class="dim">${esc(n.verb ?? 'named')}</span></li>`);
   for (const v of row.impact.verdicts) li.push(`<li><span class="k">verdict ${esc(v.verdict)}</span> ${esc(v.produced)}${v.note ? ` — ${esc(v.note)}` : ''}</li>`);
+  // The demoted verdict column's own silence, which is two different silences: a
+  // delivery record that was read and said nothing about this agent, and one that
+  // was never read at all. The chip could only ever show the first as a dash.
+  if (!row.impact.verdicts.length) {
+    li.push(`<li><span class="k">verdict</span> <span class="dim">${esc(row.impact.unjudged
+      ? 'no delivery record on this machine, so no verdict either way'
+      : 'no close-out verdict recorded for this agent')}</span></li>`);
+  }
   const usage = [
     row.synthetic ? null : plural(row.sessions, 'session'),
     row.tokens ? `${row.tokens.toLocaleString('en-US')} tokens` : null,
@@ -482,7 +737,10 @@ const STATUS_TONE = {
   'not launched': 'null', 'no job record': 'null', subagent: 'null', 'before the ledger': 'null',
 };
 
-const COLS = 8;
+// Agent, Task, Status, Cost, Model, Created, Last active. Two columns came out and
+// one went in: the row now answers what a thing is and what it is doing, and the
+// delivery record's two columns — impact and verdict — expand.
+const COLS = 7;
 
 /**
  * The pin control. Rendered on every row, not only on the pinned ones: a control
@@ -505,7 +763,7 @@ function pinButton(row, p) {
 }
 
 /** One agent: the row, and the evidence row beneath it that opens on a tap. */
-export function tableRow({ row, f }, index, { pins = emptyPins() } = {}) {
+export function tableRow({ row, f }, index, { pins = emptyPins(), zone = localZone() } = {}) {
   const tone = STATUS_TONE[f.status] ?? 'done';
   const name = row.id ?? row.label;
   const sub = row.id ? (row.slug || '') : ((row.synthetic || row.resting) ? row.slug : '');
@@ -518,17 +776,17 @@ export function tableRow({ row, f }, index, { pins = emptyPins() } = {}) {
   data-created="${f.createdTs === null ? '' : f.createdTs}" data-createdday="${esc(f.createdDay)}"
   data-model="${esc(f.models.join(' ') || 'unknown')}"
   data-pinned="${p.pinned ? 'yes' : 'no'}"${row.resting ? ' data-resting="yes"' : ''}
-  data-name="${esc(String(name).toLowerCase())}">
-  <td class="c-name">${pinButton(row, p)}<span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span><span class="ag-born">${f.createdDay ? `created ${esc(f.createdDay)}` : 'created unknown'}</span></td>
+  data-name="${esc(String(name).toLowerCase())}"
+  data-task="${esc((f.task?.text ?? '').toLowerCase())}">
+  <td class="c-name">${pinButton(row, p)}<span class="ag-id">${esc(name)}</span>${sub ? `<span class="ag-slug">${esc(sub)}</span>` : ''}<span class="ag-kind">${esc(KIND_LABEL[f.kind] ?? f.kind)}</span><span class="ag-born">${f.createdDay ? `created ${esc(f.createdDay)} ${esc(isoClock(f.created))}` : 'created unknown'}</span></td>
+  <td class="c-task">${taskCell(row, f)}</td>
   <td class="c-st"><span class="tone-${esc(tone)}">${esc(f.status)}</span></td>
   <td class="c-cost cost-${esc(row.cost.code ?? 'none')}" title="${esc(row.cost.text)}">${esc(row.cost.short ?? '—')}</td>
   <td class="c-model">${modelCell(row, f)}</td>
-  <td class="c-vd">${verdictCell(f)}</td>
-  <td class="c-im">${impactCell(row, f)}</td>
-  <td class="c-created">${createdCell(row, f)}</td>
-  <td class="c-last">${esc(f.lastDay || '—')}</td>
+  <td class="c-created">${createdCell(row, f, zone)}</td>
+  <td class="c-last">${lastCell(row, f, zone)}</td>
 </tr>
-<tr class="ev-row" id="${evId}" hidden><td colspan="${COLS}">${evidence(row)}</td></tr>`;
+<tr class="ev-row" id="${evId}" hidden><td colspan="${COLS}">${evidence(row, f)}</td></tr>`;
 }
 
 const option = (group, type, o, cutoffs) => `<label class="at-o"><input type="${type}" data-group="${esc(group)}" value="${esc(o.value)}"${
@@ -573,9 +831,13 @@ const th = (key, label, cls = '', { sorted = 'none', title = '' } = {}) => `<th$
 // here should be able to find out what it measures without scrolling past the table.
 const MODEL_TITLE = 'The model each of this agent’s sessions was launched with, as the harness job record has it — the `--model` flag, verbatim. It sits beside the cost because those two are read against each other: the allocation grant says model choice is deliberate per task, and this is the first column that makes it checkable. Subagent models are not in here, and an agent with no job record on this machine reads unknown.';
 
+const TASK_TITLE = 'What this agent is doing, or what it did — never its slug, which is an address rather than a description. A live agent shows the harness job record\u2019s own line for this minute; a finished one shows the delivery record\u2019s produced line, written at close-out and checked against GitHub; failing that, the close-out line the agent wrote itself; failing that, the one-line task on its worker-ledger claim. The chip in front of the tag says which of those you are reading, because "doing now" and "did" are different questions in one column. Nothing is inferred: a row no record describes shows a dash and says why on expand. Template text is filtered out rather than rendered as a status (obot.agent#177).';
+
+const LAST_TITLE = 'The newest stamp on this agent across the harness job record and the worker ledger, on the local calendar. A row whose only later activity is in the priced usage feed shows that day with no clock, because that feed counts UTC days and keeps no instants.';
+
 const CREATED_TITLE = 'When the agent first appears in the record. Workers are dated by the moment their id was claimed in the ledger, which is before they were spawned; every other row — standing sessions, probes — never claimed an id, so it is dated by its first session start. Each cell names its own source; a row neither record dates reads unknown.';
 
-const foot = (model) => `<details class="ag-foot">
+const foot = (model, zone = localZone()) => `<details class="ag-foot">
   <summary>About these numbers</summary>
   <ul>
     ${model.usage?.missing
@@ -586,7 +848,11 @@ const foot = (model) => `<details class="ag-foot">
     <li>${esc(ID_NOTE)}</li>
     <li>Model is the <code>--model</code> flag each of an agent's sessions was launched with, read verbatim off the harness job record. It is beside the cost on purpose: the allocation grant says model choice is deliberate per task, and these two columns together are the first way to check that — an expensive model on a mechanical job, or a light one on something that needed judgement, shows up at a glance. Two caveats it cannot cover: the flag is what the session was launched with rather than a receipt for every call it made, and subagent models are not in it. The priced feed carries no model per agent at all, so an agent with no job record on this machine reads unknown.</li>
     <li>Created is when the agent first appears in the record, and the table opens on it, newest first. A worker is dated by the moment its id was claimed in the ledger — the claim happens before the spawn, and it is the only record that dates an id that was claimed and never launched. Every other row never claimed an id, so it is dated by its first session start from the harness instead. Each cell says which in its tooltip and in the evidence under the row, and a row neither record dates reads unknown rather than borrowing the first day it was priced on.</li>
-    <li>Days here are UTC days, as everywhere else on this page — the two records disagree about the clock (the ledger writes local time, the harness writes UTC), so both are read as instants and shown on one calendar. The exact stamp, offset and all, is in each cell's tooltip.</li>
+    <li>Every date and time on this page is ${esc(zone.label)} — this machine's zone at the moment the page was rendered, read rather than assumed. That is one day boundary for the whole page: the dates, the times and the period filters all turn over at local midnight, so a session that ran at 00:30 reads as today and Today includes it. Until now they were UTC days, which misdated exactly the overnight rows this page exists to report on.</li>
+    <li>Times are absolute, never "12m ago". This is a static render — a relative time is right only at the instant it is written, and this page can sit open for hours. A row with a date and no time under it is a row whose only record of that day is the priced feed, which counts UTC days and keeps no instants.</li>
+    <li>The two records disagree about the clock — the worker ledger writes local time with an offset, the harness writes UTC — so every stamp is parsed as an instant and shown on the one calendar above, never sliced out of the characters. The record's own text, offset and all, is in each cell's tooltip and in the evidence under the row.</li>
+    <li>Task is what the agent is doing, or what it did, and never its slug — a slug is an address, not a description. A live agent shows the harness job record's line for this minute, which is the same field <code>claude agents</code> renders; a finished one shows the delivery record's produced line, written at close-out and checked against GitHub; failing that, the close-out line the agent wrote itself; failing that, the one-line task on its worker-ledger claim. The chip in front of each tag says which. Nothing is inferred — a row no record describes shows a dash and says why on expand, because a plausible tag describing the wrong thing is worse than a blank one. Text that is structurally a template rather than a status is filtered out (obot.agent#177): it reaches this field on sixteen entries and carried a status with it.</li>
+    <li>Roadmap impact and the close-out verdict are under each row rather than in it: the row answers what an agent is and what it is doing, and everything else expands. Both are still filters in the sidebar, which is the better place to ask either question across the whole roster.</li>
     <li>Status is the job record joined to its append-only timeline. Where the two disagree the timeline wins, because a state file can say done over a session that fell over.</li>
     <li>Impact is the Navigator delivery record, checked against GitHub — never the job records' own child list, which is empty for nearly half of measured jobs.</li>
     <li>Filter counts are over the whole roster, not over the current selection, so they say what ticking a box would give you.</li>
@@ -611,6 +877,7 @@ export function agentsTableHtml(model, { now = new Date(), pins = emptyPins() } 
     resting.length ? { ...model, rows: [...model.rows, ...resting] } : model, { now },
   );
   if (!rows.length) return '<p class="ag-empty">No agent has run since the worker ledger was adopted.</p>';
+  const zone = localZone(now);
   const filters = buildFilters(rows);
   const cost = rows.reduce((n, r) => n + (r.f.cost ?? 0), 0);
 
@@ -621,14 +888,14 @@ export function agentsTableHtml(model, { now = new Date(), pins = emptyPins() } 
   const bodies = pinned.length
     ? `<tbody class="at-b" data-sec="pinned">
         ${secRow('Pinned', 'always here, whatever their status', '<span class="at-sechid" id="at-pinhid" hidden></span>')}
-${pinned.map((r, i) => tableRow(r, `p${i}`, { pins })).join('\n')}
+${pinned.map((r, i) => tableRow(r, `p${i}`, { pins, zone })).join('\n')}
       </tbody>
       <tbody class="at-b" data-sec="rest">
         ${secRow('Everything else', 'newest first, until you sort a column')}
-${rest.map((r, i) => tableRow(r, i, { pins })).join('\n')}
+${rest.map((r, i) => tableRow(r, i, { pins, zone })).join('\n')}
       </tbody>`
     : `<tbody class="at-b" data-sec="rest">
-${rest.map((r, i) => tableRow(r, i, { pins })).join('\n')}
+${rest.map((r, i) => tableRow(r, i, { pins, zone })).join('\n')}
       </tbody>`;
 
   return `<div class="at" id="agents">
@@ -638,20 +905,19 @@ ${sidebar(filters, cutoffs, rows.length, cost)}
     <table class="at-table">
       <thead><tr>
         ${th('name', 'Agent', 'c-name')}
+        ${th('task', 'Task', 'c-task', { title: TASK_TITLE })}
         ${th('status', 'Status', 'c-st')}
         ${th('cost', 'Cost', 'c-cost')}
         ${th('model', 'Model', 'c-model', { title: MODEL_TITLE })}
-        ${th('verdict', 'Verdict', 'c-vd')}
-        ${th('impact', 'Roadmap impact', 'c-im')}
-        ${th('created', 'Created', 'c-created', { sorted: 'descending', title: CREATED_TITLE })}
-        ${th('last', 'Last active', 'c-last')}
+        ${th('created', `Created (${zone.offset})`, 'c-created', { sorted: 'descending', title: CREATED_TITLE })}
+        ${th('last', `Last active (${zone.offset})`, 'c-last', { title: LAST_TITLE })}
       </tr></thead>
 ${bodies}
     </table>
   </div>
   <p class="at-none" id="at-none" hidden>No agent matches these filters. <button type="button" class="at-clear2">Clear them</button></p>
   <p class="ag-more"><a href="/session/log">The full record →</a> <span class="ag-morewhy">every delivery verdict, every Navigator call, and what changed</span></p>
-  ${foot(model)}
+  ${foot(model, zone)}
 </div>
 </div>
 <script>${TABLE_JS}</script>`;
@@ -758,7 +1024,7 @@ export const TABLE_JS = `
     var desc = dir[key] === 'desc' ? false : true;
     // Words read forwards. A first click on a name or a model gives the top of the
     // alphabet, not the bottom of it.
-    if (key === 'name' || key === 'model') desc = dir[key] === 'asc' ? true : false;
+    if (key === 'name' || key === 'model' || key === 'task') desc = dir[key] === 'asc' ? true : false;
     dir = {}; dir[key] = desc ? 'desc' : 'asc';
     // Sorted inside each section, never across them: a sort is a question about
     // ranking and pinning is a question about what he is watching, so a click on a
@@ -785,9 +1051,6 @@ export const TABLE_JS = `
             || String(x.name).localeCompare(String(y.name));
         }
         r = ax - ay;
-      } else if (key === 'impact') {
-        r = (a[0].querySelector('.im-moved') ? 2 : 0) + (a[0].querySelector('.im-closed') ? 1 : 0)
-          - (b[0].querySelector('.im-moved') ? 2 : 0) - (b[0].querySelector('.im-closed') ? 1 : 0);
       } else {
         r = String(x[key] || '').localeCompare(String(y[key] || ''));
       }
@@ -954,13 +1217,31 @@ export const TABLE_CSS = `
   .at-table .c-st { white-space:nowrap; font-size:0.68rem; letter-spacing:0.03em; text-transform:uppercase; }
   .at-table .c-cost { font-family:var(--mono); text-align:right; white-space:nowrap;
                       font-variant-numeric:tabular-nums; }
-  .at-table .c-vd { white-space:nowrap; font-size:0.68rem; }
-  .at-table .c-im { min-width:14rem; color:var(--muted); line-height:1.35; }
+  /* The task tag. It is the widest column and the one he is here to read, so it gets
+     a real minimum and wraps to two short lines rather than pushing the dates further
+     out of reach on a phone. 100 characters at this size is three lines at 390px and
+     one on a desktop — measured, which is why the ceiling is 100 and not 140. */
+  .at-table .c-task { min-width:13rem; max-width:26rem; line-height:1.3; }
+  .tk { display:block; font-size:0.72rem; color:var(--ink); overflow-wrap:anywhere; }
+  /* The chip says whether you are reading "doing now" or "did". Without it the same
+     column carries two different questions and nothing distinguishes them. */
+  .tk-k { display:block; font-size:0.58rem; letter-spacing:0.08em; text-transform:uppercase;
+          color:var(--faint); }
+  .tk-doing .tk-k { color:#4ea1ff; }
+  .tk-delivered .tk-k { color:var(--good); }
+  .tk-dispatched .tk-k { color:var(--warn); }
+  .tk-none { color:var(--faint); }
+
   .at-table .c-created, .at-table .c-last { font-family:var(--mono); font-size:0.68rem; color:var(--muted);
                                            white-space:nowrap; }
   /* The two dates read as a pair, so the sort column is the brighter of them and the
      one the eye lands on when the table opens. */
   .at-table .c-created { color:var(--ink); }
+  /* The clock sits under the date rather than beside it, so adding a time costs the
+     column no width at all — which is the whole 390px budget for this change. */
+  .dt-d { display:block; }
+  .dt-t { display:block; font-size:0.62rem; color:var(--faint); }
+  .dt-none { font-family:var(--sans, inherit); font-style:italic; letter-spacing:0; }
   .cr-none { color:var(--faint); font-family:var(--sans, inherit); font-style:italic; }
 
   /* Model, next to the money. Mono so a column of them lines up, and one tone per
@@ -971,10 +1252,6 @@ export const TABLE_CSS = `
   .md-opus { color:var(--accent); }
   .md-sonnet, .md-haiku { color:var(--muted); }
   .md-none { color:var(--faint); font-family:var(--sans, inherit); font-style:italic; }
-  .vd { font-size:0.66rem; letter-spacing:0.04em; text-transform:uppercase; }
-  .vd-confirmed { color:var(--good); }
-  .vd-drift { color:var(--warn); }
-  .vd-none { color:var(--faint); }
   .at-table .ev-row td { background:var(--paper); }
 
   /* The evidence wraps to the screen, not to the table. Inside a box that scrolls

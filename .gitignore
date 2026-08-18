@@ -3,3 +3,10 @@
 # The filename carries the interpreter version, so it churns on every upgrade.
 __pycache__/
 *.py[cod]
+
+# The Operations Dashboard's local store. Every file in it carries a LOCAL-ONLY
+# header saying never commit, and one `git add -A` in a worktree committed two of
+# them anyway (caught before #183 merged) — a header is a note to a human, and the
+# thing that ran was a glob. The dashboard creates this directory wherever it is
+# started from, so any worktree can grow one.
+.claude/ops/

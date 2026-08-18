@@ -148,11 +148,98 @@ export function parseWorkers(text = '') {
 
 // ---- status --------------------------------------------------------------
 
-/** The append-only timeline, read for where it actually ended. */
+/**
+ * Text that is structurally a document rather than a sentence about this agent.
+ *
+ * The harness writes a one-line `detail` per timeline entry, and that line is the
+ * best short description of what an agent is doing that exists anywhere on this
+ * machine — which is also what makes it dangerous to render unchecked. Three kinds
+ * of text arrive in that field and none of them is a status:
+ *
+ * - The sibling-briefing template's opening HTML comment, on sixteen entries across
+ *   ten jobs (jwildfire/obot.agent#177). It is not inert: one of those entries
+ *   re-asserted `blocked` forty-five seconds before a clean close-out.
+ * - The state word itself — `stopped` written as its own detail on every stopped
+ *   job, which says nothing the status column has not already said.
+ * - An unfilled template placeholder, which means a briefing was sampled rather
+ *   than a session.
+ *
+ * The filter lives here rather than in the template because a template fix cannot
+ * reach the entries already written: sixteen of them are on disk now and no future
+ * change unwrites them. Fixing the template as well is #177's own job.
+ */
+const TEMPLATE_TEXT = [
+  /^\s*<!--/,                                     // opens as a comment
+  /-->/,                                          // carries the close of one
+  /\{[A-Za-z][\w-]*\}/,                            // an unfilled {placeholder}
+  /^#{1,6}\s/,                                    // a markdown heading is a document
+  /this is the briefing a lead session hands/i,   // the known offender, by name
+];
+
+/**
+ * The harness talking about its own transport, rather than the session describing
+ * its work.
+ *
+ * "API Error: Unable to connect to API: SSL certificate hostname mismatch" is a true
+ * sentence and it is not a task. Rendered in the task column under the label "the
+ * agent's own account of what it finished" it was actively false — the agent
+ * accounted for nothing; a connection failed. So these are held apart: they never
+ * become a tag, and they surface on expand as what ended the session, beside a
+ * status column that already reads `died`.
+ *
+ * Anchored at the start of the line, deliberately. A worker's own close-out sentence
+ * may well mention an error it found and fixed, and a loose match on the word would
+ * take that away — which is the same defect in the other direction.
+ */
+const HARNESS_ERROR = [
+  /^API Error\b/i,
+  /^You(?:'|\u2019)?ve hit your (?:session|usage) limit/i,
+  /^Credit balance is too low/i,
+  /^Request timed out/i,
+  /^Connection error/i,
+  /^Prompt is too long/i,
+  /^Invalid API key/i,
+  /^Claude(?: Code)? (?:usage|API) limit/i,
+];
+
+export const isHarnessError = (text) => HARNESS_ERROR.some((re) => re.test(String(text ?? '').trim()));
+
+// Words the harness writes as a detail when it has nothing to say. Rendering one as
+// a task tag would put the status column's own word in a second column.
+const BARE_STATE = new Set(['stopped', 'done', 'working', 'idle', 'running', 'blocked', 'failed', 'error', 'completed', 'none', '']);
+
+/**
+ * One harness detail line, or null if it is not a sentence about this agent.
+ *
+ * Null rather than a cleaned-up string: text that is structurally a comment has no
+ * salvageable status inside it, and half a template rendered as a task is the same
+ * defect one character shorter.
+ */
+export function cleanDetail(text) {
+  const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  if (BARE_STATE.has(t.toLowerCase())) return null;
+  if (TEMPLATE_TEXT.some((re) => re.test(t))) return null;
+  return t;
+}
+
+/**
+ * The append-only timeline, read for where it actually ended — and for the last
+ * thing the agent said it was doing.
+ *
+ * `detail` is the newest entry whose detail survives `cleanDetail`, which is not
+ * always the newest entry: a session that died on a limit writes the limit message
+ * as its last detail, and that is the status column's sentence rather than this
+ * one's. Reading backwards for the last real line is what lets a stopped job — whose
+ * state file says only `stopped` — still say what it was doing when it stopped.
+ */
 export function timelineClose(text = '') {
   let last = null;
   let at = null;
   let entries = 0;
+  let detail = null;
+  let detailAt = null;
+  let error = null;
   for (const line of String(text).split(/\r?\n/)) {
     if (!line.trim()) continue;
     let rec;
@@ -161,8 +248,39 @@ export function timelineClose(text = '') {
     entries += 1;
     last = String(rec.state);
     at = rec.at ?? at;
+    const d = cleanDetail(rec.detail);
+    if (!d) continue;
+    if (isHarnessError(d)) error = d;
+    else { detail = d; detailAt = rec.at ?? at; }
   }
-  return { last, at, entries, closed: TERMINAL.has(last) };
+  return { last, at, entries, closed: TERMINAL.has(last), detail, detailAt, error };
+}
+
+/**
+ * What the harness itself says this agent is doing, or said it had done.
+ *
+ * Two records, and the state file wins when it has something: on a finished job it
+ * holds the close-out line the agent wrote about its own work ("obot.agent#169
+ * merged — pinning live in main"), which is the best sentence anywhere about what
+ * that agent did. On a stopped or dead job it holds only the state word, so the
+ * timeline's last real line is what is left — and on a working job the two are the
+ * same live line.
+ */
+export function jobLine(job) {
+  if (!job) return null;
+  const fromState = cleanDetail(job.detail);
+  if (fromState && !isHarnessError(fromState)) return { text: fromState, at: job.updatedAt ?? null, source: 'job record' };
+  const tl = job.timeline ?? {};
+  if (tl.detail) return { text: tl.detail, at: tl.detailAt ?? null, source: 'job timeline' };
+  return null;
+}
+
+/** What ended a session, when what ended it was the transport rather than the work. */
+export function jobError(job) {
+  if (!job) return null;
+  const fromState = cleanDetail(job.detail);
+  if (fromState && isHarnessError(fromState)) return fromState;
+  return job.timeline?.error ?? null;
 }
 
 /**
@@ -615,6 +733,15 @@ export function buildRoster({
       models: [...new Set(matched.map((j) => j.model).filter(Boolean))].sort(),
       status,
       cost,
+      // The harness's own sentence about this agent — the live line while it works,
+      // the close-out line once it has finished. Carried on the row rather than
+      // resolved in the view because the view holds no job record, and because the
+      // filtering that keeps template text off the page belongs next to the read
+      // that produces it (jwildfire/obot.agent#177).
+      line: jobLine(job),
+      // Held apart from `line` rather than dropped: the transport failure that ended
+      // a session is worth reading, and the task column is the wrong place to read it.
+      ended: jobError(job),
       // `unjudged` rides on the impact so every view gets the distinction without
       // a new parameter: a silent delivery record is not a verdict of silence.
       impact: { ...impactOf(entries), unjudged: !deliveryRead },
