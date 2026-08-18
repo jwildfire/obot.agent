@@ -156,3 +156,15 @@ test('bad arguments fail loudly rather than folding something unintended', async
   assert.match(notADate.error, /not a date/)
   assert.ok(!existsSync(join(w, '.claude/fold/runs.jsonl')), 'and writes nothing on the way out')
 })
+
+test('an unknown run leaves the watermark where it was, so the next fold still sees the window', async () => {
+  const w = quietWorkspace()
+  const held = JSON.parse(readFileSync(join(w, '.claude/fold/state.json'), 'utf8'))
+  const { report } = await run([], {
+    workspace: w, hub: HUB, now: new Date('2026-08-18T11:00:00.000Z'),
+  })
+  assert.equal(report.verdict, 'unknown')
+  const after = JSON.parse(readFileSync(join(w, '.claude/fold/state.json'), 'utf8'))
+  assert.deepEqual(after, held, 'nothing advanced past a window nobody could see')
+  assert.ok(report.unknowns.length > 0, 'and it names what could not answer')
+})

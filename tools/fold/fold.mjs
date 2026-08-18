@@ -181,5 +181,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (error) { console.error(`fold: ${error}\n\n${USAGE}`); process.exit(1) }
   if (help) { console.log(USAGE); process.exit(0) }
   console.log(process.argv.includes('--json') ? JSON.stringify(report, null, 2) : render(report))
+  // An unattended run has no reader. launchd keeps stderr (StandardErrorPath) and
+  // keeps nothing else, so the one outcome that must survive a morning nobody
+  // watched goes there too: a fold that could not see is otherwise indistinguishable
+  // from a night with nothing in it, and both produce no output at all.
+  if (exit === 3) {
+    console.error(`fold: UNKNOWN at ${report.at} — published nothing, watermark held at ${report.window.since}`)
+    for (const u of report.unknowns) console.error(`fold:   ${u}`)
+  }
   process.exit(exit)
 }
