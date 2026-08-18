@@ -72,20 +72,6 @@ export function openBlockerCount(workspace) {
 }
 
 /**
- * The two newest daily scratchpads, and how many bytes each `## Session log`
- * currently holds.
- *
- * Two files, never one: right after midnight the new day-file is nearly empty
- * while the whole session lives in yesterday's — measured at 2026-08-15 00:06,
- * 3,334 bytes returned while the previous day's file held 44 KB.
- *
- * The filter is the strict ^YYYY-MM-DD.md$ from prime-rehydrate, not the looser
- * 2*.md glob, which burns one of its two slots on a diary draft or a verify file.
- *
- * Bytes, not line timestamps: the `- HH:MM` on a scratchpad line is shelled local
- * time and agents here have run under at least three zones.
- */
-/**
  * The IDS of the config items that have EARNED the critical tag, and nothing else
  * about them.
  *
@@ -121,6 +107,20 @@ export async function criticalConfigIds(workspace) {
   }
 }
 
+/**
+ * The two newest daily scratchpads, and how many bytes each `## Session log`
+ * currently holds.
+ *
+ * Two files, never one: right after midnight the new day-file is nearly empty
+ * while the whole session lives in yesterday's — measured at 2026-08-15 00:06,
+ * 3,334 bytes returned while the previous day's file held 44 KB.
+ *
+ * The filter is the strict ^YYYY-MM-DD.md$ from prime-rehydrate, not the looser
+ * 2*.md glob, which burns one of its two slots on a diary draft or a verify file.
+ *
+ * Bytes, not line timestamps: the `- HH:MM` on a scratchpad line is shelled local
+ * time and agents here have run under at least three zones.
+ */
 export function sessionLogSizes(workspace) {
   let names
   try {
