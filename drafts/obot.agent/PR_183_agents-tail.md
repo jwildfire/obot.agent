@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-17 20:35 EDT -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/183 on 2026-08-17 20:40 EDT -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0, Labels: enhancement, Assignee: @me -->
 
 The Agents tab now says what every agent is doing, and every date on it turns over at his midnight rather than UTC's.
