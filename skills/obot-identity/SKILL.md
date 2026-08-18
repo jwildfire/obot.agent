@@ -62,11 +62,21 @@ divergence-plus-extension of gsm.agent's trailer-only attribution convention: up
 attributes via the trailer alone, while here the bot takes authorship and the trailer stays
 so the drafting model remains visible. The drafted-by body line convention is unchanged.
 
+That trailer turns out to be load-bearing for detection as well as for credit: it is the
+one thing @jwildfire never writes, so a commit carrying it whose author is not the bot is
+provably mis-attributed, with no way to false-positive on his own work. 110 commits
+authored as him carry one; 87 authored as him carry none, and those 87 are his. Keep
+writing it, and keep writing the `Worker: {W-id}` trailer beside it.
+
 ## The app, in one paragraph
 
 `obotclaw` is a GitHub App owned by @jwildfire (App ID 4215246, installation 144370633),
-installed only on the whitelisted portfolio repos: obot.roadmap, obot.agent, safety.viz,
-gsm.safety, safety-histogram. Tokens are installation tokens — 1-hour TTL, capped at the
+installed on a whitelist of his own repos — twelve as of 2026-08-18, covering every active
+one: obot.roadmap, obot.agent, safety.viz, gsm.safety, open.gismo, open.csr, demo-301,
+safety-histogram, scaffold, cv, jwildfire.github.io, RPharma2026-AIKeynote. Ask rather than
+remember: `GH_TOKEN=$(obot-app-token) gh api /installation/repositories`. This line read
+"five" until 2026-08-18, three repos after it stopped being true. Tokens are installation
+tokens — 1-hour TTL, capped at the
 app's permissions (Contents/Issues/PRs/Discussions/Workflows RW, Actions read, Metadata).
 The private key never leaves the macOS Keychain (service `obot-github-app`). Design:
 obot.roadmap#3, `requirements/design/3_design.html`.
@@ -80,16 +90,45 @@ Mint fresh per command — tokens are short-lived by design; never store one:
 GH_TOKEN=$(obot-app-token) gh api ...
 GH_TOKEN=$(obot-app-token) gh issue comment 3 -R jwildfire/obot.roadmap --body "..."
 
-# git push as the bot
-git push "https://x-access-token:$(obot-app-token)@github.com/jwildfire/<repo>.git" <branch>
+# git push as the bot — the wrapper, not the URL
+obot.agent/scripts/obot-push          # current branch; add -u to set upstream
 ```
 
-Bot-attributed commits (user ID 299836032 is fixed — look-up not needed):
+`obot-push` exists because every remote here is SSH, so a plain `git push` authenticates
+as @jwildfire whatever token is set — no token fixes it. It mints, refuses on an empty
+token instead of falling through to his keyring, refuses a remote outside the jwildfire
+org, and refuses `--force` and `--delete`. The SSH remote is deliberately left alone so
+his own pushes stay his.
+
+### The commit identity is resolved, never typed
+
+**Do not type the user id.** Take it from `tools/lib/identity.mjs`:
+
+```js
+import { identityEnv, identityArgs, BOT_EMAIL } from '../lib/identity.mjs'
+execFileSync('git', ['commit', '-m', msg], { env: identityEnv(process.env) })
+execFileSync('git', [...identityArgs(), 'commit', '-m', msg])
+```
+
+From a shell, where the module is out of reach, the id-less form is the safe one — it
+links to the bot and has no number in it to get wrong:
 
 ```bash
-git -c user.name='obotclaw[bot]' \
-    -c user.email='299836032+obotclaw[bot]@users.noreply.github.com' commit ...
+git -c user.name='obotclaw[bot]' -c user.email='obotclaw[bot]@users.noreply.github.com' commit ...
 ```
+
+This section used to read "user ID 299836032 is fixed — look-up not needed", with the
+correct number beside it. Counting every commit in the seven active checkouts on
+2026-08-18 found thirty-eight distinct wrong ids across 301 commits anyway — one of
+them reading `223456789`, twenty-six of them belonging to real GitHub accounts. A wrong id
+still renders the right name in `git log` and in the GitHub UI, and links to nobody, so
+the failure is invisible exactly where someone would check. Documenting the number more
+emphatically has been tried; it is not what fixes this (obot.agent#241,
+jwildfire/obot.roadmap#260).
+
+The five-minute Navigator sweep reports any commit carrying a `Co-Authored-By: Claude …`
+or `Worker:` trailer whose author does not link to the bot, under `## Commit identity` in
+`navigator-state.md`.
 
 In GitHub Actions, do not use this script — use `actions/create-github-app-token@v2` with
 the `OBOT_APP_ID` / `OBOT_APP_PRIVATE_KEY` repo secrets instead.
