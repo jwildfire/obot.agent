@@ -361,6 +361,51 @@ obot.agent/tools/config-count --dry-run   # print it, write nothing
 obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
 ```
 
+## A config item as a card
+
+`/config/<id>` renders one item as a short page: an executive summary, then why it exists,
+then step by step. His order, and his ask — [obot.roadmap#263](https://github.com/jwildfire/obot.roadmap/issues/263),
+2026-08-18: *"The config format isn't working for me. Let's make local-only (relatively
+short) html artifacts for each item."*
+
+That is the third format in three days, so the reason is written down rather than fixed a
+fourth time. He reads on a phone to decide whether it is worth going to a keyboard, then
+works at the keyboard with the item open — two documents, and we kept shipping one. The
+summary is built as the phone document: it answers what this is, whether to do it now, how
+long it takes and what it buys, and it holds no forward reference to a step, because the
+steps may be off-screen when it is read. Everything below it is the keyboard document.
+
+The five field names are gone. The two properties that made them worth having are not: every
+step carries what he should see, and the page closes with a check that answers pass or fail.
+A card that drops either to look cleaner has re-made the mistake of the 16th in the other
+direction.
+
+```bash
+obot.agent/tools/config-card                 # every open item
+obot.agent/tools/config-card c0016 c0017     # named items
+obot.agent/tools/config-card c0016 --stdout  # print the page, write nothing
+obot.agent/tools/config-card c0016 --summary # the phone document, as plain text
+obot.agent/tools/config-card --list          # ids, titles, and which have prose
+```
+
+**Two sources.** The spine — title, dates, criticality, what it blocks, the verify command —
+is read from `.claude/blockers.md` on every render and never copied, so a card cannot drift
+from the list about anything measurable. The prose is `<store>/config-cards/cNNNN.md`. An
+item with no prose still renders: it shows the list entry and says plainly that nobody has
+written a card for it, which keeps every open item reachable at the same address.
+
+`--summary` exists because loopback is not reachable from a phone. The dashboard is the
+keyboard lane; the fold and the push relay are the phone lane, and they can now carry the
+summary verbatim instead of paraphrasing a page nobody on that end can open.
+
+**Why this cannot leak.** Config item text has never reached a public surface — that is why
+the list lives outside git, and it predates this format. Here it is structural: `writeCard`
+is the only writer in the program, it computes its destination from a four-digit id rather
+than accepting a path, it refuses a destination outside the store, it refuses a store with a
+`.git` anywhere above it, and it refuses content that is not sentinel-stamped — the stamp the
+hub deploy greps for and fails on. The server has no card writer at all; it renders on the
+request and writes nothing. Each refusal has a test in `test/config-card.test.mjs`.
+
 ## The hub's code runs in its own process
 
 This page runs the hub's own decision collector rather than a copy of it, so the page and the

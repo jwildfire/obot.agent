@@ -55,6 +55,9 @@ import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
+import { buildCard, readCardSource, renderCard, CARD_ID_RE } from './lib/config-card.mjs';
+import { collectConfig } from './lib/collect.mjs';
+import { criticalClaim } from './lib/rank.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
 import { labelIsPinned, readPins, writePin } from './lib/pins.mjs';
@@ -132,6 +135,27 @@ export function artifactPath(hub, url) {
   if (!/^[A-Za-z0-9._-]+$/.test(slug) || slug.startsWith('.')) return null;
   const file = path.join(hub, 'reports', 'decisions', slug, 'index.html');
   return fs.existsSync(file) ? file : null;
+}
+
+/**
+ * `/config/<id>` — one config item as the short page he asked for (hub#263).
+ *
+ * Built on the request rather than read back from the file the generator wrote.
+ * The two go through the same renderer, so they cannot disagree about wording; what
+ * differs is freshness, and a page assembled from the list as it stands now can
+ * never be the stale copy of an item he retired an hour ago. Nothing is written
+ * here: the server has no writer for cards at all, which is one fewer place the
+ * containment has to hold.
+ *
+ * The id is matched against the four-digit shape before it is used for anything —
+ * it reaches a filename by way of `readCardSource`, and a request path is not a
+ * filename until something says it is.
+ */
+export function configCardId(url) {
+  const m = /^\/config\/([^/?#]+)\/?$/.exec(url.split('?')[0]);
+  if (!m) return null;
+  const id = decodeURIComponent(m[1]).toLowerCase();
+  return CARD_ID_RE.test(id) ? id : null;
 }
 
 /** The session hub's rendered live view, or null when no watch loop has run yet. */
@@ -394,6 +418,22 @@ export function serve(args) {
       // over — a 404 is not a surface, a poll is not a look, and the read has to
       // happen before the write or the page would only ever say "just now" (oa#143).
       const look = () => seenAndNote(args.workspace, req, { aliases: SURFACE_ALIASES });
+
+      // One config item as a page (jwildfire/obot.roadmap#263). Read from the list
+      // on every request and rendered on the spot — see `configCardId`.
+      const cardId = configCardId(req.url);
+      if (cardId) {
+        look();
+        const list = collectConfig(args.workspace);
+        // A list that could not be opened is not a list without this item on it.
+        // Saying "no such item" over a read failure is the same lie the queue
+        // stopped telling in jwildfire/obot.agent#206.
+        if (list.error && !list.absent) return send(500, 'text/plain', `the config list could not be read: ${list.error}`);
+        const item = list.items.find((it) => String(it.id ?? '').toLowerCase() === cardId);
+        if (!item) return send(404, 'text/plain', `${cardId} is not an open item on the config list`);
+        const card = buildCard({ ...item, criticalClaim: criticalClaim(item) }, readCardSource(args.workspace, cardId));
+        return send(200, 'text/html; charset=utf-8', renderCard(card));
+      }
 
       // Artifacts are served from the tree the queue was built from, so the page he
       // opens is the page the row promised — never a staler copy of it.
