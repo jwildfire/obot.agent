@@ -255,3 +255,28 @@ All active repos live under the `jwildfire` account; agent-authored commits, pus
 and PRs come from `obotclaw[bot]` per `skills/obot-identity/SKILL.md`. Future transfer
 to `SafetyGraphics` should happen only after repository scope, naming, permissions,
 and governance are clear.
+
+### An approval-gated action cites the approval, not the requirement
+
+Deleting, merging to a protected surface, and anything an invariant names must name
+where @jwildfire said yes — the specific approval, with its date and channel, not the
+document that contains it. A requirement is not that document: most are now written by
+an agent, and a filed requirement is milestoned, boarded and goal-linked whether the
+scope in it came from him or from an agent's own judgement.
+
+```bash
+node obot.roadmap/scripts/provenance.mjs resolve <requirement number | D0018.1 | owner/repo#9 review>
+```
+
+It prints what was asked, what he said, the channel and the date, or it says nobody has
+approved this — which is a complete answer, and means stop and ask. Where an approval
+can live on the object being approved, prefer that form: a native GitHub review carries
+his identity, the object and a timestamp first-party, with no relay chain to have
+provenance about. Chat relay is the fallback for what GitHub cannot hold — config items,
+deletions, decisions about surfaces rather than pull requests.
+
+Two things not to do. Do not compose a citation from your own reading of a conversation;
+if the decision is real but unrecorded, the fix is a decision artifact. And do not append
+"and reviewed by @jwildfire" to an attribution line — that clause sat on 75 of the hub's
+113 requirements with no record of a review behind any of them, which is what an
+approval field becomes when anyone can type into it (hub#215).

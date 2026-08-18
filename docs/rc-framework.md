@@ -106,6 +106,23 @@ for. What never happens is the increment appearing in his review queue: he
 reviews release candidates and decision artifacts, and nothing else
 (@jwildfire, 2026-08-15: *"this isnt an RC or an artifact"*).
 
+Check the decision before you cite it. `--decision` takes a free-text string and
+`obot-merge` validates the *lane* rather than the citation — it never opens the
+registry, so `--decision 'D0005, he approved it'` and `--decision 'some earlier
+decision'` are equally acceptable to the tool, and its own test suite passes both.
+The citation is therefore worth exactly what the person composing it checked, which
+is the failure mode hub#215 exists to close. So resolve it first:
+
+```bash
+node obot.roadmap/scripts/provenance.mjs resolve D0018.1
+```
+
+That prints what was asked, what he said, the channel and the date — the four facts
+the audit comment should be quoting — or it refuses, which means there is no such
+decision and the answer is a decision artifact rather than a better sentence. Citing
+a decision that does not resolve is worse than merging without one: it puts his name
+on the merge, in a comment that stays.
+
 ## What an RC PR must carry
 
 An RC is not "the accumulated diff." It is a release proposed for publication,
