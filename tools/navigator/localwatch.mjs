@@ -283,6 +283,7 @@ export function unproposedBranches(rows = [], { now = Date.now(), days = UNPROPO
   const findings = []
   let excluded = 0
   let roles = 0
+  let unread = 0
   let tooYoung = 0
   let settled = 0
   for (const r of rows) {
@@ -292,6 +293,12 @@ export function unproposedBranches(rows = [], { now = Date.now(), days = UNPROPO
     // first live run reported five of them and one real branch, which is the ratio
     // that gets a section skipped.
     if (r.role) { roles++; continue }
+    // An unread pull-request listing is not an exclusion. Counting it as one put it in
+    // the same sentence as `gh-pages` — "excluded as machine-written" — which says a
+    // branch was skipped because it is machine-written when the truth is that nobody
+    // could tell whether it had a pull request. That is the house failure mode with a
+    // different label on it.
+    if (r.unread) { unread++; continue }
     if (r.excluded || PUBLISH_BRANCHES.includes(r.branch)) { excluded++; continue }
     if (r.hasPR || r.merged) { settled++; continue }
     const age = now - (r.lastCommitMs || 0)
@@ -303,7 +310,7 @@ export function unproposedBranches(rows = [], { now = Date.now(), days = UNPROPO
     })
   }
   findings.sort((a, b) => b.ageMs - a.ageMs)
-  return { findings, excluded, roles, tooYoung, settled }
+  return { findings, excluded, roles, unread, tooYoung, settled }
 }
 
 /** One git command against a checkout, or null. Never throws — a reading that fails is
@@ -434,12 +441,15 @@ export function localSection(found = {}, now = Date.now()) {
   // The broken reading goes first and on its own, because everything under it is a
   // partial view and a partial view presented as a verdict is the failure one door
   // down from the one this file is about.
-  if (live === null || unread.length || cloneUnread.length || !fetchAge) {
+  const fetchFailed = found.fetchFailed ?? []
+  if (live === null || unread.length || cloneUnread.length || !fetchAge || fetchFailed.length || branches.unread) {
     const why = []
     if (live === null) why.push('the live agent ledger could not be read, so no worktree here can be called ownerless — an unreadable fleet is not an empty one')
     if (unread.length) why.push(`${unread.length} working tree(s) could not be read`)
     if (cloneUnread.length) why.push(`${cloneUnread.length} checkout position(s) could not be measured`)
     if (!fetchAge) why.push('no fetch has ever completed on this machine, so every position below is unmeasured rather than current')
+    if (fetchFailed.length) why.push(`the fetch failed for ${fetchFailed.join(', ')}, so those positions are older than the stamp above them says`)
+    if (branches.unread) why.push(`${branches.unread} branch(es) could not be checked for a pull request, and are counted as proposed rather than as findings`)
     lines.push(`${ALARM_BROKEN} — ${why.join('; ')}. Nothing below is a clean bill of health.`)
   }
 
@@ -606,7 +616,7 @@ export function collectLocal({ repos = [], ws, cacheFile, jobsDir, now = Date.no
       if (b.repo !== repo) continue
       // A repo whose pull requests could not be listed must not turn every branch into
       // a finding, so an unread listing counts its branches as proposed and says so.
-      if (heads === null) b.excluded = 'pull requests could not be listed'
+      if (heads === null) b.unread = 'pull requests could not be listed'
       else b.hasPR = heads.has(b.branch)
     }
   }
@@ -616,6 +626,10 @@ export function collectLocal({ repos = [], ws, cacheFile, jobsDir, now = Date.no
     clones,
     claimants: live,
     fetchedAt: fetch.fetchedAt,
+    // The failures travel with the freshness. Without this the header said "last
+    // fetched 0m ago" over a repo whose fetch had just failed, and its position was
+    // hours old behind a number that looked current.
+    fetchFailed: fetch.failed ?? [],
   }
 }
 
