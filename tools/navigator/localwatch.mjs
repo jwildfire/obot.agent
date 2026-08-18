@@ -113,6 +113,29 @@ export const NOISE_SEGMENTS = ['node_modules', '.venv', '__pycache__', '.DS_Stor
  */
 export const PUBLISH_BRANCHES = ['gh-pages', 'session-state', 'gh-pages-preview']
 
+/**
+ * The trailer that says a branch exists to keep something, not to propose it.
+ *
+ * A dead worker's uncommitted tree is preserved by committing it to a branch and
+ * pushing it, after which the worktree can be removed without anyone weighing a
+ * deletion — that is how the `roadmap-rebuild` instance on jwildfire/obot.roadmap#256
+ * was resolved. The branch that results is not a role branch, not machine-published,
+ * not merged and has no pull request, so a day later it lands in "branches nobody ever
+ * proposed", where the prescribed next command is a pull request that must never be
+ * opened. A FINDING WHOSE REMEDY IS FORBIDDEN is worse than no finding: it is what
+ * teaches a reader to skip the section.
+ *
+ * Read from the commit object rather than from a branch-name convention, for the same
+ * reason ownership above is read as writes rather than as a session's own claim: a
+ * convention is a rule somebody has to remember at six in the morning, and the trailer
+ * is a fact the preserver already recorded.
+ *
+ * A preserved branch gets a row saying what it is. Silence would be wrong here — the
+ * whole point of the branch is that somebody deliberately kept something, and an
+ * exclusion count cannot say that.
+ */
+export const PRESERVED_TRAILER = 'Preserved-by'
+
 /** The tag every worker carries in its session name. A standing session is not one. */
 const WORKER_TAG = '\u{1F46F}\u{1F916}' // 👯🤖
 
@@ -283,6 +306,7 @@ export function classifyWorktree(reading, { claimants: live, now = Date.now(), g
  */
 export function unproposedBranches(rows = [], { now = Date.now(), days = UNPROPOSED_DAYS } = {}) {
   const findings = []
+  const preserved = []
   let excluded = 0
   let roles = 0
   let unread = 0
@@ -302,6 +326,10 @@ export function unproposedBranches(rows = [], { now = Date.now(), days = UNPROPO
     // different label on it.
     if (r.unread) { unread++; continue }
     if (r.excluded || PUBLISH_BRANCHES.includes(r.branch)) { excluded++; continue }
+    if (r.preservedBy) {
+      preserved.push({ ...r, line: `${shortRepo(r.repo)} \`${r.branch}\` — preserved by ${r.preservedBy}, no pull request expected: the branch exists so the work is recoverable from the remote, and merging it is not the remedy` })
+      continue
+    }
     if (r.hasPR || r.merged) { settled++; continue }
     const age = now - (r.lastCommitMs || 0)
     if (age < days * DAY) { tooYoung++; continue }
@@ -312,7 +340,7 @@ export function unproposedBranches(rows = [], { now = Date.now(), days = UNPROPO
     })
   }
   findings.sort((a, b) => b.ageMs - a.ageMs)
-  return { findings, excluded, roles, unread, tooYoung, settled }
+  return { findings, preserved, excluded, roles, unread, tooYoung, settled }
 }
 
 /** One git command against a checkout, or null. Never throws — a reading that fails is
@@ -435,6 +463,111 @@ export function clonePosition(root, { remote = 'origin', repo = '', branch = nul
 }
 
 /**
+ * The credential headline (obot.agent#246, under the same requirement as the rest of
+ * this file). Its own, because "a token is sitting in a config file" is a different
+ * thing from "a worktree was abandoned" and a reader should be able to tell at a
+ * glance which one the section is shouting about.
+ */
+export const ALARM_CREDENTIAL = '**CREDENTIAL AT REST FINDING**'
+
+/**
+ * A credential embedded in a config value.
+ *
+ * Two forms, and both are narrow on purpose. `user:secret@` inside a URL is what
+ * `git push -u https://x-access-token:TOKEN@github.com/...` leaves behind — the
+ * mechanism that put three of these on this machine. The token prefixes catch a
+ * secret sitting in a value with no URL around it, which an `http.extraheader` does.
+ *
+ * `ssh://git@host` and `git@host:owner/repo` do not match and must not: they carry a
+ * username and no secret, and they are what every correct remote in this workspace
+ * looks like.
+ */
+export const CONFIG_CRED_RE = /:\/\/[^/\s:@]+:[^/\s@]+@|\b(?:ghp|ghs|gho|ghu|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}/
+
+/**
+ * Where a credential is, and never what it is.
+ *
+ * Returns the stanza and the key, because that is enough to go and fix it and it
+ * carries nothing. This reading renders to the Navigator panel, into the state file
+ * 🎩🤖 prime reads, and into the wrapup that folds the shared scratchpad — so a row
+ * carrying the matched string would publish the credential to four surfaces in order
+ * to report that it was sitting in one. The config-item ledger already holds exactly
+ * this shape: ids from the journal, never the item text.
+ *
+ * A line above any stanza is reported as `(no section)` rather than dropped. A record
+ * with no section is still a record, and a parser that quietly discards what it did
+ * not expect is how a scan comes back clean about a file it did not fully read
+ * (obot.agent#247, the same lesson one file over).
+ */
+export function credentialLines(text = '') {
+  const out = []
+  let stanza = '(no section)'
+  for (const raw of String(text).split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue
+    const head = line.match(/^\[(.+)\]$/)
+    if (head) { stanza = head[1].trim(); continue }
+    if (!CONFIG_CRED_RE.test(line)) continue
+    out.push({ stanza, key: line.split('=')[0].trim() || '(unnamed)' })
+  }
+  return out
+}
+
+/**
+ * Every git config on this machine that could hold one.
+ *
+ * EVERY CLONE IN THE WORKSPACE, not only the seven in policy.json. The seven are the
+ * repos this program works in; the harm here is a file at rest that travels when the
+ * directory is copied, and a token in `gsm.kri/.git/config` travels exactly as far.
+ * @jwildfire is moving to a new machine this week, which is precisely when a copied
+ * checkout carries one along. The Navigator's hand scan covered every checkout and so
+ * does this.
+ *
+ * Per-worktree configs are included even though none exists today: they appear the
+ * moment `extensions.worktreeConfig` is set anywhere, and a check that has to be
+ * remembered at that point is a check that will not be.
+ */
+export function configFiles(ws, { list = readdirSync, exists = existsSync } = {}) {
+  const out = []
+  let names = []
+  try { names = list(ws) } catch { return out }
+  for (const name of names.sort()) {
+    const gitDir = join(ws, name, '.git')
+    if (!exists(join(gitDir, 'config'))) continue
+    out.push({ repo: name, file: join(gitDir, 'config') })
+    let wts = []
+    try { wts = list(join(gitDir, 'worktrees')) } catch { /* none, which is the usual case */ }
+    for (const wt of wts) {
+      const f = join(gitDir, 'worktrees', wt, 'config.worktree')
+      if (exists(f)) out.push({ repo: name, file: f })
+    }
+  }
+  return out
+}
+
+/**
+ * The scan. Counts what it read, names what it could not, and reports where.
+ *
+ * `scanned` is not decoration. A machine where the checkouts have not been cloned yet
+ * produces zero findings for the same reason a clean machine does, and zero on day
+ * one is the reading most likely to be believed — so "nothing scanned" and "nothing
+ * found" are kept apart here and in the render, which is the third time that
+ * distinction has been the whole fix in this file.
+ */
+export function scanConfigs(files = [], { read = readFileSync } = {}) {
+  const findings = []
+  const unreadable = []
+  let scanned = 0
+  for (const f of files) {
+    let text
+    try { text = read(f.file, 'utf8') } catch { unreadable.push(f.repo); continue }
+    scanned++
+    for (const hit of credentialLines(text)) findings.push({ repo: f.repo, file: f.file, ...hit })
+  }
+  return { scanned, unreadable, findings }
+}
+
+/**
  * The section, as the state file carries it and the Navigator panel renders it.
  *
  * Reported even when clean. A detector that only ever speaks up on failure is
@@ -449,6 +582,7 @@ export function localSection(found = {}, now = Date.now()) {
   const worktrees = found.worktrees ?? []
   const branches = found.branches ?? { findings: [], excluded: 0, tooYoung: 0 }
   const clones = found.clones ?? []
+  const creds = found.credentials ?? null
   const live = found.claimants ?? null
   const verdicts = worktrees.map((w) => (w.kind ? w : classifyWorktree(w, { claimants: live, now })))
 
@@ -460,6 +594,11 @@ export function localSection(found = {}, now = Date.now()) {
   const active = verdicts.filter((v) => v.kind === 'active')
   const cloneAlarms = clones.filter((c) => c.alarm)
   const cloneUnread = clones.filter((c) => c.read === false)
+  const credFindings = creds?.findings ?? []
+  // Counted apart from the work findings, because they are a different thing with a
+  // different headline. Folding them into the same total produced "1 piece(s) of work
+  // … 0 stranded, 0 unproposed, 0 checkouts" — a breakdown that does not add up, which
+  // costs a reader more trust than the finding buys.
   const findings = stranded.length + branches.findings.length + cloneAlarms.length
 
   const fetchedMs = found.fetchedAt ? Date.parse(found.fetchedAt) : NaN
@@ -471,7 +610,9 @@ export function localSection(found = {}, now = Date.now()) {
   // partial view and a partial view presented as a verdict is the failure one door
   // down from the one this file is about.
   const fetchFailed = found.fetchFailed ?? []
-  if (live === null || unread.length || undated.length || cloneUnread.length || !fetchAge || fetchFailed.length || branches.unread) {
+  const credBlind = creds !== null && creds.scanned === 0
+  if (live === null || unread.length || undated.length || cloneUnread.length || !fetchAge
+      || fetchFailed.length || branches.unread || credBlind || creds?.unreadable?.length) {
     const why = []
     if (live === null) why.push('the live agent ledger could not be read, so no worktree here can be called ownerless — an unreadable fleet is not an empty one')
     if (unread.length) why.push(`${unread.length} working tree(s) could not be read`)
@@ -480,12 +621,22 @@ export function localSection(found = {}, now = Date.now()) {
     if (!fetchAge) why.push('no fetch has ever completed on this machine, so every position below is unmeasured rather than current')
     if (fetchFailed.length) why.push(`the fetch failed for ${fetchFailed.join(', ')}, so those positions are older than the stamp above them says`)
     if (branches.unread) why.push(`${branches.unread} branch(es) could not be checked for a pull request, and are counted as proposed rather than as findings`)
+    if (credBlind) why.push('no git config was scanned for a credential, so no finding here means no reading — on a machine whose checkouts are not cloned yet this is what zero looks like')
+    if (creds?.unreadable?.length) why.push(`${creds.unreadable.length} git config(s) could not be read (${creds.unreadable.join(', ')}), so a credential in them would not have been seen`)
     lines.push(`${ALARM_BROKEN} — ${why.join('; ')}. Nothing below is a clean bill of health.`)
   }
 
-  lines.push(findings > 0
-    ? `${ALARM_FINDING} — ${findings} piece(s) of work exist on this machine that no GitHub-derived check can see: ${stranded.length} stranded worktree(s), ${branches.findings.length} unproposed branch(es), ${cloneAlarms.length} checkout(s) out of step with their remote.`
-    : `local-only work: clean — ${verdicts.length} worktrees and ${clones.length} checkouts read, nothing stranded${fetchAge ? `, positions as last fetched ${fetchAge} ago` : ''}`)
+  if (findings > 0) {
+    lines.push(`${ALARM_FINDING} — ${findings} piece(s) of work exist on this machine that no GitHub-derived check can see: ${stranded.length} stranded worktree(s), ${branches.findings.length} unproposed branch(es), ${cloneAlarms.length} checkout(s) out of step with their remote.`)
+  } else if (!credFindings.length) {
+    lines.push(`local-only work: clean — ${verdicts.length} worktrees and ${clones.length} checkouts read, nothing stranded${fetchAge ? `, positions as last fetched ${fetchAge} ago` : ''}`)
+  }
+
+  // Its own headline. A token at rest is a different thing from an abandoned worktree
+  // and a reader should not have to open a group to find out which one fired.
+  if (credFindings.length) {
+    lines.push(`${ALARM_CREDENTIAL} — ${credFindings.length} git config(s) on this machine record a credential in a value. Named below by file and stanza only: the value is never printed, because this section renders to the panel, to the state file prime reads, and into the shared scratchpad.`)
+  }
 
   // Every exclusion prints its count. A truncated list that does not say so reads as
   // full coverage, and a suppression nobody can see is indistinguishable from a check
@@ -495,7 +646,9 @@ export function localSection(found = {}, now = Date.now()) {
   if (held.length) notes.push(`${held.length} stale worktree(s) a live worker predates, listed below without an alarm`)
   if (branches.roles) notes.push(`${branches.roles} branch(es) skipped as role branches from policy.json — a release lane is merged into, never proposed from`)
   if (branches.excluded) notes.push(`${branches.excluded} branch(es) excluded as machine-written — the publish branches (${PUBLISH_BRANCHES.join(', ')}) and dependabot pushes`)
+  if (branches.preserved?.length) notes.push(`${branches.preserved.length} branch(es) preserved on purpose and listed below — kept so somebody's work is recoverable, never to be proposed`)
   if (branches.tooYoung) notes.push(`${branches.tooYoung} branch(es) younger than ${UNPROPOSED_DAYS}d, where a pull request is usually the next command`)
+  if (creds && !credBlind) notes.push(`${creds.scanned} git config(s) scanned for a credential at rest${credFindings.length ? '' : ' — none found'}`)
   if (fetchAge) notes.push(`remotes last fetched ${fetchAge} ago, refreshed at most every ${FETCH_TTL_MIN}m — every position above is as last fetched, never live`)
   for (const n of notes) lines.push(`  ${n}`)
 
@@ -510,7 +663,11 @@ export function localSection(found = {}, now = Date.now()) {
   group('Worktrees that could not be read', unread)
   group('Worktrees whose age could not be measured', undated)
   group('Branches nobody ever proposed', branches.findings)
+  group('Branches preserved on purpose, never to be proposed', branches.preserved ?? [])
   group('Checkouts out of step with their remote', cloneAlarms)
+  group('Credentials recorded in a git config', credFindings.map((f) => ({
+    line: `${f.repo} \`${f.file.replace(/^.*\/(?=[^/]+\/\.git\/)/, '')}\` — a credential is recorded in \`[${f.stanza}] ${f.key}\`; the value is not printed here`,
+  })))
   return lines.join('\n') + '\n'
 }
 
@@ -632,6 +789,7 @@ export function collectLocal({ repos = [], ws, cacheFile, jobsDir, now = Date.no
     if (b.role || b.excluded) continue
     if (now - (b.lastCommitMs || 0) < UNPROPOSED_DAYS * DAY) continue
     b.merged = git(b.root, ['merge-base', '--is-ancestor', b.ref, `${b.remote}/${b.integration}`]) !== null
+    b.preservedBy = git(b.root, ['log', '-1', `--format=%(trailers:key=${PRESERVED_TRAILER},valueonly)`, b.ref])?.trim() || null
   }
 
   // GitHub is asked LAST, and only about the repos where the answer can still change
@@ -652,6 +810,8 @@ export function collectLocal({ repos = [], ws, cacheFile, jobsDir, now = Date.no
     }
   }
   return {
+    // Every clone in the workspace, not only the policy roots — see `configFiles`.
+    credentials: scanConfigs(configFiles(ws)),
     worktrees,
     branches: unproposedBranches(branchRows, { now }),
     clones,
