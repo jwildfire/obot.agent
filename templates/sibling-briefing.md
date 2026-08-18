@@ -109,9 +109,26 @@ obot.agent/scripts/obot-merge {pr#} -R jwildfire/{repo} --squash --delete-branch
   which refuses about one call in thirty at random. That coin flip is what left
   obot.agent#150 and #158 finished and unmerged overnight on 2026-08-17. The wrapper prints
   ten lines — there is nothing to trim, so do not pipe it.
+- **An approval-gated action cites the approval, not the requirement.** Before deleting
+  anything, merging to a protected surface, or doing anything an invariant names, run:
+
+```bash
+node obot.roadmap/scripts/provenance.mjs resolve {requirement number or D0018.1}
+```
+
+  It prints what was asked, what he said, the channel and the date — or it says nobody
+  has approved this, which is a complete answer and means stop. A requirement is never
+  the authority: most are written by an agent, they are milestoned and boarded and linked
+  to a goal either way, and on 2026-08-16 a worker read one as his approval and prepared
+  to delete files that he had never agreed to lose. Quote what `resolve` prints. If the
+  decision is real but unrecorded, the fix is a decision artifact — never a citation you
+  compose yourself (hub#215).
 - **No writes outside the `jwildfire` org.**
 - **Nothing deleted** without approval.
-- **Attribution line at the bottom** of drafted artifacts, after a `---` rule.
+- **Attribution line at the bottom** of drafted artifacts, after a `---` rule. It names
+  who drafted it and stops there — do not append "and reviewed by @jwildfire" unless he
+  reviewed it. That clause was on 75 of the hub's 113 requirements, none of which carried
+  any record of a review, because it costs nothing to write and nothing checked it.
 - **GitHub bodies use one line per paragraph or bullet** — no hard-wrapped prose.
 - **Every commit carries a `Worker: {W-id}` trailer**, and every issue or PR you open names
   your id. An unstamped write can never be attributed afterwards: the bot identity is shared,
