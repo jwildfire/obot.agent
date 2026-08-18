@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { STANDING_ROLES, kindOf } from '../lib/roster-view.mjs';
+import { STANDING_ROLES, kindOf, standingRoleOf } from '../lib/roster-view.mjs';
 import {
   emptyPins, isPinned, labelIsPinned, pinKey, pinState, pinnedByDefault, readPins, writePin,
 } from '../lib/pins.mjs';
@@ -96,14 +96,22 @@ test('the three standing roles are the ones he named: prime, admiral and nav', (
   assert.deepEqual(STANDING_ROLES.map((r) => r.short).sort(), ['admiral', 'nav', 'prime']);
 });
 
-test('a resting line fits the Task cell that renders it', () => {
-  // `resting` is rendered as the Task cell for a pinned role with no session, so a
-  // long one is clipped with an ellipsis on the Agents tab rather than wrapping.
-  // The admiral's line was 101 characters when it was written for the fleet manager
-  // and would have shipped clipped the day that column landed; it is 88 now. This
-  // holds the next one under the limit without anyone having to know the limit.
+test('a renamed role keeps its own history: prior tags still resolve to it', () => {
+  // The failure this catches is silent in both directions. When the third role was
+  // renamed from fleet to admiral (obot.agent#182) its tag moved from the traffic
+  // signal to the anchor, and every session that had already run under the old tag
+  // — including its first real launch and the run that wedged for eleven hours —
+  // stopped classifying as a standing role and fell through to `other`. Nothing
+  // errored, and the pinned band still showed three roles the whole time, because
+  // the resting row is derived from the registry rather than from any session. So
+  // the obvious acceptance check passed while the role's record was being lost.
   for (const r of STANDING_ROLES) {
-    assert.ok(r.resting.length < 100, `${r.short}'s resting line is ${r.resting.length} chars, over the 100 the Task cell fits`);
+    for (const prior of r.priorTags ?? []) {
+      const old = row({ label: `${prior} obot-${r.short}` });
+      assert.equal(kindOf(old), 'standing', `a session tagged ${prior} should still be ${r.short}`);
+      assert.equal(standingRoleOf(old)?.short, r.short);
+      assert.equal(pinKey(old), `role:${r.tag}`, 'an old-tag row must share the pin key of the role it belongs to');
+    }
   }
 });
 
@@ -235,7 +243,7 @@ test('a pinned role whose session ended cleanly before the ledger epoch still ge
 });
 
 test('a pinned role that has never run at all renders a resting row rather than nothing', () => {
-  // The fleet manager is short-lived by design (obot.agent#167): it launches when a
+  // The admiral is short-lived by design (obot.agent#167): it launches when a
   // condition fires and exits. So its usual state is absent, and an absent pinned
   // role must say "not running" rather than leave a gap — a quiet system must not
   // look like a broken one, and an empty slot cannot say which it is.

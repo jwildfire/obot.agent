@@ -147,7 +147,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, fleet = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -201,7 +201,7 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // wake says a worker stopped; this says what was done about it. They sit together
   // because reading one without the other is how six stalled sessions and seven open
   // pull requests stayed visible for two days without anything moving.
-  if (fleet && fleet.trim()) lines.push(fleet.trimEnd(), '')
+  if (admiral && admiral.trim()) lines.push(admiral.trimEnd(), '')
 
   lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
@@ -321,16 +321,16 @@ function readDelivery() {
 const auditDelivery = () => shellAudit('delivery-log')
 
 /**
- * The fleet trigger, and the launch when a condition holds (obot.agent#167).
+ * The admiral trigger, and the launch when a condition holds (obot.agent#167).
  *
  * Shelled rather than imported so the conditions are computed in exactly ONE place:
  * what this file renders and what actually launched can then never disagree. It
- * prints its own `## Fleet` section, so the sweep folds it whole in the same way it
+ * prints its own `## Admiral` section, so the sweep folds it whole in the same way it
  * folds the delivery record.
  *
  * This is the only part of the sweep that CAUSES something rather than recording it,
  * and it is deliberately the narrowest possible act: it starts a short-lived agent
- * and returns. Everything the manager then does is the manager's, under its own
+ * and returns. Everything the admiral then does is the admiral's, under its own
  * skill contract and its own time budget.
  */
 function runAdmiral() {
@@ -338,7 +338,7 @@ function runAdmiral() {
     env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 120000,
   })
   if (r.error || r.status === null) {
-    return `## Admiral — the triggered manager\n\n**ADMIRAL TRIGGER BROKEN** — launcher did not run (${r.error ? String(r.error.message).slice(0, 120) : 'killed'}). No condition was evaluated this run; this is not a quiet fleet.\n`
+    return `## Admiral — triggered, acts and exits\n\n**ADMIRAL TRIGGER BROKEN** — launcher did not run (${r.error ? String(r.error.message).slice(0, 120) : 'killed'}). No condition was evaluated this run; this is not a quiet fleet.\n`
   }
   return (r.stdout || '').trim() || null
 }
@@ -544,13 +544,13 @@ const safeJobs = () => {
   if (!existsSync(JOBS_DIR)) return null
   try { return readJobs(JOBS_DIR) } catch { return null }
 }
-// A broken trigger must not break the sweep, and must not fail quietly either — a
-// fleet section that simply vanished would read as a page with nothing to report.
+// A broken trigger must not break the sweep, and must not fail quietly either — an
+// admiral section that simply vanished would read as a page with nothing to report.
 // The launcher reads the job ledger itself rather than taking this one, so the
 // null-versus-empty distinction above is not in its path.
 const safeAdmiral = () => {
   try { return runAdmiral() } catch (e) {
-    return `## Admiral — the triggered manager\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
+    return `## Admiral — triggered, acts and exits\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
   }
 }
 // A broken wake must not break the sweep, and must not fail quietly either: the
@@ -590,7 +590,7 @@ function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, fleet: safeAdmiral() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, admiral: safeAdmiral() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -694,10 +694,10 @@ function main() {
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
-  // The fleet trigger runs last of the readings, after the wake, because a manager
+  // The admiral trigger runs last of the readings, after the wake, because an admiral
   // it launches will read the state file this run is about to write.
-  const fleet = safeAdmiral()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, fleet }))
+  const admiral = safeAdmiral()
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

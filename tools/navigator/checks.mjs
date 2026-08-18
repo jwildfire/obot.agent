@@ -144,13 +144,13 @@ export function registryDisagreement(registry = {}, indexRows = []) {
  * Only workers, and this is a DELIVERY question rather than a liveness one — which
  * is the distinction obot.agent#181 was filed about. A worker is judged on what it
  * delivered; a role is not. Prime and the Navigator carry no deliverable, and
- * neither does the fleet manager: it moves other people's finished work and records
- * what it did in the fleet log, so a verdict on its own closeout would be a verdict
+ * neither does the admiral: it moves other people's finished work and records what
+ * it did in the admiral log, so a verdict on its own closeout would be a verdict
  * on nothing. Its exits stay out of this list on purpose.
  *
  * The exclusion that WAS wrong is the liveness one, and it lived in wake.mjs: the
  * `blocked`/`done` states mean something different for a session that rests between
- * wakings, and the fleet manager was excluded as if it were one of those when it is
+ * wakings, and the admiral was excluded as if it were one of those when it is
  * the opposite — triggered, budgeted, and dead when it stops. That is now asked of
  * `lifecycle` in tools/lib/roles.mjs rather than of a list of roles.
  *

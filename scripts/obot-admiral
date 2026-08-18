@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// obot-admiral — evaluate the fleet conditions and, when one holds, launch a
-// short-lived 🚦🤖 manager that acts and exits.
+// obot-admiral — evaluate the trigger conditions and, when one holds, launch a
+// short-lived ⚓🤖 admiral that acts and exits.
 //
 // Implements jwildfire/obot.agent#167 under jwildfire/obot.roadmap#236.
 //
 // THE SHAPE, and it is the whole design: the sweep DETECTS and this LAUNCHES; the
-// manager ACTS and EXITS. Nothing here is a standing session, because a standing
+// admiral ACTS and EXITS. Nothing here is a standing session, because a standing
 // supervisor was measured and argued against in D0016 and that analysis still
 // stands — it was right about detection, which was never the problem. Finished work
 // stopped moving twice in two days and @jwildfire found it both times, with all of
@@ -17,7 +17,7 @@
 // disagree. The sweep shells this and folds the section it prints — the same
 // pattern it already uses for the ledger audits.
 //
-// WHY THE MANAGER IS AN AGENT AND NOT MORE SCRIPT. Two of its three actions need
+// WHY THE ADMIRAL IS AN AGENT AND NOT MORE SCRIPT. Two of its three actions need
 // judgment that a script cannot supply: a summary must be built from what reached
 // GitHub rather than from the session's own record, and a pull request must be
 // measured against a bar with a stated reason when it fails. The third — closing a
@@ -25,7 +25,7 @@
 //
 // Usage:
 //   obot-admiral                 evaluate; launch if warranted; print the
-//                                      `## Fleet` section on stdout for the sweep
+//                                      `## Admiral` section on stdout for the sweep
 //   obot-admiral --check         evaluate and report; never launch
 //   obot-admiral --json          the trigger as JSON, no launch
 //   obot-admiral --preflight-only  print the launch command only
@@ -41,13 +41,13 @@
 // THE HARD CEILING IS ARMED BY DEFAULT; OBOT_ADMIRAL_KILL=0 disarms it. The Navigator
 // decided this on 2026-08-17 and the reasoning is worth keeping: a kill that ships
 // disarmed is documentation, and the failure it prevents is the one the requirement
-// names — a manager with no enforced limit is a standing session that has not
+// names — an admiral with no enforced limit is a standing session that has not
 // admitted it yet. The risk of an armed kill is interrupting a write, and that risk
-// is small here by construction, because everything fleet writes is append-only and
-// an interrupted append is a shorter record rather than a corrupted one.
+// is small here by construction, because everything the admiral writes is append-only
+// and an interrupted append is a shorter record rather than a corrupted one.
 //
-// A ceiling that fires silently is indistinguishable from a manager that exited
-// cleanly, so the kill leaves a line in the fleet log AND an alarm headline in the
+// A ceiling that fires silently is indistinguishable from an admiral that exited
+// cleanly, so the kill leaves a line in the admiral log AND an alarm headline in the
 // section that reaches the dashboard.
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -102,10 +102,10 @@ const say = (m) => console.error(`obot-admiral: ${m}`)
 const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
 
 /**
- * The command that launches a manager.
+ * The command that launches an admiral.
  *
  * UNBRIDGED, deliberately. Remote Control is for the roles @jwildfire talks to from
- * a phone — the Navigator and the concierge. The manager talks to nobody: it reads
+ * a phone — the Navigator and the concierge. The admiral talks to nobody: it reads
  * GitHub, acts, records and exits. Dropping the flag alone is a no-op because the
  * flag is OR-ed with the global setting, so the setting is overridden explicitly
  * (obot.agent#116/#117).
@@ -179,7 +179,7 @@ function main() {
 
   // The host guard, borrowed from the wake and for the same reason: on 2026-08-16 a
   // lid closed for thirteen hours and every worker on the machine read as stalled on
-  // the next sweep. A detector cannot run on a suspended host, and a manager that
+  // the next sweep. A detector cannot run on a suspended host, and an admiral that
   // launched on that reading would have closed a fleet that was merely asleep.
   let prevSweptIso = null
   try { prevSweptIso = JSON.parse(safeRead(SNAPSHOT)).sweptIso ?? null } catch { /* first run */ }
@@ -220,15 +220,15 @@ function main() {
   }
   let launched = null
 
-  // An overrunning manager is handled before anything else: it is also the thing
+  // An overrunning admiral is handled before anything else: it is also the thing
   // holding the singleton, so a report that mentions it after the hold reads as if
   // the hold were normal.
   for (const o of overruns) {
     say(o.line)
     if (MODE === 'run' && o.hard && process.env.OBOT_ADMIRAL_KILL !== '0') {
-      const killed = killManager(o.job, jobs)
-      appendFileSync(ADMIRAL_LOG, `${now.toISOString()} HOLD - — killed overrunning manager ${o.job}: ${killed}\n`)
-      say(`killed overrunning manager ${o.job}: ${killed}`)
+      const killed = killAdmiral(o.job, jobs)
+      appendFileSync(ADMIRAL_LOG, `${now.toISOString()} HOLD - — killed overrunning admiral ${o.job}: ${killed}\n`)
+      say(`killed overrunning admiral ${o.job}: ${killed}`)
       o.killed = killed
     }
   }
@@ -277,14 +277,14 @@ function main() {
 }
 
 /**
- * Terminate an overrunning manager, armed only by OBOT_ADMIRAL_KILL=1.
+ * Terminate an overrunning admiral, armed only by OBOT_ADMIRAL_KILL=1.
  *
  * The pid comes from `claude agents --json`, joined on the session id, because the
  * job record does not carry one. SIGTERM rather than SIGKILL so the session gets to
- * flush; a manager that ignores it is reported again on the next run, which is a
+ * flush; an admiral that ignores it is reported again on the next run, which is a
  * finding rather than an escalation.
  */
-function killManager(jobId, jobs) {
+function killAdmiral(jobId, jobs) {
   try {
     const list = JSON.parse(execFileSync('claude', ['agents', '--json'], { encoding: 'utf8', timeout: 20000 }))
     const job = jobs.find((j) => j.id === jobId)

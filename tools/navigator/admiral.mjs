@@ -1,7 +1,7 @@
-// fleet — the trigger conditions for the fleet manager (obot.agent#167, under
+// admiral — the trigger conditions for the admiral (obot.agent#167, under
 // jwildfire/obot.roadmap#236).
 //
-// The sweep detects; a short-lived manager acts and exits. This module is the
+// The sweep detects; a short-lived admiral acts and exits. This module is the
 // detecting half: pure functions over job records and an open-PR listing, so the
 // conditions can be proved in a test rather than trusted in production.
 //
@@ -16,17 +16,17 @@
 // THREE PROPERTIES THIS FILE EXISTS TO GUARANTEE:
 //
 // 1. THE TRIGGER IS A POSITIVE CONDITION, NEVER AN ABSENCE. "Nothing is running"
-//    must not launch a manager, or a genuinely quiet system spawns one forever.
+//    must not launch an admiral, or a genuinely quiet system spawns one forever.
 //    Every condition below is something that IS true of a named job or a named pull
 //    request — never something that is missing. `triggers()` on an empty fleet
 //    returns fired:false, and a test holds it there.
 //
-// 2. THE SWEEP MAKES THE CHEAP TEST; THE MANAGER MAKES THE EXPENSIVE ONE. A PR is a
+// 2. THE SWEEP MAKES THE CHEAP TEST; THE ADMIRAL MAKES THE EXPENSIVE ONE. A PR is a
 //    candidate here on facts the sweep already has in hand — open, idle, not a
 //    draft, not a release candidate, operational repo. Whether its checks are green,
 //    whether a review requested changes, whether it closes an issue: that is a call
 //    per pull request, far too much for something that runs every five minutes, and
-//    it is the manager's bar to apply. A candidate is NOT a decision to merge.
+//    it is the admiral's bar to apply. A candidate is NOT a decision to merge.
 //
 // 3. IT DESCRIBES; IT DOES NOT JUDGE. A closeout with no verdict is reported as a
 //    gap. Judging delivery stays the Navigator's — the delivery record is
@@ -37,7 +37,7 @@
 // Detection of stop-states is NOT rebuilt here. wake.mjs (hub#212) already knows
 // what waiting, stalled and dead look like, and every signature in it was taken
 // from a real job record on this machine. This module raises the bar and nothing
-// else: the wake notifies at 10-30 minutes, the manager acts at hours, because a
+// else: the wake notifies at 10-30 minutes, the admiral acts at hours, because a
 // notification that turns out to be premature costs a glance and a close that turns
 // out to be premature destroys work.
 import { classify, hostWasAway, isWorker, judgedWorkers, readJobs, verdictKeys,
@@ -67,9 +67,9 @@ export const isAdmiral = (job) => String(job?.name ?? '').startsWith(ADMIRAL_TAG
  *
  * Copied from wake.mjs's `classify`, which had them right. The first draft of the
  * singleton tested `state !== 'done'` alone, and the very first real launch caught
- * it: a manager stopped an hour earlier still read as live, so the singleton was
- * held permanently and no manager could ever launch again. The launcher went on
- * reporting "held — a manager is already running", which is the worst shape a
+ * it: an admiral stopped an hour earlier still read as live, so the singleton was
+ * held permanently and no admiral could ever launch again. The launcher went on
+ * reporting "held — an admiral is already running", which is the worst shape a
  * failure can take here, because it looks exactly like the guard working.
  */
 export const TERMINAL = ['done', 'stopped', 'failed']
@@ -81,7 +81,7 @@ const num = (v, dflt) => {
 }
 
 /**
- * How long a stop-state must hold before a manager acts on it. MEASURED, not
+ * How long a stop-state must hold before an admiral acts on it. MEASURED, not
  * guessed — the requirement asks for that explicitly.
  *
  * From the 92 job records on this machine (2026-08-17): of every span a worker
@@ -102,7 +102,7 @@ const num = (v, dflt) => {
  * `dead` is shorter because a worker that died on an API error is not coming back,
  * so waiting on it cannot pay. 60 minutes still leaves the wake channel — whose own
  * re-wake floor for a dead worker is 60 minutes — a full cycle to reach the
- * Navigator first, so the manager is the second responder rather than the first.
+ * Navigator first, so the admiral is the second responder rather than the first.
  */
 export const ACT_MIN = {
   waiting: num(process.env.OBOT_ADMIRAL_WAIT_MIN, 180),
@@ -134,16 +134,16 @@ export const PR_IDLE_MIN = num(process.env.OBOT_ADMIRAL_PR_IDLE_MIN, 120)
  * healthy verdict ever recorded here and below both failures.
  *
  * Without this bar the condition would fire the instant any worker finished, which
- * would launch a manager after every single piece of work — a busy fleet spawning
+ * would launch an admiral after every single piece of work — a busy fleet spawning
  * an overseer per closeout, which is the standing-supervisor cost D0016 rejected,
  * arriving by the back door.
  */
 export const CLOSEOUT_GAP_MIN = num(process.env.OBOT_ADMIRAL_GAP_MIN, 90)
 
 /**
- * The manager's lifetime bound, and the whole reason a triggered design beats a
- * standing one. A manager with no time limit is a standing session that has not
- * admitted it yet. The manager is told this budget and must exit inside it; the
+ * The admiral's lifetime bound, and the whole reason a triggered design beats a
+ * standing one. An admiral with no time limit is a standing session that has not
+ * admitted it yet. The admiral is told this budget and must exit inside it; the
  * sweep reports one that has not, which works because the sweep is a script and
  * cannot stall the way an agent stalls, and the only thing watching IT is launchd,
  * which is the operating system. The regress terminates at the OS.
@@ -161,7 +161,7 @@ export const ADMIRAL_HARD_MIN = num(process.env.OBOT_ADMIRAL_HARD_MIN, 60)
 export const RELAUNCH_FLOOR_MIN = num(process.env.OBOT_ADMIRAL_FLOOR_MIN, 60)
 /** And a much longer floor when the conditions are the SAME ones as last time, so a
  *  condition nothing can resolve — a pull request that will never pass the bar —
- *  cannot spin up a manager every hour for the rest of the week. */
+ *  cannot spin up an admiral every hour for the rest of the week. */
 export const REPEAT_FLOOR_MIN = num(process.env.OBOT_ADMIRAL_REPEAT_MIN, 240)
 
 const minsSince = (at, now) => {
@@ -219,7 +219,7 @@ export function stalledSessions(jobs = [], { now = new Date(), hostWasAway: away
 // ---- condition 2: operational pull requests that stopped moving --------------
 
 /**
- * Repos the manager may land a pull request in, and the branch it may land on.
+ * Repos the admiral may land a pull request in, and the branch it may land on.
  *
  * Read from scripts/policy.json rather than listed here, so promoting a repo is
  * still one decision in one file. Two filters, both of them hard:
@@ -253,11 +253,11 @@ export function operationalRepos(policy = {}) {
  *
  * CANDIDATES, not decisions. Everything excluded here is excluded on data the sweep
  * already holds from `gh pr list`; everything else — checks green, no requested
- * changes, a linked issue — is the manager's bar, applied per pull request with the
+ * changes, a linked issue — is the admiral's bar, applied per pull request with the
  * calls that needs. The exclusions:
  *
  *   not the integration branch — a release-role base is a release candidate by
- *     definition and the manager may never merge one.
+ *     definition and the admiral may never merge one.
  *   draft — unfinished by its author's own declaration.
  *   reviewDecision set — @jwildfire has it, or has ruled on it. Either way it is
  *     his, and an RC by the sweep's own classifier.
@@ -295,11 +295,11 @@ export function stuckPRs(prs = [], { now = new Date(), idleMin = PR_IDLE_MIN } =
 /**
  * Workers that finished and carry no verdict.
  *
- * REPORTED, NEVER JUDGED. The manager surfaces the gap and wakes the Navigator; the
+ * REPORTED, NEVER JUDGED. The admiral surfaces the gap and wakes the Navigator; the
  * Navigator writes the verdict. This is correction 1 of the requirement and the one
  * most likely to be eroded by a well-meaning later change, so the shape of this
- * return value carries no verdict field at all — there is nothing here for a
- * manager to fill in.
+ * return value carries no verdict field at all — there is nothing here for an
+ * admiral to fill in.
  */
 export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
                                           judgedReadable = true,
@@ -311,10 +311,10 @@ export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
   //
   // Found by running it rather than by reasoning about it: a sandboxed integration
   // run pointed OBOT_WORKSPACE at a fresh directory with the real job ledger, read
-  // no journal, and launched a real manager holding twelve phantom gaps for workers
+  // no journal, and launched a real admiral holding twelve phantom gaps for workers
   // the Navigator had judged hours earlier. Nothing was written, because a gap is
   // only ever reported — but the same failure on a condition that ACTS would have
-  // been a manager closing a fleet on a missing file.
+  // been an admiral closing a fleet on a missing file.
   //
   // So it fails the other way: no reading means no detection, said out loud. Same
   // discipline as the sweep's `backlogCapped`, where a repo that failed to list must
@@ -327,7 +327,7 @@ export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
     // Bounded at both ends: below `minMins` the Navigator has simply not got to it
     // yet, and beyond the window is history nobody can judge any more. What falls
     // outside the top of the window is the wake channel's to report, not a gap to
-    // launch a manager for.
+    // launch an admiral for.
     if (mins === null || mins < minMins || mins > windowHours * 60) continue
     if (verdictKeys(job).some((k) => judged.has(k))) continue
     const who = workerIdOf(job.name) || `job ${job.id}`
@@ -351,7 +351,7 @@ export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
  * NAMED thing is in a state it should not be in. There is no branch in this
  * function that can fire on a count of zero, and `triggers({})` returning
  * fired:false is held by a test, because the failure mode it guards against — a
- * quiet system spawning managers forever — is silent, cheap to introduce and
+ * quiet system spawning admirals forever — is silent, cheap to introduce and
  * expensive to notice.
  */
 export function triggers({ jobs = [], prs = [], policy = {}, judged = new Set(),
@@ -403,7 +403,7 @@ export function parseAdmiralLog(text = '') {
 }
 
 /**
- * Whether this run launches a manager, and why not when it does not.
+ * Whether this run launches an admiral, and why not when it does not.
  *
  * Four gates, and every one of them reports what it held rather than returning a
  * bare false — a launcher that silently declines is indistinguishable from one that
@@ -416,7 +416,7 @@ export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
 
   const live = jobs.filter((j) => isAdmiral(j) && isLive(j))
   if (live.length) {
-    return { launch: false, why: `a manager is already running (job ${live[0].id}, ${live[0].state})` }
+    return { launch: false, why: `an admiral is already running (job ${live[0].id}, ${live[0].state})` }
   }
 
   const launches = log.filter((e) => e.op === 'LAUNCH')
@@ -430,7 +430,7 @@ export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
       return {
         launch: false,
         why: `identical conditions to the launch ${round(since)}m ago and nothing has changed — repeat floor is ` +
-             `${REPEAT_FLOOR_MIN}m, so a condition nobody can resolve cannot spin up a manager every hour`,
+             `${REPEAT_FLOOR_MIN}m, so a condition nobody can resolve cannot spin up an admiral every hour`,
       }
     }
   }
@@ -442,9 +442,9 @@ export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
 }
 
 /**
- * A manager that has not exited.
+ * An admiral that has not exited.
  *
- * `state` is not consulted for the clock: a manager stuck on a prompt reads
+ * `state` is not consulted for the clock: an admiral stuck on a prompt reads
  * `blocked` and one wedged mid-turn reads `working`, and both are overruns. What
  * matters is the wall clock since it started, which is the one reading that cannot
  * be overstated by the session's own account of itself.
@@ -462,7 +462,7 @@ export function overrun(jobs = [], { now = new Date(), ttlMin = ADMIRAL_TTL_MIN,
       state: job.state,
       mins: round(mins),
       hard: mins >= hardMin,
-      line: `manager job ${job.id} has run ${round(mins)}m against a ${ttlMin}m budget (state ${job.state})` +
+      line: `admiral job ${job.id} has run ${round(mins)}m against a ${ttlMin}m budget (state ${job.state})` +
             (mins >= hardMin ? ` — past the ${hardMin}m ceiling` : ''),
     })
   }
@@ -490,42 +490,42 @@ export const UNJUDGED_NOTE =
  */
 export function admiralSection({ trigger = null, decision = null, overruns = [],
                                launched = null, error = null } = {}) {
-  const lines = ['## Admiral — the triggered manager', '']
+  const lines = ['## Admiral — triggered, acts and exits', '']
   if (error) {
     lines.push(`**ADMIRAL TRIGGER BROKEN** — ${clip(error, 160)}. No condition was evaluated this run; this is not a quiet fleet.`)
     return lines.join('\n') + '\n'
   }
   if (!trigger) {
-    lines.push('fleet: no reading this run')
+    lines.push('admiral: no reading this run')
     return lines.join('\n') + '\n'
   }
 
   // The alarm headline is spelled to match the dashboard's alarm regex, which is
   // case-sensitive ALL-CAPS and keyed on one of GAP/FINDING/BREACHED/FAILED/DOWN/
-  // BROKEN (tools/ops-dashboard/lib/navigator.mjs). "MANAGER OVERRUN" matches none
+  // BROKEN (tools/ops-dashboard/lib/navigator.mjs). "ADMIRAL OVERRUN" matches none
   // of them and would reach his page as ordinary grey text — the exact shape of
   // obot.agent#129, where a real headline rendered as if nothing were wrong.
   //
   // The character class is [A-Z0-9 ] and nothing else, so punctuation between the
-  // asterisks silently breaks the match: "MANAGER KILLED, BUDGET BREACHED" contains
+  // asterisks silently breaks the match: "ADMIRAL KILLED, BUDGET BREACHED" contains
   // BREACHED and still renders grey, purely because of the comma. Its test caught
   // exactly that, which is the argument for testing the wording rather than reading it.
   for (const o of overruns) {
-    if (o.killed) lines.push(`**MANAGER KILLED ON A BREACHED BUDGET** — ${o.line} · ${o.killed}`)
-    else lines.push(o.hard ? `**MANAGER BUDGET BREACHED** — ${o.line}` : `manager overrun — ${o.line}`)
+    if (o.killed) lines.push(`**ADMIRAL KILLED ON A BREACHED BUDGET** — ${o.line} · ${o.killed}`)
+    else lines.push(o.hard ? `**ADMIRAL BUDGET BREACHED** — ${o.line}` : `admiral overrun — ${o.line}`)
   }
 
   if (!trigger.fired) {
-    lines.push('fleet: nothing to act on — no session past the bar, no idle operational PR, no unrecorded closeout')
-    lines.push('  the trigger is a positive condition: an empty fleet never launches a manager')
+    lines.push('admiral: nothing to act on — no session past the bar, no idle operational PR, no unrecorded closeout')
+    lines.push('  the trigger is a positive condition: an empty fleet never launches an admiral')
     if (trigger.judgedReadable === false) lines.push(`  ${UNJUDGED_NOTE}`)
     return lines.join('\n') + '\n'
   }
   if (trigger.judgedReadable === false) lines.push(`  ${UNJUDGED_NOTE}`)
 
-  lines.push(`fleet: **${trigger.conditions.length} condition(s)** — ${trigger.sessions.length} session(s) past the bar, ` +
+  lines.push(`admiral: **${trigger.conditions.length} condition(s)** — ${trigger.sessions.length} session(s) past the bar, ` +
              `${trigger.pulls.length} idle operational PR(s), ${trigger.gaps.length} closeout gap(s)`)
-  if (launched) lines.push(`  launched manager ${launched} — it acts and exits inside ${ADMIRAL_TTL_MIN}m`)
+  if (launched) lines.push(`  launched admiral ${launched} — it acts and exits inside ${ADMIRAL_TTL_MIN}m`)
   else if (decision) lines.push(`  held: ${decision.why}`)
 
   const group = (title, rows) => {
@@ -541,7 +541,7 @@ export function admiralSection({ trigger = null, decision = null, overruns = [],
 }
 
 /**
- * The brief handed to the manager.
+ * The brief handed to the admiral.
  *
  * Conditions and clocks only. It deliberately carries no summary of what any
  * session did and no opinion about any pull request, because the one rule most

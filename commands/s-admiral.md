@@ -1,5 +1,5 @@
 ---
-description: "Run this session as 🚦🤖 obot-admiral — the short-lived triggered actor that moves finished work which has stopped moving, then exits."
+description: "Run this session as ⚓🤖 obot-admiral — the short-lived triggered actor that moves finished work which has stopped moving, then exits."
 argument-hint: "The path to the brief JSON written by scripts/obot-admiral"
 allowed-tools: Bash(cat *)
 ---

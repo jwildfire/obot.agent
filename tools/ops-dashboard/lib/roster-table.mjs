@@ -452,7 +452,7 @@ export function unattributedRow(u) {
 /**
  * A row for a pinned role that has no session on this machine at all.
  *
- * The fleet manager is short-lived by design (obot.agent#167): it launches when a
+ * The admiral is short-lived by design (obot.agent#167): it launches when a
  * condition fires, acts, and exits, so ABSENT is its ordinary state. A pinned role
  * with no row leaves a gap, and a gap cannot say whether the role is resting or
  * broken — which is the same failure as a pin that drops its subject on death, one

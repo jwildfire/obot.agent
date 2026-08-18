@@ -57,11 +57,11 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
  * the whole registry on purpose, so a fourth role arrives pinned without anyone
  * remembering to pin it.
  *
- * IT IS NOT THE LIVENESS ANSWER, and it must never be used as one. Fleet is on this
- * list — @jwildfire asked for it pinned beside prime and the Navigator — and it is
- * NOT a session for which stopping is the resting state: it is triggered, budgeted,
- * and a blocked one is dead. Reading pinning as liveness is exactly how a fleet
- * manager sat blocked for ten hours with nothing looking (obot.agent#181). The
+ * IT IS NOT THE LIVENESS ANSWER, and it must never be used as one. The admiral is on
+ * this list — @jwildfire asked for it pinned beside prime and nav — and it is NOT a
+ * session for which stopping is the resting state: it is triggered, budgeted, and a
+ * blocked one is dead. Reading pinning as liveness is exactly how an admiral sat
+ * blocked for ten hours with nothing looking (obot.agent#181). The
  * liveness question is `restsWhenIdle` / `mustExit` in tools/lib/roles.mjs, off the
  * `lifecycle` each role declares in the same registry.
  *

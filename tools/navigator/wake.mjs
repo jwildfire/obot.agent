@@ -36,7 +36,7 @@
 // `blocked` is their ordinary state, and calling it death every quiet hour would
 // train the reader to ignore the hour it is true.
 //
-// The fleet manager is the second kind and was excluded as if it were the first,
+// The admiral is the second kind and was excluded as if it were the first,
 // because the role registry answered pinning and liveness with one list. It sat
 // blocked from 13:51Z on 2026-08-17 carrying an `API Error` detail this file's own
 // `DEATH` pattern matches on sight, for ten hours, until a person stopped it
@@ -105,8 +105,8 @@ export const LISTENER_STALE_MIN = 5
  * unrecognised message must not be silent purely because nobody has seen that
  * message yet.
  *
- * Held equal to `MANAGER_TTL_MIN` in fleet.mjs by intent rather than by import —
- * fleet.mjs imports this file, so the dependency cannot run the other way.
+ * Held equal to `ADMIRAL_TTL_MIN` in admiral.mjs by intent rather than by import —
+ * admiral.mjs imports this file, so the dependency cannot run the other way.
  */
 export const TRIGGERED_QUIET_MIN = 30
 
@@ -168,7 +168,7 @@ const minsSince = (at, now) => {
 }
 
 // A role has no worker id and never will, so it is named by the role. `job <id>`
-// alone is what a fleet detection would otherwise read as, which is the least
+// alone is what an admiral detection would otherwise read as, which is the least
 // actionable thing a wake can say.
 const label = (job) => workerIdOf(job.name) || roleOf(job.name)?.short || `job ${job.id}`
 
@@ -189,7 +189,7 @@ const clip = (s, n) => {
 export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
   // Workers, and roles that must exit inside a budget. A role that RESTS when idle
   // is skipped — and it is skipped for that reason, never for being on the list of
-  // roles @jwildfire pins, which is the conflation that lost the fleet manager.
+  // roles @jwildfire pins, which is the conflation that lost the admiral.
   const budgeted = mustExit(job?.name)
   if (!isWorker(job) && !budgeted) return []
   const out = []
@@ -251,7 +251,7 @@ export function classify(job, now = new Date(), { hostWasAway = false } = {}) {
   // `tempo: active`. A manager can be wedged with none of the three — and unlike a
   // worker, one that is not moving is not merely slow, it is a session that was
   // supposed to be gone and now never will be. Two states, kept apart: `overrun` in
-  // fleet.mjs catches the manager still RUNNING past its budget, this catches the
+  // admiral.mjs catches the admiral still RUNNING past its budget, this catches the
   // one that has STOPPED and will never exit.
   if (budgeted && !terminal && !out.length && quiet !== null &&
       quiet >= (hostWasAway ? Infinity : TRIGGERED_QUIET_MIN)) {

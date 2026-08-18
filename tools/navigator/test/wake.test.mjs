@@ -92,10 +92,10 @@ const standing = (tag, over = {}) => ({
   needs: null, updatedAt: agoMin(612), firstTerminalAt: null, ...over,
 })
 
-test('a blocked fleet manager is dead, and reads as dead on the first sweep that sees it', () => {
+test('a blocked admiral is dead, and reads as dead on the first sweep that sees it', () => {
   const d = classify(manager({ updatedAt: agoMin(5) }), NOW)
   assert.deepEqual(d.map((x) => x.kind), ['dead'])
-  assert.match(d[0].line, /^fleet died/, 'named by its role — it has no worker id and never will')
+  assert.match(d[0].line, /^admiral died/, 'named by its role — it has no worker id and never will')
   assert.match(d[0].line, /SSL certificate hostname mismatch/)
 })
 
@@ -156,7 +156,7 @@ test('a suspended host suppresses the elapsed-time reading for a manager too', (
     'a detector cannot run on a sleeping host, so elapsed time proves nothing')
 })
 
-test('the whole fleet at once: the manager is seen, the standing roles are not', () => {
+test('the whole fleet at once: the admiral is seen, the standing roles are not', () => {
   const found = pending([
     manager({ updatedAt: agoMin(612) }),
     standing('\u{1F3A9}\u{1F916}', { id: 'p1' }),
