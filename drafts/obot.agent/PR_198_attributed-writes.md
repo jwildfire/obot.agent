@@ -90,6 +90,8 @@ The last two rows are the invariants: the guard keeps its teeth on an unattribut
 
 <b>Also fixed here, and not this PR's defect:</b> <code>tool-invocation.test.mjs</code> was failing on <code>main</code> at this branch's exact merge base (<code>17e4f624</code>, run <a href="https://github.com/jwildfire/obot.agent/actions/runs/32090618374">32090618374</a>) over six lines documenting <code>tools/config-count</code> — mode 755 with its own <code>node</code> shebang — behind a <code>node</code> prefix. The six lines were brought to the assertion; nothing in the test was edited (<code>207f8a5</code>). Worth noting that the check did not catch it: <code>config-count</code> landed on <code>main</code> with the suite already red, so the test that exists for this habit was reporting a failure nobody was reading.
 
+<b>Not fixed here, and filed instead:</b> a GitHub write inside <code>sh -c '…'</code> is invisible to this guard, because quoted spans are stripped before matching — which is the same mechanism that keeps it from firing on prose, so the fix needs care. Both versions of the hook behave identically, so it is a long-standing gap rather than anything this branch introduced. It surfaced because <code>skills/session-inbox</code> documented exactly that shape, carrying both halves of #207 at once; that line is fixed here, the general lane is <a href="https://github.com/jwildfire/obot.agent/issues/239">#239</a> with the reproduction and the trap in the obvious fix.
+
 <b>Not fixed here:</b> `~/.claude/settings.json` still carries blanket `Bash(gh api *)` / `Bash(gh issue create *)` / `Bash(gh pr edit *)` allow rules. The hook denies over an allow, so they are not a hole, but they are worth narrowing separately.
 
 ---
