@@ -28,7 +28,7 @@
 #
 # Usage, from inside the checkout or worktree whose branch you want pushed:
 #   obot.agent/scripts/obot-push                 # current branch to its own name
-#   obot.agent/scripts/obot-push -u              # ...and set upstream
+#   obot.agent/scripts/obot-push -u              # ...and track the NAMED remote after
 #   obot.agent/scripts/obot-push HEAD:some-branch
 set -euo pipefail
 
@@ -38,12 +38,22 @@ REMOTE_NAME="${OBOT_PUSH_REMOTE:-origin}"
 
 die() { echo "obot-push: $*" >&2; exit 1; }
 
+SET_UPSTREAM=0
+ARGS=()
 for arg in "$@"; do
   case "$arg" in
     -f|--force|--force-with-lease|--force-with-lease=*|--delete|-d|--mirror)
       die "refusing $arg — this wrapper is the attribution lane, not the lane for rewriting or deleting history. Do that deliberately, by hand, with approval." ;;
+    # `git push -u <url>` writes the URL it was given into branch.<name>.remote, and
+    # here that URL contains a live installation token. The first real use of this
+    # wrapper did exactly that and left an hour-valid credential sitting in
+    # .git/config. The flag is handled here instead: pushed without it, then the branch
+    # is pointed at the NAMED remote afterwards.
+    -u|--set-upstream) SET_UPSTREAM=1 ;;
+    *) ARGS+=("$arg") ;;
   esac
 done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
 
 url="$(git remote get-url "$REMOTE_NAME" 2>/dev/null)" || die "no remote '$REMOTE_NAME' here — run this from inside the checkout or worktree you want pushed"
 
@@ -55,12 +65,20 @@ owner="${slug%%/*}"
 token="$("$TOKEN_BIN" 2>/dev/null)" || token=""
 [ -n "$token" ] || die "the app token mint returned nothing — refusing to push on whatever credential is ambient, which is @jwildfire's. Nothing was pushed."
 
-if [ "$#" -eq 0 ] || [ "$1" = "-u" ] || [ "$1" = "--set-upstream" ]; then
-  branch="$(git rev-parse --abbrev-ref HEAD)"
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$#" -eq 0 ]; then
   [ "$branch" != "HEAD" ] || die "detached HEAD — name the refspec explicitly"
-  set -- "$@" "HEAD:$branch"
+  set -- "HEAD:$branch"
 fi
 
 # The token is interpolated into the URL and never echoed: this output reaches a
 # transcript, and an installation token is live for an hour.
 git push "https://x-access-token:${token}@github.com/${slug}.git" "$@"
+
+if [ "$SET_UPSTREAM" = "1" ]; then
+  [ "$branch" != "HEAD" ] || die "pushed, but cannot set upstream from a detached HEAD"
+  # Against the named remote, never the tokenised URL. A fetch is a read, so it does
+  # not matter that this one authenticates as @jwildfire.
+  git fetch -q "$REMOTE_NAME" "$branch"
+  git branch --quiet --set-upstream-to="$REMOTE_NAME/$branch" "$branch"
+fi

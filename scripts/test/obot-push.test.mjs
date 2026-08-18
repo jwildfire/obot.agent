@@ -79,6 +79,22 @@ test('an https remote is handled as well as an ssh one', () => {
   assert.match(r.pushed, /github\.com\/jwildfire\/obot\.roadmap\.git/)
 })
 
+test('-u never reaches git push, because it would write the token into .git/config', () => {
+  // Found by using the wrapper for the first time, on this very branch: `git push -u
+  // <url>` records the URL it was given as branch.<name>.remote, and that URL carries a
+  // live installation token. It sat in .git/config until it was scrubbed by hand. The
+  // flag is now handled here — pushed without it, then the branch is pointed at the
+  // NAMED remote afterwards.
+  const r = run({ args: ['-u'] })
+  assert.equal(r.code, 0, r.out)
+  const pushLine = r.pushed.split('\n').find((l) => l.includes('x-access-token'))
+  assert.ok(pushLine, 'the push still happens over the tokenised URL')
+  assert.doesNotMatch(pushLine, /(^|\s)(-u|--set-upstream)(\s|$)/, 'but never with -u')
+  // The tracking branch is set separately, against the remote NAME.
+  assert.match(r.pushed, /^branch --quiet --set-upstream-to=origin\/w0060-branch/m)
+  assert.match(r.pushed, /^fetch -q origin w0060-branch/m)
+})
+
 test('a failing push is reported as a failure, not swallowed', () => {
   const r = run({ gitExit: 1 })
   assert.notEqual(r.code, 0)
