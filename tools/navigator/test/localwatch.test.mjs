@@ -21,8 +21,9 @@ import { execFileSync } from 'node:child_process'
 import {
   ALARM_BROKEN, ALARM_FINDING, BEHIND_COMMITS, HELD_GRACE_MIN, NOISE_SEGMENTS,
   PUBLISH_BRANCHES, UNPROPOSED_DAYS, UNPUSHED_HOURS,
-  classifyStatus, classifyWorktree, claimants, clonePosition, localSection, newestMtime,
-  readWorktrees, resolveRemote, unproposedBranches, worktreeReading,
+  ALARM_CREDENTIAL, PRESERVED_TRAILER, classifyStatus, classifyWorktree, claimants, clonePosition, configFiles,
+  credentialLines, localSection, newestMtime, readWorktrees, resolveRemote, scanConfigs,
+  unproposedBranches, worktreeReading,
 } from '../localwatch.mjs'
 import { ALARM_RE, parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
 
@@ -272,6 +273,35 @@ test('a branch holding a role in policy.json is skipped — a release lane is me
   assert.equal(r.findings[0].branch, 'demo')
 })
 
+test('a branch preserved on purpose is never a finding — its remedy is forbidden', () => {
+  // `roadmap-rebuild` on obot.roadmap: a dead worker's 1,925 uncommitted lines,
+  // committed and pushed so they are recoverable, verified superseded before the
+  // commit was made. It is not a role branch, not machine-published, not merged and
+  // has no pull request, so a day later it would land under "nobody ever proposed"
+  // with a prescribed next command that must never be run. A finding whose remedy is
+  // forbidden is what teaches a reader to skip the section.
+  const rows = [branch('roadmap-rebuild', 3, { preservedBy: 'W0061' }), branch('demo', 145)]
+  const r = unproposedBranches(rows, { now })
+  assert.equal(r.findings.length, 1)
+  assert.equal(r.findings[0].branch, 'demo')
+  assert.equal(r.preserved.length, 1)
+  assert.match(r.preserved[0].line, /W0061/)
+})
+
+test('a preserved branch gets a row saying what it is, never a silent exclusion', () => {
+  // The whole point of the branch is that somebody deliberately kept something. An
+  // exclusion count cannot say that, so this one is listed rather than subtracted.
+  const r = unproposedBranches([branch('roadmap-rebuild', 3, { preservedBy: 'W0061' })], { now })
+  const md = localSection({
+    worktrees: [], branches: r, clones: [], claimants: [],
+    fetchedAt: new Date(now - 5 * MIN).toISOString(),
+  }, now)
+  assert.doesNotMatch(md, ALARM_RE, 'a preservation is not an alarm')
+  assert.match(md, /preserved by W0061/)
+  assert.match(md, /no pull request expected/)
+  assert.ok(PRESERVED_TRAILER === 'Preserved-by')
+})
+
 test('the age bar is short, because a branch found the morning after is still found in time', () => {
   assert.ok(UNPROPOSED_DAYS >= 1 && UNPROPOSED_DAYS <= 3)
 })
@@ -356,6 +386,149 @@ test('every worktree of a repo is read, the main one is marked, and its dirt is 
   assert.ok(feature.newestMs > 0)
   const mainWt = readings.find((r) => r.main)
   assert.equal(mainWt.tracked, 1)
+})
+
+
+// ── Credentials recorded in a git config (obot.agent#246) ───────────────────────
+
+// `git push -u https://x-access-token:TOKEN@github.com/...` records the URL it was
+// handed as `branch.<name>.remote`, so a live installation token lands in a file that
+// travels when the directory is copied. Three were sitting on this machine across two
+// repositories, written on earlier nights, and nothing detected them — which is the
+// same sentence as the rest of this section rather than a different one.
+const TOKEN = 'ghs_' + 'A'.repeat(36)
+const CONFIG_WITH_TOKEN = `[core]
+\trepositoryformatversion = 0
+[remote "origin"]
+\turl = git@github.com:jwildfire/safety.viz.git
+[branch "fix-79-qtc"]
+\tremote = https://x-access-token:${TOKEN}@github.com/jwildfire/safety.viz.git
+\tmerge = refs/heads/fix-79-qtc
+`
+
+test('a credential recorded in a config is found, and named by its stanza', () => {
+  const hits = credentialLines(CONFIG_WITH_TOKEN)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].stanza, 'branch "fix-79-qtc"')
+  assert.equal(hits[0].key, 'remote')
+})
+
+test('THE FINDING NEVER CARRIES WHAT IT MATCHED', () => {
+  // The row renders to the Navigator panel, to the state file prime reads, and into
+  // the wrapup that folds the shared scratchpad. A row carrying the matched string
+  // publishes the credential to four surfaces in order to report that it was in one.
+  const hits = credentialLines(CONFIG_WITH_TOKEN)
+  assert.equal(JSON.stringify(hits).includes(TOKEN), false, 'the reading itself must not carry the secret')
+  const md = localSection({
+    worktrees: [], branches: { findings: [], excluded: 0, tooYoung: 0 }, clones: [], claimants: [],
+    fetchedAt: new Date(now - 5 * MIN).toISOString(),
+    credentials: { scanned: 7, unreadable: [], findings: [{ repo: 'jwildfire/safety.viz', file: 'safety.viz/.git/config', ...hits[0] }] },
+  }, now)
+  assert.equal(md.includes(TOKEN), false, 'the rendered section must not carry the secret')
+  assert.match(md, /safety\.viz/)
+  assert.match(md, /fix-79-qtc/)
+  assert.match(md, ALARM_RE)
+})
+
+test('an ordinary config is clean — ssh and scp remotes carry no password to embed', () => {
+  const clean = `[remote "origin"]
+\turl = git@github.com:jwildfire/obot.agent.git
+[remote "up"]
+\turl = ssh://git@github.com/jwildfire/obot.agent.git
+[branch "main"]
+\tremote = origin
+`
+  assert.deepEqual(credentialLines(clean), [])
+})
+
+test('a bare token in a value is a credential even with no URL around it', () => {
+  const hits = credentialLines(`[http]\n\textraheader = Authorization: bearer github_pat_${'x'.repeat(22)}\n`)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].stanza, 'http')
+})
+
+test('a credential above any stanza is reported, not dropped — a record with no section is still a record', () => {
+  const hits = credentialLines(`\turl = https://u:p@github.com/x/y.git\n[core]\n\tbare = false\n`)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].stanza, '(no section)')
+})
+
+test('nothing scanned is reported apart from nothing found — zero on a new machine is the reading most likely to be believed', () => {
+  const md = localSection({
+    worktrees: [], branches: { findings: [], excluded: 0, tooYoung: 0 }, clones: [], claimants: [],
+    fetchedAt: new Date(now - 5 * MIN).toISOString(),
+    credentials: { scanned: 0, unreadable: [], findings: [] },
+  }, now)
+  assert.ok(md.includes(ALARM_BROKEN), md.slice(0, 400))
+  assert.match(md, /no git config was scanned/i)
+})
+
+test('a config that could not be read is unreadable, never clean', () => {
+  const md = localSection({
+    worktrees: [], branches: { findings: [], excluded: 0, tooYoung: 0 }, clones: [], claimants: [],
+    fetchedAt: new Date(now - 5 * MIN).toISOString(),
+    credentials: { scanned: 6, unreadable: ['gsm.safety/.git/config'], findings: [] },
+  }, now)
+  assert.ok(md.includes(ALARM_BROKEN))
+  assert.match(md, /gsm\.safety/)
+})
+
+test('a clean scan says how many configs it read, so clean is distinguishable from silent', () => {
+  const md = localSection({
+    worktrees: [], branches: { findings: [], excluded: 0, tooYoung: 0 }, clones: [], claimants: [],
+    fetchedAt: new Date(now - 5 * MIN).toISOString(),
+    credentials: { scanned: 15, unreadable: [], findings: [] },
+  }, now)
+  assert.doesNotMatch(md, ALARM_RE)
+  assert.match(md, /15 git config/i)
+})
+
+test('the headline breakdown adds up — a credential is not counted as a piece of work', () => {
+  // The first proof run printed "1 piece(s) of work … 0 stranded, 0 unproposed, 0
+  // checkouts". A breakdown that does not add up costs more trust than the finding buys,
+  // and a credential at rest is a different thing from work that never shipped.
+  const md = localSection({
+    worktrees: [], branches: { findings: [], excluded: 0, tooYoung: 0 }, clones: [], claimants: [],
+    fetchedAt: new Date(now - 5 * MIN).toISOString(),
+    credentials: { scanned: 3, unreadable: [], findings: [{ repo: 'x', file: 'x/.git/config', stanza: 'branch "y"', key: 'remote' }] },
+  }, now)
+  assert.doesNotMatch(md, /piece\(s\) of work/, 'no work finding, so no work headline')
+  assert.ok(md.includes(ALARM_CREDENTIAL))
+  assert.doesNotMatch(md, /local-only work: clean/, 'and it must not call itself clean either')
+})
+
+test('the credential headline matches the real ALARM_RE', () => {
+  assert.match(ALARM_CREDENTIAL, ALARM_RE)
+})
+
+test('scanConfigs reads real files, counts what it could not open, and names no values', () => {
+  const dir = tmp()
+  fs.mkdirSync(path.join(dir, 'a', '.git'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'a', '.git', 'config'), CONFIG_WITH_TOKEN)
+  fs.mkdirSync(path.join(dir, 'b', '.git'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'b', '.git', 'config'), '[core]\n\tbare = false\n')
+  const r = scanConfigs([
+    { repo: 'x/a', file: path.join(dir, 'a', '.git', 'config') },
+    { repo: 'x/b', file: path.join(dir, 'b', '.git', 'config') },
+    { repo: 'x/gone', file: path.join(dir, 'gone', '.git', 'config') },
+  ])
+  assert.equal(r.scanned, 2)
+  assert.equal(r.unreadable.length, 1)
+  assert.equal(r.findings.length, 1)
+  assert.equal(r.findings[0].stanza, 'branch "fix-79-qtc"')
+  assert.equal(JSON.stringify(r).includes(TOKEN), false)
+})
+
+test('every clone in the workspace is scanned, not only the policy seven — a token travels from any of them', () => {
+  const ws = tmp()
+  for (const name of ['obot.agent', 'gsm.kri', 'notarepo']) fs.mkdirSync(path.join(ws, name), { recursive: true })
+  for (const name of ['obot.agent', 'gsm.kri']) {
+    fs.mkdirSync(path.join(ws, name, '.git'), { recursive: true })
+    fs.writeFileSync(path.join(ws, name, '.git', 'config'), '[core]\n')
+  }
+  const files = configFiles(ws)
+  assert.equal(files.length, 2)
+  assert.ok(files.some((f) => f.repo === 'gsm.kri'), 'a non-policy clone still holds credentials that travel')
 })
 
 // ── The verdict has to reach the page ────────────────────────────────────────────
