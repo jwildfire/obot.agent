@@ -62,6 +62,13 @@ import { refreshMetrics } from './metrics.mjs'
 // walking past it every five minutes — fast-forwards it and restarts what reads it.
 // Fast-forward only; every refusal is reported and nothing is ever forced.
 import { brokenRecord, buildStamp, renderSelfUpdate, selfUpdate } from './selfupdate.mjs'
+// Local-only work (jwildfire/obot.roadmap#256, obot.agent#240). Everything above this
+// line reads GitHub, and GitHub is accurate about everything that reached it — so work
+// that never reached it is invisible to every one of them. Four instances in two days,
+// all found by accident. This is the reading that runs on the machine where that work
+// actually is; see localwatch.mjs for why age plus absence of an owner, and never
+// dirtiness, is what makes it a finding.
+import { collectLocal, localSection } from './localwatch.mjs'
 // The wake (hub#212). The sweep already knew a worker had stopped; what it could not
 // do was get the Navigator's attention, so workers stopped and then waited — twenty
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
@@ -82,6 +89,12 @@ const SNAPSHOT = join(WS, '.claude/session-hub/cache/navigator-rc.json')
 // dashboard's Navigator tab, which never reaches the network at render time.
 const METRICS = join(WS, '.claude/session-hub/cache/metrics.json')
 const METRICS_TTL_MIN = 60
+// Where the local-state reading remembers its last fetch. The sweep does NOT fetch six
+// remotes every five minutes — that measured 3.6s warm and is unbounded on a bad
+// connection, for a number that moves by two or three commits an hour. It refreshes on
+// the same hourly ride the metrics take, and every position it prints says how old it
+// is, which is the call selfupdate.mjs already made for the checkout position.
+const LOCALWATCH_CACHE = join(WS, '.claude/session-hub/cache/localwatch.json')
 // How far back the commit-identity scan reads. Bounded so a five-minute job never walks
 // months of history; the backlog it does not cover is the 301 commits already counted on
 // obot.agent#241, which is a cleanup question rather than a detection one.
@@ -171,7 +184,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null, identity = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, selfupdate = null, local = null, identity = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -235,6 +248,14 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push((selfupdate && selfupdate.trim())
     ? selfupdate.trimEnd()
     : '## Checkout — the code this machine is running\n\n**AUTO UPDATE BROKEN** — no update ran this sweep, so nothing here says the checkout is current or that a merge would reach him.', '')
+
+  // And directly under it, the other half of the same question. The checkout section
+  // asks whether this machine has what GitHub has; this asks whether GitHub has what
+  // this machine has. They are the same failure seen from opposite ends, and the
+  // second one had no reader at all until obot.agent#240.
+  lines.push((local && local.trim())
+    ? local.trimEnd()
+    : '## Local-only work — what exists on this machine and not on GitHub\n\n**LOCAL WORK READING BROKEN** — the local-state reading did not run this sweep, so nothing here says that stranded worktrees, unproposed branches or stale checkouts were looked for.', '')
 
   // Who the commits under all of that say they were made by (obot.agent#241, under
   // jwildfire/obot.roadmap#260). It sits beside the checkout stamp for the same reason:
@@ -631,6 +652,18 @@ const safeSelfUpdate = () => {
   }
 }
 
+// The local-state reading (obot.agent#240). Same contract as everything above it: a
+// broken reading must not take the sweep down and must not vanish either, because a
+// section that disappeared would read as a machine with nothing local to report —
+// which is precisely the state four separate instances were in when nobody found them.
+const safeLocal = (repos) => {
+  try {
+    return localSection(collectLocal({ repos, ws: WS, cacheFile: LOCALWATCH_CACHE, jobsDir: JOBS_DIR }))
+  } catch (e) {
+    return `## Local-only work — what exists on this machine and not on GitHub\n\n**LOCAL WORK READING BROKEN** — ${String(e.message).slice(0, 160)}. No worktree, branch or checkout was read this run; this is not a clean machine.\n`
+  }
+}
+
 // Commit attribution across the checkouts on this machine (obot.agent#241). Every
 // repo is read independently: one unreadable checkout reports itself as unread and the
 // rest still report, because a directory that is not a repository is unknown rather
@@ -808,7 +841,8 @@ function main() {
   // The admiral trigger runs last of the readings, after the wake, because an admiral
   // it launches will read the state file this run is about to write.
   const admiral = safeAdmiral()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate, identity }))
+  const local = safeLocal(repos)
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, selfupdate, local, identity }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
