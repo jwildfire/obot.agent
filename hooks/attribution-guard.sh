@@ -62,9 +62,13 @@
 # The fix is not for this hook to mint a token and check it. A hook cannot hand its
 # result to the command it is judging, so any check here is a guess about a mint that
 # has not happened yet - and it would put a GitHub API call in front of every write.
-# The fix is to refuse the one shape in which an empty mint passes unnoticed, and to
-# name the two that cannot: the wrapper, which mints and runs in one process and so
-# can refuse on its own failure, and a plain assignment, whose status `&&` can see.
+# It cannot answer "is this the App's credential rather than his" either; only the
+# thing holding the token can, which is why the wrapper and obot-merge check their
+# own mints. What this hook can do is refuse the three shapes in which an empty
+# credential passes unnoticed - an empty assignment, a substitution whose failure the
+# shell swallows, and a variable nothing in reach assigns - and name the lanes that
+# cannot fail that way: the wrapper, which mints and runs in one process, and a plain
+# assignment in the same call, whose status `&&` and `set -e` can see.
 #
 # Parse failures defer. This guard must never block unrelated work.
 
