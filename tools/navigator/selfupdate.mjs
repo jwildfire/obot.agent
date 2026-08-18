@@ -347,11 +347,12 @@ export function planRestart({ marker, health: h, headSha, lastLookMs: lookMs, qu
 
 const sleepMs = (ms) => { try { execFileSync(process.execPath, ['-e', `setTimeout(()=>{},${ms})`], { timeout: ms + 4000, stdio: 'ignore' }) } catch { /* a sleep that fails is a shorter sleep */ } }
 
-/** Is that pid still running? `EPERM` counts: alive, just not ours to signal. */
-export function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' }
-}
+/** Is that pid still running? `EPERM` counts: alive, just not ours to signal.
+ *
+ *  Re-exported from tools/lib/killconfirm.mjs since obot.agent#223 rather than
+ *  written twice. Two liveness answers that could disagree would be worse than
+ *  either, and this file's whole restart decision rests on this one. */
+export { alive } from '../lib/killconfirm.mjs'
 
 /**
  * Stop the old dashboard, start one from the current checkout, and prove it answers.

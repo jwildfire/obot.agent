@@ -229,6 +229,44 @@ test('the newest look across every surface is the one that counts', () => {
   assert.equal(lastLookMs({ surfaces: {} }, now), null, 'an empty store is unknown, never "long ago"')
 })
 
+// ---- the second termination path in this repo (jwildfire/obot.roadmap#251) ----
+//
+// Audited alongside the admiral's. This one already confirms — it signals, waits,
+// re-reads liveness, and on failure returns a result that reads as a failure. The
+// cases below pin that, because the property is easy to lose to a refactor and its
+// loss is invisible: a restart that assumed the old process was gone would start a
+// second dashboard against a held port and report success.
+//
+// It does NOT escalate to SIGKILL, deliberately, and that policy is pinned too: a
+// wedged server still serving yesterday's page is strictly better than a killed one
+// serving nothing, and the next sweep tries again.
+
+test('the restart reads liveness AGAIN after the signal — a sent signal is not a stopped process', () => {
+  const seen = []
+  let running = true
+  const r = restartDashboard({
+    root: '/repo', workspace: '/ws', pid: 4242, start: false,
+    isAlive: () => { seen.push('check'); return running },
+    kill: (pid, sig) => { seen.push(sig); if (sig === 'SIGTERM') running = false; return true },
+    sleep: () => {}, waitMs: 1000,
+    spawnFn: () => { throw new Error('the case ends before the spawn') },
+  })
+  assert.equal(seen[0], 'check', 'it establishes the process is there before signalling it')
+  assert.equal(seen[1], 'SIGTERM')
+  assert.ok(seen.slice(2).includes('check'), 'and reads liveness again afterwards rather than assuming')
+  assert.equal(r.code, 'no-script', 'it got past the stop, which is all this case is about')
+})
+
+test('and it never escalates to SIGKILL — the policy, held on purpose', () => {
+  const sent = []
+  restartDashboard({
+    root: '/repo', workspace: '/ws', pid: 4242,
+    isAlive: () => true, kill: (pid, sig) => { sent.push(sig); return true },
+    sleep: () => {}, waitMs: 1000, spawnFn: () => ({ pid: 1 }),
+  })
+  assert.deepEqual(sent, ['SIGTERM'], 'a wedged dashboard is reported, not escalated on')
+})
+
 test('a dashboard that will not exit is left running rather than killed', () => {
   let spawned = 0
   const r = restartDashboard({

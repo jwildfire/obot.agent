@@ -11,9 +11,10 @@ import assert from 'node:assert/strict'
 
 import { ACT_MIN, CLOSEOUT_GAP_MIN, UNJUDGED_NOTE, ADMIRAL_NAME, ADMIRAL_TAG, PR_IDLE_MIN,
          REPEAT_FLOOR_MIN, RELAUNCH_FLOOR_MIN, brief, closeoutGaps, admiralSection,
-         holdLine, isAdmiral, launchLine, operationalRepos, overrun, parseAdmiralLog,
-         shouldLaunch, signatureOf, stalledSessions, stuckPRs,
+         holdLine, isAdmiral, killLine, launchLine, operationalRepos, overrun, parseAdmiralLog,
+         priorStopAttempts, shouldLaunch, signatureOf, stalledSessions, stuckPRs,
          triggers } from '../admiral.mjs'
+import { ALARM_RE } from '../../ops-dashboard/lib/navigator.mjs'
 
 const NOW = new Date('2026-08-17T12:00:00Z')
 const agoMin = (m) => new Date(NOW.getTime() - m * 60000).toISOString()
@@ -297,9 +298,10 @@ test('an admiral inside its budget is not an overrun, and a finished one never i
 
 // ---- what reaches his page ---------------------------------------------------
 
-// The dashboard's alarm styling, copied from tools/ops-dashboard/lib/navigator.mjs.
-// A headline that does not match this renders as ordinary grey text — obot.agent#129.
-const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED|DOWN|BROKEN)[A-Z0-9 ]*\*\*/
+// The dashboard's alarm styling. A headline that does not match it renders as
+// ordinary grey text — obot.agent#129. Imported rather than copied since
+// obot.agent#223: a copy goes on passing while the real regex moves underneath it,
+// which is a headline asserted green and rendered grey.
 
 test('a breached admiral budget reaches the page as an ALARM, not as grey text', () => {
   const jobs = [{ ...worker(), id: 'm', name: ADMIRAL_NAME, createdAt: agoMin(900) }]
@@ -398,13 +400,84 @@ test('a suppressed detector still says so when OTHER conditions fired', () => {
   assert.match(admiralSection({ trigger: t, decision: { why: 'x' } }), /SUPPRESSED/)
 })
 
-test('a kill that fired reaches the page as its own ALARM, not as a quiet exit', () => {
+// ---- what the page says about a stop (jwildfire/obot.roadmap#251) -------------
+
+const OVERRUN_LINE = 'admiral job m has run 90m against a 30m budget (state working)'
+const overrunWith = (kill) => [{ job: 'm', state: 'working', mins: 90, hard: true, kill, line: OVERRUN_LINE }]
+
+test('a CONFIRMED stop reaches the page as its own ALARM, not as a quiet exit', () => {
   // A ceiling that fires silently is indistinguishable from an admiral that exited
   // cleanly, which would make the enforcement invisible exactly when it acted.
-  const o = [{ job: 'm', state: 'working', mins: 90, hard: true, killed: 'SIGTERM to pid 123',
-               line: 'admiral job m has run 90m against a 30m budget (state working)' }]
-  const s = admiralSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: o })
+  const kill = { confirmed: true, code: 'confirmed', alarm: null,
+                 detail: 'pid 123 exited on SIGTERM and session m is no longer in the agent ledger' }
+  const s = admiralSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: overrunWith(kill) })
   assert.match(s, ALARM_RE)
   assert.match(s, /ADMIRAL KILLED ON A BREACHED BUDGET/)
-  assert.match(s, /SIGTERM to pid 123/)
+  assert.match(s, /pid 123 exited on SIGTERM/)
+})
+
+test('an UNCONFIRMED stop is a finding on the page, and never reads as a kill', () => {
+  // The defect, at the surface it reached: two **ADMIRAL KILLED ON A BREACHED
+  // BUDGET** headlines on his dashboard for sessions that went on running for four
+  // more hours. The headline a reader trusts is the one that must not be able to
+  // overstate what happened.
+  const kill = { confirmed: false, code: 'respawned', alarm: '**STOP UNCONFIRMED FINDING**',
+                 detail: 'pid 123 exited on SIGTERM and session m is live again on pid 456 — the daemon re-hosted it' }
+  const s = admiralSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: overrunWith(kill) })
+  assert.match(s, ALARM_RE, 'an unconfirmed stop is a finding and reaches the page as one')
+  assert.match(s, /ADMIRAL STOP UNCONFIRMED FINDING/)
+  assert.doesNotMatch(s, /ADMIRAL KILLED/, 'the success headline belongs to confirmed stops alone')
+  assert.doesNotMatch(s, /killed/i)
+  assert.match(s, /live again on pid 456/, 'and it says what was actually observed')
+})
+
+test('a stop that found no pid says so, without the word killed', () => {
+  const kill = { confirmed: false, code: 'not-found', alarm: '**PID RESOLUTION FAILED**',
+                 detail: 'no session in the agent ledger carries the id m, so nothing was signalled' }
+  const s = admiralSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: overrunWith(kill) })
+  assert.match(s, /ADMIRAL PID RESOLUTION FAILED/)
+  assert.match(s, ALARM_RE)
+  assert.doesNotMatch(s, /kill/i)
+})
+
+// ---- the record (jwildfire/obot.roadmap#251) ---------------------------------
+
+test('the log records a stop under its own op, and an unconfirmed one under a different word', () => {
+  // The kill used to be written as `HOLD - — killed overrunning admiral …`, which
+  // put it in the launch-decision vocabulary and made every kill unreadable as a
+  // kill. Its own op means the record can be read back — which is what lets the next
+  // run know this session has been signalled before.
+  const at = '2026-08-18T01:27:31.373Z'
+  const yes = killLine(at, '1cc6cc32', { confirmed: true, detail: 'pid 67793 exited on SIGTERM' })
+  const no = killLine(at, '1cc6cc32', { confirmed: false, detail: 'no pid was resolved and nothing was signalled' })
+  assert.match(yes, /^2026-08-18T01:27:31.373Z KILL 1cc6cc32 — /)
+  assert.match(no, /^2026-08-18T01:27:31.373Z KILL-UNCONFIRMED 1cc6cc32 — /)
+  assert.doesNotMatch(no, /killed/i)
+
+  const log = parseAdmiralLog([yes, no].join('\n'))
+  assert.equal(log.length, 2)
+  assert.deepEqual(log.map((e) => e.op), ['KILL', 'KILL-UNCONFIRMED'])
+})
+
+test('a session signalled before is COUNTED, because the repetition is the evidence', () => {
+  // Session 1cc6cc32 was recorded as killed five times in twenty-one minutes. A
+  // successful stop is not repeatable, so the second attempt already knew the first
+  // had failed — nothing was reading the record back.
+  const log = parseAdmiralLog([
+    killLine('2026-08-18T01:27:31.373Z', '1cc6cc32', { confirmed: false, detail: 'a' }),
+    killLine('2026-08-18T01:33:03.838Z', '1cc6cc32', { confirmed: false, detail: 'b' }),
+    killLine('2026-08-18T01:38:13.997Z', '7233bc9c', { confirmed: false, detail: 'c' }),
+    holdLine('2026-08-18T01:40:00.000Z', 'sig', 'unrelated'),
+  ].join('\n'))
+  assert.equal(priorStopAttempts(log, '1cc6cc32'), 2)
+  assert.equal(priorStopAttempts(log, '7233bc9c'), 1)
+  assert.equal(priorStopAttempts(log, 'never-seen'), 0)
+})
+
+test('a KILL line is not a launch decision, so it can never arm the relaunch floor', () => {
+  // The old wording wrote kills as HOLD lines. HOLD is read back by shouldLaunch's
+  // floors; a kill is not a decision about launching and must not sit in that
+  // vocabulary at all.
+  const log = parseAdmiralLog(killLine('2026-08-18T01:27:31.373Z', 'm', { confirmed: true, detail: 'x' }))
+  assert.equal(log.filter((e) => e.op === 'LAUNCH' || e.op === 'HOLD').length, 0)
 })

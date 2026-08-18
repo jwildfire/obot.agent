@@ -40,6 +40,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { launches, openPR, settle, stubHarness } from './harness-stub.mjs'
+import { ALARM_RE } from '../../tools/ops-dashboard/lib/navigator.mjs'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const LAUNCHER = join(REPO, 'scripts', 'obot-admiral')
@@ -244,14 +245,72 @@ test('an overrunning admiral is reported, and a DRY RUN never kills', () => {
 
 test('the hard ceiling is ARMED by default and OBOT_ADMIRAL_KILL=0 disarms it', () => {
   // The Navigator's call, 2026-08-17: a kill that ships disarmed is documentation.
-  // The job id here matches nothing in `claude agents`, so the kill path runs and
-  // reports that it found no pid rather than terminating anything real.
+  // The job id here matches nothing in `claude agents`, so the stop path runs and
+  // reports a detection failure rather than terminating anything real.
   const old = new Date(Date.now() - 90 * 60000).toISOString()
   const mgr = { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old } }
   const armed = run([], { jobs: mgr })
-  assert.match(armed.r.stderr, /killed overrunning admiral mgr1/)
+  assert.match(armed.r.stderr, /overrunning admiral mgr1/, 'the ceiling fired')
   const disarmed = run([], { jobs: mgr, env: { OBOT_ADMIRAL_KILL: '0' } })
-  assert.doesNotMatch(disarmed.r.stderr, /killed overrunning admiral/)
+  assert.doesNotMatch(disarmed.r.stderr, /STOP|KILL/, 'and disarmed, it does not')
+})
+
+// ---- a stop this house reports is a stop it confirmed (obot.roadmap#251) ------
+
+test('the no-pid path never says killed — not in the log, the section, or the console', () => {
+  // The named case, end to end. `.claude/session-hub/admiral.log` carried six lines
+  // reading `killed overrunning admiral <id>: no pid found — reported only` on the
+  // night of 2026-08-18: the success wording emitted on the branch that admits
+  // nothing happened, in the file that answers what the guard did.
+  const old = new Date(Date.now() - 90 * 60000).toISOString()
+  const ws = workspace()
+  const { r } = run([], {
+    ws,
+    jobs: { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old, cwd: ws } },
+    env: { FAKE_AGENTS_JSON: '[]' },
+  })
+  const log = readFileSync(admiralLog(ws), 'utf8')
+
+  assert.doesNotMatch(r.stderr, /killed/i, 'the console never says it')
+  assert.doesNotMatch(log, /killed/i, 'nor the record')
+  assert.doesNotMatch(r.stdout, /killed/i, 'nor the section that reaches his page')
+  assert.match(log, /KILL-UNCONFIRMED mgr1 — /, 'the record says what it actually was')
+  assert.match(r.stdout, /ADMIRAL PID RESOLUTION FAILED/, 'and it reaches the page as a finding')
+  assert.match(r.stdout, ALARM_RE)
+})
+
+test('a stop is never reported against a pid running something else', () => {
+  // Clause 4. The ledger names a pid; whatever answers to it here is this test
+  // process's own parent — certainly not the admiral. Signalling it would terminate
+  // an unrelated program and report a stop of a session nothing touched.
+  const old = new Date(Date.now() - 90 * 60000).toISOString()
+  const ws = workspace()
+  const { r } = run([], {
+    ws,
+    jobs: { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old, cwd: ws } },
+    env: {
+      FAKE_AGENTS_JSON: JSON.stringify([
+        { sessionId: 'mgr1-0000-0000-0000-000000000000', name: '⚓🤖 obot-admiral', pid: 1 },
+      ]),
+    },
+  })
+  // pid 1 is launchd on this platform: alive, signallable by nobody here, and about
+  // as far from a claude session host as a pid can get.
+  assert.doesNotMatch(r.stderr, /killed/i)
+  assert.match(readFileSync(admiralLog(ws), 'utf8'), /KILL-UNCONFIRMED mgr1/)
+  assert.match(r.stdout, /ADMIRAL PID RESOLUTION FAILED/)
+})
+
+test('the repeat is carried into the record, so a stop that keeps failing says so', () => {
+  // Session 1cc6cc32 was recorded as killed five times in twenty-one minutes.
+  // Nothing read the record back, so the second attempt knew nothing the first did.
+  const old = new Date(Date.now() - 90 * 60000).toISOString()
+  const ws = workspace()
+  const jobs = { mgr1: { name: '⚓🤖 obot-admiral', state: 'working', createdAt: old, updatedAt: old, cwd: ws } }
+  run([], { ws, jobs, env: { FAKE_AGENTS_JSON: '[]' } })
+  const second = run([], { ws, jobs, env: { FAKE_AGENTS_JSON: '[]' } })
+  assert.match(second.r.stdout, /1 earlier attempt/, 'the second run knows about the first')
+  assert.doesNotMatch(readFileSync(admiralLog(ws), 'utf8'), /killed/i)
 })
 
 // ---- the spawn switch: the launch branch, without the launch -----------------
@@ -402,15 +461,15 @@ test('the kill joins on the session id, never on the role name', () => {
       ]),
     },
   })
-  assert.match(r.stderr, /killed overrunning admiral mgr1: no pid found/)
-  assert.doesNotMatch(r.stderr, /SIGTERM to pid 999999/, 'a name is not an identity')
+  assert.match(r.stderr, /overrunning admiral mgr1/)
+  assert.doesNotMatch(r.stderr, /999999/, 'a name is not an identity, so that pid was never resolved')
+  assert.doesNotMatch(r.stderr, /killed/i, 'and a session it could not find was not killed')
 })
 
-test('the kill does fire when the session id actually matches', () => {
-  // The other half, so the join is proved rather than merely narrowed: a real
-  // overrun still gets its SIGTERM. `process.kill` against a pid this process does
-  // not own throws, and the wrapper reports that — which is the branch reaching the
-  // kill, said out loud.
+test('the stop path IS reached when the session id matches, and reports what it found', () => {
+  // The other half, so the join is proved rather than merely narrowed: a real overrun
+  // still reaches the stop path. The pid here is in the ledger and not in the process
+  // table, which is a stale record — reported as one, and nothing is signalled.
   const old = new Date(Date.now() - 90 * 60000).toISOString()
   const ws = workspace()
   const { r } = run([], {
@@ -422,7 +481,9 @@ test('the kill does fire when the session id actually matches', () => {
       ]),
     },
   })
-  assert.match(r.stderr, /killed overrunning admiral mgr1: (SIGTERM to pid 2147483000|kill failed)/)
+  assert.match(r.stderr, /2147483000/, 'the join found the row')
+  assert.match(readFileSync(admiralLog(ws), 'utf8'), /KILL-UNCONFIRMED mgr1 — the ledger names pid 2147483000/)
+  assert.doesNotMatch(r.stderr, /killed/i)
 })
 
 // ---- the pull-request condition, now a fixture ------------------------------
