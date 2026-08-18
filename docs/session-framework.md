@@ -179,10 +179,17 @@ published pages is the hub's
 appended, **never committed**:
 
 ```json
-{"ts":"<ISO>","bookend":"init|wrapup","step":"<slug>","tier":0,"ms":0,"session":"<job id or slug>"}
+{"ts":"<ISO>","bookend":"init|wrapup|fold","step":"<slug>","tier":0,"ms":0,"session":"<job id or slug>"}
 ```
 
 Shell the timestamps. The SLA is a **checkable fact, not a vibe**.
+
+`fold` joined the enum in 2026-08 (obot.roadmap#238, obot.agent#200): the morning
+fold has no session boundary to hang off, so its own latency is stamped the way the
+bookends' was. One caveat stated rather than left to be discovered — nothing reads
+this file yet, so a `fold` row is telemetry until something scores it, and a prior
+writer already emitted rows with no `ms` at all, which is why the shape is now built
+in one place (`tools/fold/lib/ledger.mjs`) rather than hand-rolled per caller.
 
 ## Exemptions — announce them
 
