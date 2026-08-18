@@ -189,6 +189,10 @@ project access if GitHub ever offers it for user-account installations.
 
 ## Failure modes
 
+- `--assignee @me` fails, or the assignee is silently dropped — a GitHub App bot is not an
+  assignable user (`GET /repos/{owner}/{repo}/assignees/obotclaw[bot]` is a 404), so `@me`
+  has nothing to resolve to under an installation token. Name the assignee:
+  `--assignee jwildfire`.
 - `no Keychain item` — the key isn't seeded on this machine; see the script header for the
   `security add-generic-password` seed command (requires the PEM, which only Jeremy can
   regenerate from the app settings page).

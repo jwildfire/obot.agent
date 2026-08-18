@@ -313,6 +313,13 @@ out under his own account, on roughly a hundred issues he had not read. Issue *b
 carried to the rest, and only the timeline disagrees, so nobody finds it unless already
 suspicious ([obot.agent#197](https://github.com/jwildfire/obot.agent/issues/197)).
 
+One consequence to know before it surprises you: **`--assignee @me` cannot be used through
+the wrapper.** A GitHub App bot is not an assignable user at all —
+`GET /repos/jwildfire/obot.roadmap/assignees/obotclaw[bot]` is a 404 — so name the assignee
+(`--assignee jwildfire`), which is what the hub's audit policy already required of anything
+filed there. This is a documented divergence from the upstream gsm.agent Assignee
+Convention, which predates the bot identity.
+
 It is not a rule to remember. `hooks/attribution-guard.sh` refuses the write at the moment
 it would run unauthenticated and names the wrapper in the refusal; the reasoning and the
 one case the bot cannot sign — a user-owned ProjectsV2 board, which no GitHub App can reach
