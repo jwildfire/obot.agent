@@ -43,8 +43,8 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pins-'));
 // ---- the principle, not the three names -----------------------------------
 
 test('every standing role in the registry is pinned by default', () => {
-  // The test is written over the REGISTRY rather than over prime, the Navigator and
-  // fleet by name: a fourth standing role added to the registry has to arrive
+  // The test is written over the REGISTRY rather than over prime, nav and the
+  // admiral by name: a fourth standing role added to the registry has to arrive
   // pinned without anyone editing this file or the pin code.
   assert.ok(STANDING_ROLES.length >= 3, 'the registry should hold the standing roles');
   for (const r of STANDING_ROLES) {
@@ -65,23 +65,46 @@ test('the pin code names no role: the default follows what an agent IS', () => {
   }
 });
 
-test('the fleet manager role stays in step with the launcher that spawns it', async () => {
-  // The registry declares the fleet manager's tag; `tools/navigator/fleet.mjs`
-  // declares the same tag for the session it launches (obot.agent#167). Two
-  // declarations of one fact can half-land — a rename in one place and not the other
-  // makes the manager render as a probe and quietly stop being pinned, which is a
-  // silent no-op rather than a failure. This holds them together the moment that
-  // module exists, and says nothing while it does not.
-  let fleet = null;
-  try {
-    fleet = await import('../../navigator/fleet.mjs');
-  } catch {
-    return; // not on this branch yet — nothing to compare against
+test('the admiral role stays in step with the launcher that spawns it', async () => {
+  // The registry declares the admiral's tag; `tools/navigator/admiral.mjs` declares
+  // the same tag for the session it launches (obot.agent#167). Two declarations of
+  // one fact can half-land — a rename in one place and not the other makes the
+  // admiral render as a probe and quietly stop being pinned, which is a silent no-op
+  // rather than a failure.
+  //
+  // HARDENED IN THE RENAME (obot.agent#182), because the rename is the exact event
+  // this guard exists to catch and the guard would have slept through it. It used to
+  // swallow an import failure with `catch { return }` and compare each field only
+  // `if` the export was truthy — so renaming ADMIRAL_TAG away, or breaking the
+  // module outright, produced a passing test and an unpinned admiral. A guard that
+  // cannot fail is not a guard. The module is not optional any more: if it will not
+  // import, that is the finding.
+  const admiral = await import('../../navigator/admiral.mjs');
+  const role = STANDING_ROLES.find((r) => r.short === 'admiral');
+  assert.ok(role, 'the registry should carry the admiral');
+  assert.ok(admiral.ADMIRAL_TAG, 'admiral.mjs should export ADMIRAL_TAG');
+  assert.ok(admiral.ADMIRAL_NAME, 'admiral.mjs should export ADMIRAL_NAME');
+  assert.equal(role.tag, admiral.ADMIRAL_TAG);
+  assert.equal(role.name, admiral.ADMIRAL_NAME);
+});
+
+test('the three standing roles are the ones he named: prime, admiral and nav', () => {
+  // @jwildfire, 2026-08-17: "I think we should call the fleet manager the admiral.
+  // prime, admiral and nav." The short forms are what he says out loud and what the
+  // dashboard prints, so they are asserted rather than left to drift back into
+  // "the Navigator" and "the fleet manager" the next time someone edits the registry.
+  assert.deepEqual(STANDING_ROLES.map((r) => r.short).sort(), ['admiral', 'nav', 'prime']);
+});
+
+test('a resting line fits the Task cell that renders it', () => {
+  // `resting` is rendered as the Task cell for a pinned role with no session, so a
+  // long one is clipped with an ellipsis on the Agents tab rather than wrapping.
+  // The admiral's line was 101 characters when it was written for the fleet manager
+  // and would have shipped clipped the day that column landed; it is 88 now. This
+  // holds the next one under the limit without anyone having to know the limit.
+  for (const r of STANDING_ROLES) {
+    assert.ok(r.resting.length < 100, `${r.short}'s resting line is ${r.resting.length} chars, over the 100 the Task cell fits`);
   }
-  const role = STANDING_ROLES.find((r) => r.short === 'fleet');
-  assert.ok(role, 'the registry should carry the fleet manager');
-  if (fleet.MANAGER_TAG) assert.equal(role.tag, fleet.MANAGER_TAG);
-  if (fleet.MANAGER_NAME) assert.equal(role.name, fleet.MANAGER_NAME);
 });
 
 test('a long-lived worker never drifts into the pinned set', () => {

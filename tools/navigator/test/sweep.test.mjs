@@ -331,9 +331,9 @@ test('the fleet section reaches the state file, directly beneath the wake', () =
   const md = renderState({
     snapshot: {}, events: [], meta,
     wake: '## Wake — workers that stopped\n\nnothing pending\n',
-    fleet: '## Fleet — the triggered manager\n\nfleet: nothing to act on\n',
+    fleet: '## Admiral — the triggered manager\n\nfleet: nothing to act on\n',
   })
-  assert.match(md, /## Fleet — the triggered manager/)
+  assert.match(md, /## Admiral — the triggered manager/)
   assert.ok(md.indexOf('## Wake') < md.indexOf('## Fleet'), 'the wake comes first')
   assert.ok(md.indexOf('## Fleet') < md.indexOf('## RC queue'), 'both come before his queue')
 })
@@ -346,10 +346,10 @@ test('a sweep that could not read the policy STILL renders the fleet section', (
     snapshot: {}, events: [],
     meta: { sweptAt: '2026-08-17 08:00', cadenceMin: 5, repoCount: 0, ok: false,
             errors: ['policy.json: ENOENT'], lastGoodAt: null },
-    fleet: '## Fleet — the triggered manager\n\n**FLEET TRIGGER BROKEN** — policy unreadable\n',
+    fleet: '## Admiral — the triggered manager\n\n**ADMIRAL TRIGGER BROKEN** — policy unreadable\n',
   })
   assert.match(md, /\*\*FAILED\*\*/)
-  assert.match(md, /\*\*FLEET TRIGGER BROKEN\*\*/)
+  assert.match(md, /\*\*ADMIRAL TRIGGER BROKEN\*\*/)
 })
 
 test('no fleet reading renders no fleet section rather than an empty heading', () => {

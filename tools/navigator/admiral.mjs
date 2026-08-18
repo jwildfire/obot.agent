@@ -45,13 +45,22 @@ import { classify, hostWasAway, isWorker, judgedWorkers, readJobs, verdictKeys,
 
 export { hostWasAway, judgedWorkers, readJobs }
 
-/** The manager's own session tag. Deliberately not a worker tag: a manager that
+/** The admiral's own session tag. Deliberately not a worker tag: an admiral that
  *  its own detector reads as a worker would wake the Navigator about itself, and
- *  a later run would find it stalled and close it. */
-export const MANAGER_TAG = '\u{1F6A6}\u{1F916}' // 🚦🤖
-export const MANAGER_NAME = `${MANAGER_TAG} obot-fleet`
+ *  a later run would find it stalled and close it.
+ *
+ *  ANCHOR RATHER THAN TRAFFIC SIGNAL (obot.agent#182). The first tag was 🚦, chosen
+ *  when the role was called the fleet manager. That glyph already means something
+ *  else in the one place he actually reads: `## 🚦 Release candidates needing
+ *  review` is the first headline of every wrapup, every session-init hand-off and
+ *  the RC framework. One glyph meaning both "his review queue" and "the agent that
+ *  never touches a release candidate" is the worst possible pair to collide, so the
+ *  rename took the chance to separate them. ⚓ is naval like the name and sits
+ *  beside prime's 🎩 and nav's 🧭. */
+export const ADMIRAL_TAG = '\u{2693}\u{1F916}' // ⚓🤖
+export const ADMIRAL_NAME = `${ADMIRAL_TAG} obot-admiral`
 
-export const isManager = (job) => String(job?.name ?? '').startsWith(MANAGER_TAG)
+export const isAdmiral = (job) => String(job?.name ?? '').startsWith(ADMIRAL_TAG)
 
 /**
  * The harness's terminal states, all three of them.
@@ -96,9 +105,9 @@ const num = (v, dflt) => {
  * Navigator first, so the manager is the second responder rather than the first.
  */
 export const ACT_MIN = {
-  waiting: num(process.env.OBOT_FLEET_WAIT_MIN, 180),
-  stalled: num(process.env.OBOT_FLEET_STALL_MIN, 180),
-  dead: num(process.env.OBOT_FLEET_DEAD_MIN, 60),
+  waiting: num(process.env.OBOT_ADMIRAL_WAIT_MIN, 180),
+  stalled: num(process.env.OBOT_ADMIRAL_STALL_MIN, 180),
+  dead: num(process.env.OBOT_ADMIRAL_DEAD_MIN, 60),
 }
 
 /**
@@ -111,7 +120,7 @@ export const ACT_MIN = {
  * the 75th percentile of both repos with room and still catches the tail on the
  * same morning rather than the next one.
  */
-export const PR_IDLE_MIN = num(process.env.OBOT_FLEET_PR_IDLE_MIN, 120)
+export const PR_IDLE_MIN = num(process.env.OBOT_ADMIRAL_PR_IDLE_MIN, 120)
 
 /**
  * How long a closeout may sit before its absence from the delivery record is a gap
@@ -129,7 +138,7 @@ export const PR_IDLE_MIN = num(process.env.OBOT_FLEET_PR_IDLE_MIN, 120)
  * an overseer per closeout, which is the standing-supervisor cost D0016 rejected,
  * arriving by the back door.
  */
-export const CLOSEOUT_GAP_MIN = num(process.env.OBOT_FLEET_GAP_MIN, 90)
+export const CLOSEOUT_GAP_MIN = num(process.env.OBOT_ADMIRAL_GAP_MIN, 90)
 
 /**
  * The manager's lifetime bound, and the whole reason a triggered design beats a
@@ -142,18 +151,18 @@ export const CLOSEOUT_GAP_MIN = num(process.env.OBOT_FLEET_GAP_MIN, 90)
  * The general rule, worth stating once: never let an agent be the sole watcher of
  * an agent.
  */
-export const MANAGER_TTL_MIN = num(process.env.OBOT_FLEET_TTL_MIN, 30)
+export const ADMIRAL_TTL_MIN = num(process.env.OBOT_ADMIRAL_TTL_MIN, 30)
 /** When an overrun stops being a finding and becomes a runaway. Reported either
  *  way; only killed if the kill is armed, because terminating a process mid-write
  *  is not something to do on a default. */
-export const MANAGER_HARD_MIN = num(process.env.OBOT_FLEET_HARD_MIN, 60)
+export const ADMIRAL_HARD_MIN = num(process.env.OBOT_ADMIRAL_HARD_MIN, 60)
 
 /** Never two launches inside this window, whatever changed. */
-export const RELAUNCH_FLOOR_MIN = num(process.env.OBOT_FLEET_FLOOR_MIN, 60)
+export const RELAUNCH_FLOOR_MIN = num(process.env.OBOT_ADMIRAL_FLOOR_MIN, 60)
 /** And a much longer floor when the conditions are the SAME ones as last time, so a
  *  condition nothing can resolve — a pull request that will never pass the bar —
  *  cannot spin up a manager every hour for the rest of the week. */
-export const REPEAT_FLOOR_MIN = num(process.env.OBOT_FLEET_REPEAT_MIN, 240)
+export const REPEAT_FLOOR_MIN = num(process.env.OBOT_ADMIRAL_REPEAT_MIN, 240)
 
 const minsSince = (at, now) => {
   const t = Date.parse(at ?? '')
@@ -184,7 +193,7 @@ export function stalledSessions(jobs = [], { now = new Date(), hostWasAway: away
   if (away) return []
   const out = []
   for (const job of jobs) {
-    if (isManager(job)) continue // it never acts on itself, or on its successor
+    if (isAdmiral(job)) continue // it never acts on itself, or on its successor
     for (const d of classify(job, now)) {
       if (!(d.kind in ACT_MIN)) continue
       const mins = minsSince(d.at, now)
@@ -384,7 +393,7 @@ export const holdLine = (at, signature, why) => `${at} HOLD ${signature || '-'} 
 
 /** Launch and hold entries back out of the log. The signature is a field, never
  *  re-derived from prose — the mistake the ledger work spent a night undoing. */
-export function parseFleetLog(text = '') {
+export function parseAdmiralLog(text = '') {
   const out = []
   for (const raw of String(text).split('\n')) {
     const m = /^(\S+) (LAUNCH|HOLD) (\S+) — (.*)$/.exec(raw.trim())
@@ -405,7 +414,7 @@ export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
   if (away) return { launch: false, why: 'host was away — a gap in the sweep is not a stalled fleet' }
   if (!trigger?.fired) return { launch: false, why: 'no condition holds — a quiet fleet is not a trigger' }
 
-  const live = jobs.filter((j) => isManager(j) && isLive(j))
+  const live = jobs.filter((j) => isAdmiral(j) && isLive(j))
   if (live.length) {
     return { launch: false, why: `a manager is already running (job ${live[0].id}, ${live[0].state})` }
   }
@@ -440,11 +449,11 @@ export function shouldLaunch({ trigger, jobs = [], log = [], now = new Date(),
  * matters is the wall clock since it started, which is the one reading that cannot
  * be overstated by the session's own account of itself.
  */
-export function overrun(jobs = [], { now = new Date(), ttlMin = MANAGER_TTL_MIN,
-                                     hardMin = MANAGER_HARD_MIN, startedAt = {} } = {}) {
+export function overrun(jobs = [], { now = new Date(), ttlMin = ADMIRAL_TTL_MIN,
+                                     hardMin = ADMIRAL_HARD_MIN, startedAt = {} } = {}) {
   const out = []
   for (const job of jobs) {
-    if (!isManager(job) || !isLive(job)) continue
+    if (!isAdmiral(job) || !isLive(job)) continue
     const started = startedAt[job.id] ?? job.createdAt ?? job.updatedAt
     const mins = minsSince(started, now)
     if (mins === null || mins < ttlMin) continue
@@ -479,11 +488,11 @@ export const UNJUDGED_NOTE =
  * alarm flag, so an overrun written as a sub-line would reach his page as small
  * grey text.
  */
-export function fleetSection({ trigger = null, decision = null, overruns = [],
+export function admiralSection({ trigger = null, decision = null, overruns = [],
                                launched = null, error = null } = {}) {
-  const lines = ['## Fleet — the triggered manager', '']
+  const lines = ['## Admiral — the triggered manager', '']
   if (error) {
-    lines.push(`**FLEET TRIGGER BROKEN** — ${clip(error, 160)}. No condition was evaluated this run; this is not a quiet fleet.`)
+    lines.push(`**ADMIRAL TRIGGER BROKEN** — ${clip(error, 160)}. No condition was evaluated this run; this is not a quiet fleet.`)
     return lines.join('\n') + '\n'
   }
   if (!trigger) {
@@ -516,7 +525,7 @@ export function fleetSection({ trigger = null, decision = null, overruns = [],
 
   lines.push(`fleet: **${trigger.conditions.length} condition(s)** — ${trigger.sessions.length} session(s) past the bar, ` +
              `${trigger.pulls.length} idle operational PR(s), ${trigger.gaps.length} closeout gap(s)`)
-  if (launched) lines.push(`  launched manager ${launched} — it acts and exits inside ${MANAGER_TTL_MIN}m`)
+  if (launched) lines.push(`  launched manager ${launched} — it acts and exits inside ${ADMIRAL_TTL_MIN}m`)
   else if (decision) lines.push(`  held: ${decision.why}`)
 
   const group = (title, rows) => {
@@ -540,7 +549,7 @@ export function fleetSection({ trigger = null, decision = null, overruns = [],
  * session's own record — and a brief that arrived pre-summarised from local job
  * state would be exactly that mistake, wearing the launcher's authority.
  */
-export function brief({ trigger, now = new Date(), ttlMin = MANAGER_TTL_MIN }) {
+export function brief({ trigger, now = new Date(), ttlMin = ADMIRAL_TTL_MIN }) {
   return {
     generatedAt: now.toISOString(),
     deadline: new Date(now.getTime() + ttlMin * 60000).toISOString(),

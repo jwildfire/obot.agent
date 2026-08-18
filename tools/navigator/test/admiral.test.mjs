@@ -9,9 +9,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ACT_MIN, CLOSEOUT_GAP_MIN, UNJUDGED_NOTE, MANAGER_NAME, MANAGER_TAG, PR_IDLE_MIN,
-         REPEAT_FLOOR_MIN, RELAUNCH_FLOOR_MIN, brief, closeoutGaps, fleetSection,
-         holdLine, isManager, launchLine, operationalRepos, overrun, parseFleetLog,
+import { ACT_MIN, CLOSEOUT_GAP_MIN, UNJUDGED_NOTE, ADMIRAL_NAME, ADMIRAL_TAG, PR_IDLE_MIN,
+         REPEAT_FLOOR_MIN, RELAUNCH_FLOOR_MIN, brief, closeoutGaps, admiralSection,
+         holdLine, isAdmiral, launchLine, operationalRepos, overrun, parseAdmiralLog,
          shouldLaunch, signatureOf, stalledSessions, stuckPRs,
          triggers } from '../fleet.mjs'
 
@@ -98,10 +98,10 @@ test('the host guard: a lid shut for hours is not a stalled fleet', () => {
 })
 
 test('the manager never detects itself, or its predecessor', () => {
-  const self = { ...worker({ state: 'blocked', tempo: 'blocked', needs: 'x', updatedAt: agoMin(900) }), name: MANAGER_NAME }
+  const self = { ...worker({ state: 'blocked', tempo: 'blocked', needs: 'x', updatedAt: agoMin(900) }), name: ADMIRAL_NAME }
   assert.equal(stalledSessions([self], { now: NOW }).length, 0)
-  assert.equal(isManager(self), true)
-  assert.equal(isManager(worker()), false)
+  assert.equal(isAdmiral(self), true)
+  assert.equal(isAdmiral(worker()), false)
 })
 
 // ---- condition 2: operational pull requests ----------------------------------
@@ -174,7 +174,7 @@ test('a real condition launches, and says how many of each', () => {
 })
 
 test('singleton: a live manager blocks a second one and names the job holding it', () => {
-  const live = [{ ...worker(), id: 'mgr1', name: MANAGER_NAME, state: 'working' }]
+  const live = [{ ...worker(), id: 'mgr1', name: ADMIRAL_NAME, state: 'working' }]
   const d = shouldLaunch({ trigger: firedTrigger(), jobs: live, log: [], now: NOW })
   assert.equal(d.launch, false)
   assert.match(d.why, /already running \(job mgr1/)
@@ -187,7 +187,7 @@ test('singleton: a finished manager does not block a new one — in ANY terminal
   // reporting "held — a manager is already running". A failure that looks exactly
   // like the guard working is the worst shape available.
   for (const state of ['done', 'stopped', 'failed']) {
-    const dead = [{ ...worker(), id: 'mgr0', name: MANAGER_NAME, state }]
+    const dead = [{ ...worker(), id: 'mgr0', name: ADMIRAL_NAME, state }]
     assert.equal(shouldLaunch({ trigger: firedTrigger(), jobs: dead, log: [], now: NOW }).launch, true,
       `a manager in state '${state}' must not hold the singleton`)
   }
@@ -195,7 +195,7 @@ test('singleton: a finished manager does not block a new one — in ANY terminal
 
 test('overrun ignores a manager in any terminal state, not just done', () => {
   for (const state of ['done', 'stopped', 'failed']) {
-    const jobs = [{ ...worker(), id: 'm', name: MANAGER_NAME, state, createdAt: agoMin(900) }]
+    const jobs = [{ ...worker(), id: 'm', name: ADMIRAL_NAME, state, createdAt: agoMin(900) }]
     assert.equal(overrun(jobs, { now: NOW }).length, 0, `state '${state}' is finished, not overrunning`)
   }
 })
@@ -242,10 +242,10 @@ test('the signature is stable under ordering — the same fleet is never "new"',
 
 test('the log round-trips: the signature is a field, never re-derived from prose', () => {
   const line = launchLine('2026-08-17T12:00:00Z', 'pr:x#1', 'because — with an em dash')
-  const [e] = parseFleetLog(line)
+  const [e] = parseAdmiralLog(line)
   assert.equal(e.op, 'LAUNCH')
   assert.equal(e.signature, 'pr:x#1')
-  const [h] = parseFleetLog(holdLine('2026-08-17T12:00:00Z', '', 'nothing'))
+  const [h] = parseAdmiralLog(holdLine('2026-08-17T12:00:00Z', '', 'nothing'))
   assert.equal(h.op, 'HOLD')
   assert.equal(h.signature, '')
 })
@@ -255,7 +255,7 @@ test('the log round-trips: the signature is a field, never re-derived from prose
 test('overrun is measured on the wall clock, not on the state the session reports', () => {
   // A manager stuck on a prompt reads `blocked`; one wedged mid-turn reads
   // `working`. Both are overruns, and the session's own account cannot be trusted.
-  const jobs = [{ ...worker(), id: 'm', name: MANAGER_NAME, state: 'working', createdAt: agoMin(45) }]
+  const jobs = [{ ...worker(), id: 'm', name: ADMIRAL_NAME, state: 'working', createdAt: agoMin(45) }]
   const [o] = overrun(jobs, { now: NOW })
   assert.equal(o.job, 'm')
   assert.equal(o.hard, false)
@@ -264,8 +264,8 @@ test('overrun is measured on the wall clock, not on the state the session report
 })
 
 test('a manager inside its budget is not an overrun, and a finished one never is', () => {
-  assert.equal(overrun([{ ...worker(), name: MANAGER_NAME, createdAt: agoMin(5) }], { now: NOW }).length, 0)
-  assert.equal(overrun([{ ...worker(), name: MANAGER_NAME, state: 'done', createdAt: agoMin(900) }], { now: NOW }).length, 0)
+  assert.equal(overrun([{ ...worker(), name: ADMIRAL_NAME, createdAt: agoMin(5) }], { now: NOW }).length, 0)
+  assert.equal(overrun([{ ...worker(), name: ADMIRAL_NAME, state: 'done', createdAt: agoMin(900) }], { now: NOW }).length, 0)
 })
 
 // ---- what reaches his page ---------------------------------------------------
@@ -275,33 +275,33 @@ test('a manager inside its budget is not an overrun, and a finished one never is
 const ALARM_RE = /\*\*[A-Z][A-Z0-9 ]*(GAP|FINDING|BREACHED|FAILED|DOWN|BROKEN)[A-Z0-9 ]*\*\*/
 
 test('a breached manager budget reaches the page as an ALARM, not as grey text', () => {
-  const jobs = [{ ...worker(), id: 'm', name: MANAGER_NAME, createdAt: agoMin(900) }]
-  const s = fleetSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: overrun(jobs, { now: NOW }) })
+  const jobs = [{ ...worker(), id: 'm', name: ADMIRAL_NAME, createdAt: agoMin(900) }]
+  const s = admiralSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: overrun(jobs, { now: NOW }) })
   assert.match(s, ALARM_RE)
 })
 
 test('a broken trigger says so, and never reads as a quiet fleet', () => {
-  const s = fleetSection({ error: 'policy.json unreadable' })
+  const s = admiralSection({ error: 'policy.json unreadable' })
   assert.match(s, ALARM_RE)
   assert.match(s, /this is not a quiet fleet/)
   assert.doesNotMatch(s, /nothing to act on/)
 })
 
 test('a clean run still reports — a detector that only speaks up on failure reads as dead', () => {
-  const s = fleetSection({ trigger: triggers({ policy: POLICY, now: NOW }) })
+  const s = admiralSection({ trigger: triggers({ policy: POLICY, now: NOW }) })
   assert.match(s, /nothing to act on/)
   assert.doesNotMatch(s, ALARM_RE)
 })
 
 test('the verdict line is unindented — the dashboard reads an indented line as detail', () => {
-  const s = fleetSection({ trigger: firedTrigger(), decision: { why: 'x' } })
+  const s = admiralSection({ trigger: firedTrigger(), decision: { why: 'x' } })
   const verdict = s.split('\n').find((l) => l.startsWith('fleet:'))
   assert.ok(verdict, 'the verdict must be a top-level line')
   assert.doesNotMatch(verdict, /^\s/)
 })
 
 test('a held launch says WHY it held — a launcher that silently declines looks broken', () => {
-  const s = fleetSection({ trigger: firedTrigger(), decision: { why: 'a manager is already running (job mgr1, working)' } })
+  const s = admiralSection({ trigger: firedTrigger(), decision: { why: 'a manager is already running (job mgr1, working)' } })
   assert.match(s, /held: a manager is already running/)
 })
 
@@ -324,9 +324,9 @@ test('the brief carries conditions and clocks — and no summary of any session'
 test('the manager tag is not a worker tag', () => {
   // Or the wake would nag the Navigator about the manager, and a later manager would
   // find its predecessor stalled and close it.
-  assert.equal(MANAGER_TAG, '\u{1F6A6}\u{1F916}')
-  assert.ok(!MANAGER_NAME.startsWith('\u{1F46F}\u{1F916}'))
-  assert.ok(!MANAGER_NAME.startsWith('\u{1F9BE}\u{1F916}'))
+  assert.equal(ADMIRAL_TAG, '\u{1F6A6}\u{1F916}')
+  assert.ok(!ADMIRAL_NAME.startsWith('\u{1F46F}\u{1F916}'))
+  assert.ok(!ADMIRAL_NAME.startsWith('\u{1F9BE}\u{1F916}'))
 })
 
 // ---- an unreadable journal is not an empty one ------------------------------
@@ -353,7 +353,7 @@ test('the whole trigger goes quiet on an unreadable journal, and says so out lou
   const closed = [worker({ state: 'done', firstTerminalAt: agoMin(600) })]
   const t = triggers({ jobs: closed, prs: [], policy: POLICY, judgedReadable: false, now: NOW })
   assert.equal(t.fired, false, 'a missing file must not launch a manager')
-  const s = fleetSection({ trigger: t })
+  const s = admiralSection({ trigger: t })
   assert.match(s, /closeout-gap detection SUPPRESSED/)
   assert.equal(UNJUDGED_NOTE.includes('not an empty one'), true)
 })
@@ -368,7 +368,7 @@ test('a suppressed detector still says so when OTHER conditions fired', () => {
   const t = triggers({ jobs, prs: [], policy: POLICY, judgedReadable: false, now: NOW })
   assert.equal(t.fired, true)
   assert.equal(t.gaps.length, 0)
-  assert.match(fleetSection({ trigger: t, decision: { why: 'x' } }), /SUPPRESSED/)
+  assert.match(admiralSection({ trigger: t, decision: { why: 'x' } }), /SUPPRESSED/)
 })
 
 test('a kill that fired reaches the page as its own ALARM, not as a quiet exit', () => {
@@ -376,7 +376,7 @@ test('a kill that fired reaches the page as its own ALARM, not as a quiet exit',
   // cleanly, which would make the enforcement invisible exactly when it acted.
   const o = [{ job: 'm', state: 'working', mins: 90, hard: true, killed: 'SIGTERM to pid 123',
                line: 'manager job m has run 90m against a 30m budget (state working)' }]
-  const s = fleetSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: o })
+  const s = admiralSection({ trigger: triggers({ policy: POLICY, now: NOW }), overruns: o })
   assert.match(s, ALARM_RE)
   assert.match(s, /MANAGER KILLED ON A BREACHED BUDGET/)
   assert.match(s, /SIGTERM to pid 123/)

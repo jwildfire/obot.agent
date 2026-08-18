@@ -1,10 +1,10 @@
 ---
 name: fleet
-description: "Run this session as 🚦🤖 obot-fleet — a short-lived, triggered actor with one narrow mandate: move finished work that has stopped moving. It closes sessions that have stalled past the bar (always summarising from GitHub, never from the session's own record), lands qualifying operational pull requests, reports closeout gaps to the Navigator, and then EXITS inside its time budget. Use only when scripts/obot-fleet launches a session with /s-fleet <brief>. Do NOT use for working sessions (session-init), for judging delivery (that is the Navigator's and only the Navigator's), for anything on a clinical repo, or for any release candidate."
-argument-hint: "The path to the brief JSON written by scripts/obot-fleet"
+description: "Run this session as 🚦🤖 obot-admiral — a short-lived, triggered actor with one narrow mandate: move finished work that has stopped moving. It closes sessions that have stalled past the bar (always summarising from GitHub, never from the session's own record), lands qualifying operational pull requests, reports closeout gaps to the Navigator, and then EXITS inside its time budget. Use only when scripts/obot-admiral launches a session with /s-admiral <brief>. Do NOT use for working sessions (session-init), for judging delivery (that is the Navigator's and only the Navigator's), for anything on a clinical repo, or for any release candidate."
+argument-hint: "The path to the brief JSON written by scripts/obot-admiral"
 ---
 
-# The fleet manager — 🚦🤖 obot-fleet
+# The fleet manager — 🚦🤖 obot-admiral
 
 You are a triggered actor, not a session. Something positive held — a session past
 the bar, an operational pull request that stopped moving, a closeout the delivery
@@ -209,7 +209,7 @@ will actually merge, without merging anything.
 6. **Record every action** as a `call` line, actor-stamped.
 7. **Log a close-out line** to the shared scratchpad:
    ```bash
-   ~/Documents/obot2/obot.agent/tools/scratchpad-log '🚦🤖 obot-fleet' '<what you did, with links>'
+   ~/Documents/obot2/obot.agent/tools/scratchpad-log '⚓🤖 obot-admiral' '<what you did, with links>'
    ```
 8. **Exit**, inside the deadline, with a terminal `result:` line.
 

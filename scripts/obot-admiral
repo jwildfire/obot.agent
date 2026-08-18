@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// obot-fleet — evaluate the fleet conditions and, when one holds, launch a
+// obot-admiral — evaluate the fleet conditions and, when one holds, launch a
 // short-lived 🚦🤖 manager that acts and exits.
 //
 // Implements jwildfire/obot.agent#167 under jwildfire/obot.roadmap#236.
@@ -24,21 +24,21 @@
 // session — needs the harness's TaskStop tool, which only an agent has.
 //
 // Usage:
-//   obot-fleet                 evaluate; launch if warranted; print the
+//   obot-admiral                 evaluate; launch if warranted; print the
 //                                      `## Fleet` section on stdout for the sweep
-//   obot-fleet --check         evaluate and report; never launch
-//   obot-fleet --json          the trigger as JSON, no launch
-//   obot-fleet --preflight-only  print the launch command only
-//   obot-fleet --model <m>     model override (default: opus)
+//   obot-admiral --check         evaluate and report; never launch
+//   obot-admiral --json          the trigger as JSON, no launch
+//   obot-admiral --preflight-only  print the launch command only
+//   obot-admiral --model <m>     model override (default: opus)
 //
 // Exit codes: 0 always on a completed evaluation — this runs on the five-minute
 // sweep and a non-zero exit there is noise, not information. A broken evaluation
-// prints a FLEET TRIGGER BROKEN section, which is the reading that matters.
+// prints a ADMIRAL TRIGGER BROKEN section, which is the reading that matters.
 //
-// Env: OBOT_WORKSPACE, OBOT_JOBS_DIR, and the OBOT_FLEET_* thresholds documented in
-// tools/navigator/fleet.mjs.
+// Env: OBOT_WORKSPACE, OBOT_JOBS_DIR, and the OBOT_ADMIRAL_* thresholds documented in
+// tools/navigator/admiral.mjs.
 //
-// THE HARD CEILING IS ARMED BY DEFAULT; OBOT_FLEET_KILL=0 disarms it. The Navigator
+// THE HARD CEILING IS ARMED BY DEFAULT; OBOT_ADMIRAL_KILL=0 disarms it. The Navigator
 // decided this on 2026-08-17 and the reasoning is worth keeping: a kill that ships
 // disarmed is documentation, and the failure it prevents is the one the requirement
 // names — a manager with no enforced limit is a standing session that has not
@@ -54,9 +54,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { MANAGER_NAME, MANAGER_TTL_MIN, brief, fleetSection, holdLine, hostWasAway,
-         isManager, judgedWorkers, launchLine, operationalRepos, overrun,
-         parseFleetLog, readJobs, shouldLaunch, triggers } from '../tools/navigator/fleet.mjs'
+import { ADMIRAL_NAME, ADMIRAL_TTL_MIN, brief, admiralSection, holdLine, hostWasAway,
+         isAdmiral, judgedWorkers, launchLine, operationalRepos, overrun,
+         parseAdmiralLog, readJobs, shouldLaunch, triggers } from '../tools/navigator/admiral.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(HERE, '..')
@@ -65,10 +65,24 @@ const JOBS_DIR = process.env.OBOT_JOBS_DIR || join(process.env.HOME, '.claude', 
 // Overridable for the same reason OBOT_JOBS_DIR is: the branch where no lane is
 // readable is the one that must NOT report a quiet fleet, and a branch that cannot
 // be reached from a test is a branch nobody has ever seen run.
-const POLICY = process.env.OBOT_FLEET_POLICY || join(REPO_ROOT, 'scripts', 'policy.json')
+const POLICY = process.env.OBOT_ADMIRAL_POLICY || join(REPO_ROOT, 'scripts', 'policy.json')
 const HUB_DIR = join(WS, '.claude/session-hub')
-const FLEET_LOG = join(HUB_DIR, 'fleet.log')
-const BRIEF = join(HUB_DIR, 'cache', 'fleet-brief.json')
+// The launch log, and a one-release read of the name it had before obot.agent#182.
+//
+// This log is not a record for a reader — `parseAdmiralLog` reads it back to enforce
+// RELAUNCH_FLOOR_MIN and REPEAT_FLOOR_MIN, so an empty log means "nothing has ever
+// launched" and every floor is open. Renaming the file without reading the old one
+// would therefore not fail: it would silently re-arm both floors, and the first
+// sweep after the rename could launch on a signature that was deliberately held four
+// hours ago. That is the exact shape of failure this codebase keeps finding — a
+// change that reports success while quietly undoing a guard.
+//
+// So the new path is authoritative and the legacy path is read when the new one does
+// not exist yet. The fallback can go once a launch has been written to the new file
+// on every machine that runs this, which in practice is the next real trigger here.
+const ADMIRAL_LOG = join(HUB_DIR, 'admiral.log')
+const LEGACY_ADMIRAL_LOG = join(HUB_DIR, 'fleet.log')
+const BRIEF = join(HUB_DIR, 'cache', 'admiral-brief.json')
 const SNAPSHOT = join(HUB_DIR, 'cache', 'navigator-rc.json')
 const DELIVERY_JOURNAL = join(HUB_DIR, 'delivery.journal')
 
@@ -81,10 +95,10 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--preflight-only') MODE = 'preflight'
   else if (a === '--model') MODEL = process.argv[++i]
   else if (a === '-h' || a === '--help') { MODE = 'help' }
-  else { console.error(`obot-fleet: unknown argument: ${a}`); process.exit(1) }
+  else { console.error(`obot-admiral: unknown argument: ${a}`); process.exit(1) }
 }
 
-const say = (m) => console.error(`obot-fleet: ${m}`)
+const say = (m) => console.error(`obot-admiral: ${m}`)
 const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
 
 /**
@@ -99,14 +113,14 @@ const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return 
 const launchCommand = (briefPath) => [
   'claude', '--bg', '--permission-mode', 'auto',
   '--settings', '{"remoteControlAtStartup":false}',
-  '-n', MANAGER_NAME, '--model', MODEL,
-  `/s-fleet ${briefPath}`,
+  '-n', ADMIRAL_NAME, '--model', MODEL,
+  `/s-admiral ${briefPath}`,
 ]
 
 const printCommand = (cmd) => {
   // %s rather than %q: %q escapes every non-ASCII byte, which turns the session
   // name into mojibake and makes the one line a reader checks unreadable.
-  process.stdout.write('obot-fleet: would run (from ' + WS + '):')
+  process.stdout.write('obot-admiral: would run (from ' + WS + '):')
   for (const arg of cmd) process.stdout.write(/[\s{]/.test(arg) ? ` '${arg}'` : ` ${arg}`)
   process.stdout.write('\n')
 }
@@ -159,7 +173,7 @@ function main() {
     // Not a quiet fleet — an unreadable policy. Said as a broken reading, because a
     // trigger that cannot see any lane and reports "nothing to do" is the exact
     // shape of silent success this house keeps rebuilding.
-    process.stdout.write(fleetSection({ error: `no operational repo readable from ${POLICY}` }))
+    process.stdout.write(admiralSection({ error: `no operational repo readable from ${POLICY}` }))
     return
   }
 
@@ -188,7 +202,8 @@ function main() {
   if (errors.length) trigger.unread = errors
 
   const overruns = overrun(jobs, { now })
-  const log = parseFleetLog(safeRead(FLEET_LOG))
+  // Legacy read: only when the new log does not exist at all, never merged with it.
+  const log = parseAdmiralLog(existsSync(ADMIRAL_LOG) ? safeRead(ADMIRAL_LOG) : safeRead(LEGACY_ADMIRAL_LOG))
 
   if (MODE === 'json') {
     process.stdout.write(JSON.stringify({ trigger, overruns, away, unread: errors }, null, 2) + '\n')
@@ -210,9 +225,9 @@ function main() {
   // the hold were normal.
   for (const o of overruns) {
     say(o.line)
-    if (MODE === 'run' && o.hard && process.env.OBOT_FLEET_KILL !== '0') {
+    if (MODE === 'run' && o.hard && process.env.OBOT_ADMIRAL_KILL !== '0') {
       const killed = killManager(o.job, jobs)
-      appendFileSync(FLEET_LOG, `${now.toISOString()} HOLD - — killed overrunning manager ${o.job}: ${killed}\n`)
+      appendFileSync(ADMIRAL_LOG, `${now.toISOString()} HOLD - — killed overrunning manager ${o.job}: ${killed}\n`)
       say(`killed overrunning manager ${o.job}: ${killed}`)
       o.killed = killed
     }
@@ -229,12 +244,12 @@ function main() {
       const child = spawn(cmd[0], cmd.slice(1), { cwd: WS, detached: true, stdio: 'ignore' })
       child.unref()
       launched = `pid ${child.pid}`
-      appendFileSync(FLEET_LOG, `${launchLine(now.toISOString(), trigger.signature, decision.why)}\n`)
+      appendFileSync(ADMIRAL_LOG, `${launchLine(now.toISOString(), trigger.signature, decision.why)}\n`)
       say(`launched — ${decision.why}`)
     } catch (e) {
       launched = null
       decision.why = `launch failed: ${String(e.message).slice(0, 120)}`
-      appendFileSync(FLEET_LOG, `${holdLine(now.toISOString(), trigger.signature, decision.why)}\n`)
+      appendFileSync(ADMIRAL_LOG, `${holdLine(now.toISOString(), trigger.signature, decision.why)}\n`)
       say(decision.why)
     }
   } else {
@@ -247,13 +262,13 @@ function main() {
     // launcher declined when it was never asked to launch would be a false entry in
     // the one file that answers why nothing ran.
     if (MODE === 'run' && trigger.fired) {
-      appendFileSync(FLEET_LOG, `${holdLine(now.toISOString(), trigger.signature, decision.why)}\n`)
+      appendFileSync(ADMIRAL_LOG, `${holdLine(now.toISOString(), trigger.signature, decision.why)}\n`)
     }
     say(MODE === 'check' ? `dry run — would ${decision.launch ? 'LAUNCH' : 'hold'}: ${decision.why}`
                          : trigger.fired ? `held — ${decision.why}` : 'no condition holds — nothing launched')
   }
 
-  let section = fleetSection({ trigger, decision, overruns, launched })
+  let section = admiralSection({ trigger, decision, overruns, launched })
   if (errors.length) {
     section = section.replace(/\n$/, '') + '\n' +
       errors.map((e) => `  unread: ${e}`).join('\n') + '\n'
@@ -262,7 +277,7 @@ function main() {
 }
 
 /**
- * Terminate an overrunning manager, armed only by OBOT_FLEET_KILL=1.
+ * Terminate an overrunning manager, armed only by OBOT_ADMIRAL_KILL=1.
  *
  * The pid comes from `claude agents --json`, joined on the session id, because the
  * job record does not carry one. SIGTERM rather than SIGKILL so the session gets to
@@ -286,7 +301,7 @@ function killManager(jobId, jobs) {
 try {
   main()
 } catch (e) {
-  process.stdout.write(fleetSection({ error: String(e.message) }))
+  process.stdout.write(admiralSection({ error: String(e.message) }))
   say(`BROKEN: ${e.message}`)
 }
 process.exit(0)

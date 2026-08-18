@@ -333,12 +333,12 @@ const auditDelivery = () => shellAudit('delivery-log')
  * and returns. Everything the manager then does is the manager's, under its own
  * skill contract and its own time budget.
  */
-function runFleet() {
-  const r = spawnSync(join(REPO_ROOT, 'scripts', 'obot-fleet'), [], {
+function runAdmiral() {
+  const r = spawnSync(join(REPO_ROOT, 'scripts', 'obot-admiral'), [], {
     env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 120000,
   })
   if (r.error || r.status === null) {
-    return `## Fleet — the triggered manager\n\n**FLEET TRIGGER BROKEN** — launcher did not run (${r.error ? String(r.error.message).slice(0, 120) : 'killed'}). No condition was evaluated this run; this is not a quiet fleet.\n`
+    return `## Admiral — the triggered manager\n\n**ADMIRAL TRIGGER BROKEN** — launcher did not run (${r.error ? String(r.error.message).slice(0, 120) : 'killed'}). No condition was evaluated this run; this is not a quiet fleet.\n`
   }
   return (r.stdout || '').trim() || null
 }
@@ -548,9 +548,9 @@ const safeJobs = () => {
 // fleet section that simply vanished would read as a page with nothing to report.
 // The launcher reads the job ledger itself rather than taking this one, so the
 // null-versus-empty distinction above is not in its path.
-const safeFleet = () => {
-  try { return runFleet() } catch (e) {
-    return `## Fleet — the triggered manager\n\n**FLEET TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
+const safeAdmiral = () => {
+  try { return runAdmiral() } catch (e) {
+    return `## Admiral — the triggered manager\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
   }
 }
 // A broken wake must not break the sweep, and must not fail quietly either: the
@@ -590,7 +590,7 @@ function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, fleet: safeFleet() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, fleet: safeAdmiral() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -696,7 +696,7 @@ function main() {
   mkdirSync(dirname(SNAPSHOT), { recursive: true })
   // The fleet trigger runs last of the readings, after the wake, because a manager
   // it launches will read the state file this run is about to write.
-  const fleet = safeFleet()
+  const fleet = safeAdmiral()
   writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, fleet }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
