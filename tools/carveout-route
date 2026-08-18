@@ -1,0 +1,237 @@
+#!/usr/bin/env node
+// carveout-route — raise the config item for a pull request only @jwildfire can merge.
+//
+// obot.agent#264, under jwildfire/obot.roadmap#220 ("his queue holds exactly three
+// buckets — RC, decision, config").
+//
+// THE SHAPE: `obot-merge --check` DECIDES, this READS, `blocker-log` FILES. Nothing
+// here re-implements the carve-out rules — they live in `scripts/policy.json` and
+// belong to @jwildfire, and a second copy of them in this file would be one more
+// thing to drift out of agreement with the guardrail it is describing. This tool
+// runs the real wrapper in its own dry-run mode and parses what it printed.
+//
+// WHY IT RUNS AT ALL. c0016 covers obot.agent#198 because a person noticed and filed
+// it by hand. Nothing created it and nothing would have, on a night nobody was
+// looking: the pull request is not a release candidate, so it never reaches his
+// review queue, and it is unmergeable by every agent, so it is never cleared. It
+// would simply have sat there, while ⚓🤖 obot-admiral escalated it once a cycle to
+// an audience that could do nothing about it.
+//
+// THE PROPERTY THAT DECIDES WHETHER THIS IS WORTH HAVING: nothing is ever raised
+// twice. Coverage is read from the open config list before any id is claimed, so a
+// pull request that already has an item costs this run one map lookup. Re-raising
+// c0016 every five minutes would be worse than never raising it at all, because a
+// list he cannot trust is one he stops reading — and that is the failure the whole
+// three-bucket rule was written against.
+//
+// Usage:
+//   carveout-route                     scan the operational lanes; raise what is due
+//   carveout-route --check             evaluate and report; file nothing
+//   carveout-route --pr 198 -R jwildfire/obot.agent   one pull request, no age bar
+//   carveout-route --json              the reading as JSON, files nothing
+//
+// Exit codes: 0 on a completed evaluation, whatever it found. This runs on the
+// five-minute sweep, where a non-zero exit is noise rather than information; a
+// broken evaluation prints a CARVE-OUT ROUTING FAILED section, which is the reading
+// that matters. 1 only when the evaluation itself could not be made.
+//
+// Env: OBOT_WORKSPACE, and OBOT_CARVEOUT_{MERGE,BLOCKER_LOG,POLICY,GH,AFTER_MIN,MAX}
+// so the whole path is reachable from a test without touching the real config list,
+// the real policy file or the network. A path that can only be exercised in
+// production is a path nobody has ever seen run.
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { operationalRepos } from './navigator/admiral.mjs'
+import { CHECK_AFTER_MIN, MAX_CHECKS, candidates, carveoutSection, needsRoute,
+         parseCheck, prKey, raiseArgs, readCoverage, shortRef } from './navigator/carveout.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = join(HERE, '..')
+const WS = process.env.OBOT_WORKSPACE || join(process.env.HOME, 'Documents/obot2')
+const MERGE = process.env.OBOT_CARVEOUT_MERGE || join(REPO_ROOT, 'scripts', 'obot-merge')
+const BLOCKER_LOG = process.env.OBOT_CARVEOUT_BLOCKER_LOG || join(REPO_ROOT, 'tools', 'blocker-log')
+const POLICY = process.env.OBOT_CARVEOUT_POLICY || join(REPO_ROOT, 'scripts', 'policy.json')
+const GH = process.env.OBOT_CARVEOUT_GH || 'gh'
+const AFTER_MIN = Number(process.env.OBOT_CARVEOUT_AFTER_MIN) || CHECK_AFTER_MIN
+const MAX = Number(process.env.OBOT_CARVEOUT_MAX) || MAX_CHECKS
+// Which lanes were read clean at which revision. A cache of NEGATIVES only: a lane
+// that needed routing is never recorded here, because the record that it was handled
+// is the config item itself, and a cache saying "handled" would survive an item
+// somebody retired.
+const CACHE = join(WS, '.claude/session-hub/cache/carveout-checked.json')
+
+let MODE = 'run'
+let ONE_PR = null
+let ONE_REPO = null
+for (let i = 2; i < process.argv.length; i++) {
+  const a = process.argv[i]
+  if (a === '--check' || a === '--dry-run') MODE = 'check'
+  else if (a === '--json') MODE = 'json'
+  else if (a === '--pr') ONE_PR = Number(process.argv[++i])
+  else if (a === '-R' || a === '--repo') ONE_REPO = process.argv[++i]
+  else if (a === '-h' || a === '--help') MODE = 'help'
+  else { console.error(`carveout-route: unknown argument: ${a}`); process.exit(1) }
+}
+
+const say = (m) => console.error(`carveout-route: ${m}`)
+const safeRead = (f) => { try { return readFileSync(f, 'utf8') } catch { return '' } }
+
+if (MODE === 'help') {
+  process.stdout.write(safeRead(fileURLToPath(import.meta.url)).split('\n')
+    .slice(1, 43).map((l) => l.replace(/^\/\/ ?/, '')).join('\n') + '\n')
+  process.exit(0)
+}
+
+/** Open pull requests on the operational integration lanes, with the repo's own
+ *  integration branch alongside — the same listing the admiral launcher makes, and
+ *  the same reason: only operational repos are ever fetched, so no code path exists
+ *  down which a clinical repo could reach a routing decision. */
+function listPRs(repos) {
+  const prs = []
+  const errors = []
+  for (const { repo, integration } of repos) {
+    try {
+      const raw = execFileSync(GH, ['pr', 'list', '-R', repo, '--state', 'open', '--json',
+        'number,title,url,baseRefName,isDraft,updatedAt'], { encoding: 'utf8', timeout: 60000 })
+      for (const pr of JSON.parse(raw)) prs.push({ ...pr, repo, integration })
+    } catch (e) {
+      // Named, never swallowed. A repo that failed to list contributes no candidates,
+      // and reporting "nothing to route" on a listing that never happened is the
+      // silent-success shape this whole file is written against.
+      errors.push(`${repo}: ${String(e.message).slice(0, 90)}`)
+    }
+  }
+  return { prs, errors }
+}
+
+/** One real `--check`. Read-only by the wrapper's own contract: it evaluates the
+ *  policy and the milestone gate, prints, and exits without merging anything. */
+function runCheck(repo, number) {
+  const r = spawnSync(MERGE, [String(number), '-R', repo, '--check'], { encoding: 'utf8', timeout: 120000 })
+  if (r.error) return { failed: `${shortRef(repo, number)}: ${String(r.error.message).slice(0, 90)}` }
+  const check = parseCheck(r.stdout || '', r.stderr || '')
+  // A wrapper that ran and printed something this could not parse is a FAILED
+  // reading, not a clean lane. `--check` exits 0 on a completed evaluation and 2 on
+  // a refusal, and both are readable; anything else is reported.
+  if (!check.ok) {
+    return { failed: `${shortRef(repo, number)}: obot-merge --check produced no readable verdict (exit ${r.status})` }
+  }
+  return { check }
+}
+
+/** File one item through the tool that owns the list and its ledger. Shelled rather
+ *  than written here for the reason every ledger in this repo is shelled: one writer,
+ *  one allocator, one journal. This process never touches `.claude/blockers.md`. */
+function raise(repo, check) {
+  const r = spawnSync(BLOCKER_LOG, raiseArgs(check, { repo }), {
+    env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 60000,
+  })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  // Exit 2 is blocker-log's own dedup — an entry with this headline is already
+  // there. It is a SECOND line of defence behind the coverage map and reaching it is
+  // not an error: it means the headline matched something the reference scan did
+  // not. Reported as already-covered, never as a failure and never as a raise.
+  if (r.status === 2) return { duplicate: true, id: out.match(/\bc(\d{4})\b/)?.[0] ?? null }
+  if (r.error || r.status !== 0) return { failed: `blocker-log refused ${shortRef(repo, check.number)}: ${out.replace(/\s+/g, ' ').trim().slice(0, 140)}` }
+  return { id: out.match(/filed (c\d{4})/)?.[1] ?? null }
+}
+
+function main() {
+  const now = new Date()
+  const coverage = readCoverage(WS)
+  // Nothing is decided on a reading that did not happen — not a raise, and not a
+  // suppression. An unreadable list produces the same empty map as a list covering
+  // nothing, and those two mean opposite things (obot.agent#206/#215).
+  if (!coverage.read) {
+    process.stdout.write(carveoutSection({ coverageRead: false, coverageWhy: coverage.why }))
+    say(`config list unreadable — ${coverage.why}`)
+    return
+  }
+
+  let prs = []
+  let errors = []
+  if (ONE_PR) {
+    if (!ONE_REPO) { say('--pr needs -R owner/repo'); process.exit(1) }
+    prs = [{ repo: ONE_REPO, number: ONE_PR, integration: null, isDraft: false, baseRefName: null, updatedAt: now.toISOString() }]
+  } else {
+    const policy = JSON.parse(safeRead(POLICY) || '{}')
+    const repos = operationalRepos(policy)
+    if (!repos.length) {
+      process.stdout.write(carveoutSection({ errors: [`no operational repo readable from ${POLICY}`] }))
+      return
+    }
+    const listed = listPRs(repos)
+    prs = listed.prs
+    errors = listed.errors
+  }
+
+  let checked = 0
+  let skipped = 0
+  let toCheck = prs
+  const cache = ONE_PR ? {} : (() => { try { return JSON.parse(readFileSync(CACHE, 'utf8')) } catch { return {} } })()
+  if (!ONE_PR) {
+    const sel = candidates(prs, { now, covered: coverage.covered, afterMin: AFTER_MIN, max: MAX, checked: cache })
+    toCheck = sel.check
+    skipped = sel.skipped.length
+  }
+
+  const raised = []
+  for (const pr of toCheck) {
+    // The coverage gate again, and deliberately not only inside `candidates`: the
+    // single-pull-request lane skips that function entirely, and it is the lane a
+    // person types by hand at exactly the moment they are least sure whether an item
+    // already exists.
+    const key = prKey(pr.repo, pr.number)
+    if (coverage.covered.has(key)) { say(`${shortRef(pr.repo, pr.number)} already covered by ${coverage.covered.get(key).join(', ')} — nothing raised`); continue }
+    const { check, failed } = runCheck(pr.repo, pr.number)
+    checked++
+    if (failed) { errors.push(failed); continue }
+    if (!needsRoute(check)) {
+      // Only a lane READ CLEAN is cached, and only in the scanning mode where a cache
+      // means anything. A lane that needed routing is remembered by its config item.
+      if (!ONE_PR) cache[key] = { updatedAt: pr.updatedAt, at: now.toISOString() }
+      continue
+    }
+    if (MODE === 'check' || MODE === 'json') {
+      raised.push({ id: null, ref: shortRef(pr.repo, pr.number), paths: check.carveOut, closes: check.closes, wouldRaise: true })
+      continue
+    }
+    const r = raise(pr.repo, check)
+    if (r.failed) { errors.push(r.failed); continue }
+    if (r.duplicate) { say(`${shortRef(pr.repo, pr.number)} matched an existing entry by headline — nothing raised`); continue }
+    raised.push({ id: r.id, ref: shortRef(pr.repo, pr.number), paths: check.carveOut, closes: check.closes })
+    say(`raised ${r.id ?? 'a config item'} for ${shortRef(pr.repo, pr.number)} (${check.carveOut.join(', ')})`)
+  }
+
+  // Only pull requests still open on a lane this run actually looked at. The map
+  // holds every reference the list mentions, and reporting a merged one as "covered"
+  // would make the section grow forever.
+  const openKeys = new Set(prs.map((p) => prKey(p.repo, p.number)))
+  const covered = [...coverage.covered.entries()]
+    .filter(([k]) => openKeys.has(k))
+    .map(([k, ids]) => ({ ref: k.replace(/^jwildfire\//, ''), ids }))
+
+  if (MODE === 'json') {
+    process.stdout.write(JSON.stringify({ raised, covered, checked, skipped, errors, coverageRead: true }, null, 2) + '\n')
+    return
+  }
+  if (MODE === 'run' && !ONE_PR) {
+    try {
+      mkdirSync(dirname(CACHE), { recursive: true })
+      writeFileSync(CACHE, JSON.stringify(cache, null, 2))
+    } catch (e) { errors.push(`could not write ${CACHE}: ${String(e.message).slice(0, 80)}`) }
+  }
+  process.stdout.write(carveoutSection({ raised, covered, checked, skipped, errors, dryRun: MODE === 'check' }))
+}
+
+try {
+  main()
+} catch (e) {
+  process.stdout.write(carveoutSection({ coverageRead: false, coverageWhy: String(e.message) }))
+  say(`BROKEN: ${e.message}`)
+  process.exit(1)
+}
+process.exit(0)
