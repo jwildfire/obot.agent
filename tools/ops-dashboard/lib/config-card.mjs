@@ -251,7 +251,7 @@ export function readCardSource(workspace, id) {
  * card that could disagree with it about a date, a blocking reference or a verify
  * command would be a second source of truth nobody asked for.
  */
-export function buildCard(item, source = { missing: true }, { generatedAt = new Date() } = {}) {
+export function buildCard(item, source = { missing: true }, { generatedAt = new Date(), currency = null } = {}) {
   const iq = item?.iq ?? {};
   const verify = iq.verify ?? null;
   return {
@@ -274,6 +274,11 @@ export function buildCard(item, source = { missing: true }, { generatedAt = new 
     raw: source.missing ? rawFields(iq) : null,
     unwritten: Boolean(source.missing),
     unreadable: source.why ?? null,
+    // When the claim this card is about was last established, and by what
+    // (obot.agent#262, under jwildfire/obot.roadmap#264). A card used to open with the
+    // day somebody filed it, which is the one date that says nothing about whether it
+    // is still worth walking to a keyboard for.
+    currency: currency ?? null,
     generatedAt,
   };
 }
@@ -297,6 +302,10 @@ export function summaryText(card) {
   const strip = FRONT_KEYS.filter((k) => k !== 'deadline' && card.front[k])
     .map((k) => `${STRIP_LABEL[k]}: ${card.front[k]}`);
   if (strip.length) out.push(...strip, '');
+  // The currency line travels with the summary. The phone lane is the one place he
+  // reads this without a dashboard beside it, so a card that says how old its claim is
+  // only on screen has said it to the wrong reader.
+  if (card.currency?.phrase) out.push(card.currency.phrase, '');
   const body = card.summary || card.raw?.find((f) => f.name === 'do')?.text || '';
   if (body) out.push(plain(body));
   return `${out.join('\n').trim()}\n`;
@@ -398,6 +407,12 @@ export function renderCard(card) {
 
   const meta = [card.id, card.filed ? `filed ${card.filed}` : null, card.verified ? `verified ${card.verified}` : null]
     .filter(Boolean).join(' · ');
+  // The currency line goes directly under the title, above everything he would read to
+  // decide. It is the first question a card has to answer — is this still true — and
+  // the three states get three treatments so an unrunnable check can never be mistaken
+  // for one that came back outstanding.
+  const currency = card.currency
+    ? `<p class="cur ${esc(card.currency.state)}">${esc(card.currency.phrase)}</p>` : '';
 
   const steps = card.steps.map((s, i) => `
     <li class="step">
@@ -426,6 +441,7 @@ export function renderCard(card) {
     <p class="kicker">Config item${card.claim ? ` · <span class="crit">critical — ${esc(card.claim)}</span>` : ''}</p>
     <h1>${esc(card.title)}</h1>
     <p class="meta">${esc(meta)}</p>
+    ${currency}
   </header>
 
   ${card.unreadable ? `<p class="alarm">This item's card could not be read: ${esc(card.unreadable)}. What follows is the list entry, not the card.</p>` : ''}
@@ -474,7 +490,8 @@ function proofBlock(card) {
     return `<p class="see"><span class="lab">Manual</span>${inline(card.verify.expect || 'nothing here can be scripted — you are the check')}</p>`;
   }
   return `<div class="cmd"><pre>${esc(card.verify.command)}</pre><button class="copy" type="button" data-copy="${esc(card.verify.command)}">copy</button></div>
-    <p class="see"><span class="lab">Pass</span>${inline(card.verify.expect || 'it exits 0. Anything else is a fail.')}</p>`;
+    <p class="see"><span class="lab">Pass</span>${inline(card.verify.expect || 'it exits 0. Anything else is a fail.')}</p>${
+      card.currency ? `\n    <p class="see"><span class="lab">Last run</span>${esc(card.currency.phrase)}</p>` : ''}`;
 }
 
 const CARD_CSS = `
@@ -499,6 +516,12 @@ const CARD_CSS = `
   .kicker .crit { color:var(--crit); text-transform:none; letter-spacing:0; font-size:0.8rem; }
   h1 { font-size:1.32rem; line-height:1.25; margin:0 0 0.3rem; letter-spacing:-0.015em; }
   .meta { margin:0; font-family:var(--mono); font-size:0.7rem; color:var(--faint); }
+  /* Three states, three treatments. Two of them sharing a colour is the collapse this
+     line exists to prevent. */
+  .cur { margin:0.35rem 0 0; font-size:0.78rem; color:var(--muted); }
+  .cur.holds { color:var(--good); }
+  .cur.unknown { color:var(--warn); }
+  .cur.fails { color:var(--ink); }
   h2 { font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted);
        margin:1.6rem 0 0.5rem; }
   section.sum { background:var(--card); border:1px solid var(--line); border-radius:10px;

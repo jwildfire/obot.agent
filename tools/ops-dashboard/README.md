@@ -426,6 +426,90 @@ than accepting a path, it refuses a destination outside the store, it refuses a 
 hub deploy greps for and fails on. The server has no card writer at all; it renders on the
 request and writes nothing. Each refusal has a test in `test/config-card.test.mjs`.
 
+## The currency of a claim — one mechanism, two artifact classes
+
+Requirements [obot.roadmap#264](https://github.com/jwildfire/obot.roadmap/issues/264) and
+[#266](https://github.com/jwildfire/obot.roadmap/issues/266), built as one under
+[obot.agent#262](https://github.com/jwildfire/obot.agent/issues/262). Core in
+`tools/lib/claims.mjs`; the two readers and the section in `tools/navigator/currency.mjs`.
+
+Two artifact classes state claims and neither re-checked them. Config items carry a verify
+command, the dashboard runs one on a click, and nothing ran them on their own — three of
+the last six items left the list for being stale or mis-specified rather than for being
+done. Decision artifacts state a premise in prose, and D0021 said a release was held
+pending the decision when it had published sixteen minutes earlier. Same defect, one
+artifact class apart, which is why #266 asked for one mechanism by name.
+
+A **claim** is a sentence and a proof:
+
+```
+<what is claimed> | <read-only command> → <what its output should say>
+```
+
+The right-hand half is the config list's own `Verify:` grammar, unchanged. A decision
+artifact declares one per line in its head, beside the description the contract already
+requires — the form is one line because a premise that costs a section or a schema does not
+get written:
+
+```html
+<meta name="premise" content="v1.1.0 is published, not a draft | gh release view v1.1.0 -R jwildfire/gsm.safety --json isDraft --jq .isDraft → prints false">
+```
+
+**Three states, never two.** `holds` / `does not hold` / `unknown`. The classes read them
+differently — a config claim that holds is done and leaves his queue; a premise that holds
+still frames its question correctly — but `unknown` means the same thing in both, and it is
+the state the whole capability turns on:
+
+- A command the allowlist will not run is unknown with a reason, never a fail.
+- A command that never produced an exit status — not installed, killed by the timeout — is
+  unknown. This was live in the old `runVerify`, which coerced a spawn failure to
+  `exitCode: 1` and judged it, so an item nothing could check read as an item waiting on him.
+- A `prints X` claim whose command exited non-zero and either printed nothing or reported an
+  error is unknown: there was no answer to compare. Found by 👯🤖 W0071's missing-file
+  control. Deliberately narrow — `grep -c x file` prints `0` and exits 1 when the answer is
+  "none, which is what we wanted", and two live items depend on that reading as a pass.
+- A reading of a *different* command is not this claim's reading. A reworded verify starts
+  again rather than inheriting its predecessor's verdict.
+
+**Read-only, and a shell is never involved.** The allowlist is the same fail-closed one the
+click-to-run button used. A shell metacharacter *outside quotes* means the author wrote for
+a shell and the claim is refused rather than reinterpreted — `grep -q x f > /dev/null` run
+through `execFile` passes `>` and `/dev/null` to grep and answers a different question,
+silently. Inside quotes it is a character in an argument and passes through untouched, which
+is what lets a proof do its own work: `gh api … --jq '.content | @base64d | test("x")'` is
+one command with three jq pipes and no shell at all.
+
+**On the sweep, and at publish time.** They fail differently and neither substitutes.
+
+```bash
+tools/navigator/currency.mjs                        # the pass, as the sweep runs it
+tools/navigator/currency.mjs --artifact <slug>     # one artifact, exits 1 if a premise does not hold
+```
+
+Cadence catches the world moving under a page that was right when written — and the config
+half, where nothing else ever will. Publish-time catches a page born wrong, which cadence
+can only report forever with no path to green: the first draft of D0021's premise was the
+corrected-away claim, and a five-minute check on it would have been a permanent alarm. What
+actually closes the window is not the evaluation, though — the premise that expired was
+never in a field to evaluate. It is that **declaring** a premise forces the author to state
+it as a command, so a belief becomes a measurement at the moment of writing. The gate is
+worth having; the declaration is the part doing the work.
+
+**A premise is asserted in five places.** Measured by W0071 on D0021: the page, the
+artifact's README, the published index row, `registry.json`, and the discussion title — all
+five stated it and none of them were true. So a broken premise's finding names every one of
+them, and reads when each of the three that are files was last modified, flagging any older
+than the moment the premise broke. The discussion title is named without a reading, and says
+so: refusing to claim a check nobody ran is what makes the other three believable. A
+declaration that cannot be parsed at all is counted and reported rather than vanishing,
+because a premise nobody can read looks exactly like a page with nothing wrong.
+
+**What it never does.** It never writes to `.claude/blockers.md` — an item its own check
+proves done leaves the queue as a view, and the line naming it is there so nothing can
+vanish silently. It never closes anything on GitHub. And it never prints config item text:
+ids and counts reach the sweep file and the page, as everywhere else. Premise sentences do
+reach it, because they are already published on the artifact's own public page.
+
 ## The hub's code runs in its own process
 
 This page runs the hub's own decision collector rather than a copy of it, so the page and the
