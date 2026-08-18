@@ -147,3 +147,23 @@ test('an unreadable config list stops the whole pass rather than raising into th
   assert.match(r.stdout, /\*\*CONFIG ROUTING FAILED\*\*/)
   assert.match(r.stdout, /Nothing was raised and nothing was suppressed/)
 })
+
+test('an item he retired is not raised again on the next sweep', () => {
+  // The retire lane moves an entry to ## Resolved, where the reference scan stops
+  // counting it — so without a second line of defence the router would re-file it
+  // five minutes later, which is precisely the behaviour that would make the list
+  // unreadable. blocker-log's own headline dedup is that second line, and reaching
+  // it is a normal outcome rather than an error: the raise is deterministic, so the
+  // headline it would write next time is the one already sitting in the file.
+  const b = bench(attested())
+  run(b, ['--pr', '198', '-R', 'jwildfire/obot.agent'])
+  const retire = spawnSync(BLOCKER_LOG, ['--retire', 'c0001', '--reason', 'not doing this now'],
+    { encoding: 'utf8', env: { ...process.env, OBOT_WORKSPACE: b.ws, OBOT_ACTOR: 'carveout-route-test' } })
+  assert.equal(retire.status, 0, retire.stderr)
+  assert.deepEqual(entries(b.ws), [], 'retired, so nothing is open')
+
+  const again = run(b, ['--pr', '198', '-R', 'jwildfire/obot.agent'])
+  assert.deepEqual(entries(b.ws), [], 'and it stays retired rather than coming back every pass')
+  assert.match(again.stderr, /matched an existing entry by headline/)
+  assert.deepEqual(journalOps(b.ws).filter((o) => o === 'file'), ['file'], 'still one allocation')
+})
