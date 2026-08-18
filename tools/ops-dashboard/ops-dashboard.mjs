@@ -61,6 +61,7 @@ import { labelIsPinned, readPins, writePin } from './lib/pins.mjs';
 import { autoUpdate, captureCode, codeState, fetchHub, resolveHub } from './lib/provenance.mjs';
 import { markerPath, holdServeMarker } from './lib/serve-marker.mjs';
 import { readFailure } from './lib/absent.mjs';
+import { fsIntegrity } from './lib/hub-collect.mjs';
 
 const HOST = '127.0.0.1';
 // One value for "the port this machine's dashboard lives on", because two things now
@@ -172,7 +173,14 @@ export function delivererState(workspace) {
   try {
     const s = parseNavigatorState(fs.readFileSync(file, 'utf8'));
     return { alive: !s.stale, sweptAt: s.sweptAt, ageMin: s.ageMin };
-  } catch {
+  } catch (e) {
+    const f = readFailure(e, file);
+    // Absent still means nothing is listening — that is a real answer, and the
+    // remedy on it is right. Unreadable means this process does not know, and
+    // `alive: null` is that third state. It must never become an accusation: the
+    // page once told him his answers were going nowhere and offered a kickstart
+    // for a sweep that was healthy and three minutes old (jwildfire/obot.agent#215).
+    if (!f.absent) return { alive: null, unreadable: true, why: f.why, sweptAt: null, ageMin: null };
     return { alive: false, missing: true, sweptAt: null, ageMin: null };
   }
 }
@@ -218,9 +226,30 @@ async function page(args, lastLook = null) {
     // this process started.
     provenance: { code: codeState(CODE), hub, update: autoUpdate(args.workspace) },
     lastLook,
+    // Asked after the collectors have run, which is the only moment it can catch
+    // anything: a patch installed by a request-time import is invisible at start-up.
+    integrity: reportIntegrity(),
     workspace: args.workspace,
     hub: args.hub,
   });
+}
+
+// Said once per process rather than per render: a server that has been disarmed will
+// render hundreds of pages, and a log line per page buries the first one.
+let integrityAnnounced = false;
+
+/**
+ * Whether this process still has the readers it started with, announced to the log the
+ * first time the answer is no. The page carries the same answer visually; this is for
+ * whoever is reading the server's output at 3am (jwildfire/obot.agent#215).
+ */
+export function reportIntegrity() {
+  const i = fsIntegrity();
+  if (!i.intact && !integrityAnnounced) {
+    integrityAnnounced = true;
+    console.error(`ops-dashboard: this process's file readers have been replaced (${i.replaced.join(', ')}) — every count on the page is suspect. See jwildfire/obot.agent#206.`);
+  }
+  return i;
 }
 
 function readBody(req, limit = 64 * 1024) {
@@ -280,6 +309,10 @@ export function serve(args) {
           port: server.address()?.port ?? null,
           startedAt: CODE.startedAt,
           code: CODE.started ? { sha: CODE.started.sha, short: CODE.started.short, at: CODE.started.at } : null,
+          // A health check that cannot say the server has been disarmed is checking
+          // the wrong health: it would report `ok: true` for a process rendering
+          // empty lists over readable files (jwildfire/obot.agent#215).
+          fs: fsIntegrity().intact ? 'intact' : `replaced: ${fsIntegrity().replaced.join(', ')}`,
           inflight: traffic.inflight,
           idleMs: Date.now() - traffic.lastAt,
         }));
@@ -311,7 +344,7 @@ export function serve(args) {
           // What happens next, in one sentence, because the page's job is to
           // answer "what did clicking that do?" before he has to ask.
           next: 'Recorded on this machine. The Navigator picks it up within five minutes, then an agent updates the artifact — nothing else for you to do.',
-          warning: listening ? null : NOT_LISTENING,
+          warning: listening === false ? NOT_LISTENING : null,
         }));
       }
 
@@ -485,10 +518,13 @@ export function serve(args) {
         // was that none of its three sources could be opened.
         return send(200, 'application/json', JSON.stringify({
           items: q.items,
+          // The collectors' own `read` flags, not `!error` — `collectRCs` reports
+          // `error: null` on the never-swept path, so deriving it here said "read"
+          // about a source that had not been (jwildfire/obot.agent#215).
           sources: {
-            rcs: { read: !q.rcs?.error, why: q.rcs?.error ?? null },
-            decisions: { read: !q.decisions?.error, why: q.decisions?.error ?? null },
-            config: { read: !q.config?.error, why: q.config?.error ?? null },
+            rcs: { read: q.rcs?.read ?? !q.rcs?.error, why: q.rcs?.error ?? null },
+            decisions: { read: q.decisions?.read ?? !q.decisions?.error, why: q.decisions?.error ?? null },
+            config: { read: q.config?.read ?? !q.config?.error, why: q.config?.error ?? null },
           },
         }, null, 2));
       }

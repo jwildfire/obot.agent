@@ -38,6 +38,7 @@
 // never prices anything itself: the arithmetic stays in the hub's script so there is
 // one priced source and one place to change a rate.
 import fs from 'node:fs';
+import { readFailure } from './absent.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -964,14 +965,51 @@ export function rosterMarkdown(model) {
 
 // ---- reading it off disk -------------------------------------------------
 
+// Each of these answers three questions rather than one — what is in the file, whether
+// its contents were obtained, and, when they were not, why.
+//
+// `present` in the roster's honesty block (jwildfire/obot.roadmap#223) means "this
+// source gave us its contents", and it was being computed with `existsSync`. That is
+// right for a file that is not there and wrong for a file that is there and cannot be
+// opened: `existsSync` is the one call that keeps succeeding when reads do not, so the
+// mechanism reported "read" in the exact state it exists to catch (obot.agent#215).
+// Absent stays `read: false` with no `why` — the first-morning notice is the correct
+// thing to show for it. Unreadable is `read: false` WITH a `why`, so a surface can say
+// something different about a file it could not open.
+const failWhy = (e, file) => {
+  const f = readFailure(e, file);
+  return f.absent ? '' : f.why;
+};
+
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 const readText = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
 
+/** `readText`, keeping whether the contents were obtained and why not. */
+export const readTextResult = (file) => {
+  try { return { text: fs.readFileSync(file, 'utf8'), read: true, why: '' }; } catch (e) {
+    return { text: '', read: false, why: failWhy(e, file) };
+  }
+};
+
+/** `readJson`, the same. A file that is there and is not JSON did not read. */
+export const readJsonResult = (file) => {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return { value: null, read: false, why: failWhy(e, file) }; }
+  try { return { value: JSON.parse(text), read: true, why: '' }; } catch {
+    return { value: null, read: false, why: `${file} is present and is not readable JSON` };
+  }
+};
+
 /** The harness's own record of what ran. Read, never written. */
 export function readJobs(jobsDir) {
+  return readJobsResult(jobsDir).jobs;
+}
+
+/** `readJobs`, keeping whether the directory could be listed at all. */
+export function readJobsResult(jobsDir) {
   const out = [];
   let entries = [];
-  try { entries = fs.readdirSync(jobsDir, { withFileTypes: true }); } catch { return out; }
+  try { entries = fs.readdirSync(jobsDir, { withFileTypes: true }); } catch (e) { return { jobs: out, read: false, why: failWhy(e, jobsDir) }; }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
     const dir = path.join(jobsDir, e.name);
@@ -994,7 +1032,7 @@ export function readJobs(jobsDir) {
       timeline: timelineClose(readText(path.join(dir, 'timeline.jsonl'))),
     });
   }
-  return out;
+  return { jobs: out, read: true, why: '' };
 }
 
 /**
@@ -1022,12 +1060,17 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date(), pinne
   // built from the journal (jwildfire/obot.roadmap#223).
   const journalPath = path.join(workspace, '.claude', 'session-hub', 'delivery.journal');
 
-  const jobs = readJobs(jobsPath);
-  const workers = parseWorkers(readText(workersPath));
-  const delivery = parseDelivery(readText(deliveryPath));
+  const jobsRead = readJobsResult(jobsPath);
+  const jobs = jobsRead.jobs;
+  const workersRead = readTextResult(workersPath);
+  const workers = parseWorkers(workersRead.text);
+  const deliveryRead = readTextResult(deliveryPath);
+  const journalRead = readTextResult(journalPath);
+  const delivery = parseDelivery(deliveryRead.text);
 
   const usageFile = path.join(hub, 'site', 'usage', 'usage.json');
-  const raw = readJson(usageFile);
+  const usageRead = readJsonResult(usageFile);
+  const raw = usageRead.value;
   let stamped = null;
   if (raw) {
     let mtime = null;
@@ -1040,14 +1083,20 @@ export function collectRoster({ workspace, hub, jobsDir, now = new Date(), pinne
   // Observed, not assumed. On a machine that has never run an agent all four of
   // these are false, and a page that cannot tell that from four empty files is the
   // one that greets @jwildfire on his first morning with a confident set of zeros.
+  //
+  // `present` means READ, not exists. It was keyed on `existsSync` until #215, which
+  // is the one call a disarmed or unreadable filesystem still answers cheerfully —
+  // so the mechanism reported "read" for every source in the one state it was built
+  // to catch. A file that is not there still counts as read: absence is an answer.
   const sources = {
-    jobs: { path: jobsPath, present: fs.existsSync(jobsPath) },
-    workers: { path: workersPath, present: fs.existsSync(workersPath) },
-    usage: { path: usageFile, present: fs.existsSync(usageFile) },
+    jobs: { path: jobsPath, present: jobsRead.read, note: jobsRead.why },
+    workers: { path: workersPath, present: workersRead.read, note: workersRead.why },
+    usage: { path: usageFile, present: usageRead.read, note: usageRead.why },
     delivery: {
       path: deliveryPath,
-      present: fs.existsSync(deliveryPath) || fs.existsSync(journalPath),
-      note: fs.existsSync(deliveryPath) ? '' : 'read from the typed journal; delivery.md is not on this machine',
+      present: deliveryRead.read || journalRead.read,
+      note: deliveryRead.why || journalRead.why
+        || (fs.existsSync(deliveryPath) ? '' : 'read from the typed journal; delivery.md is not on this machine'),
     },
   };
 

@@ -52,9 +52,52 @@
 // own reads and the hub's code never share a process. `test/hub-isolation.test.mjs`
 // asserts the effect directly: a hub whose collector arms a guard must not be able
 // to stop the config list being read a line later.
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+/**
+ * The canary: is this process still using the readers it started with?
+ *
+ * The wall above stops the one import that is known to have armed a guard here. This
+ * answers the question the wall cannot: has ANYTHING replaced the filesystem out from
+ * under this server — a future hub module, a dependency, a well-meant patch nobody
+ * remembers writing.
+ *
+ * It is deliberately not keyed on the guard's own sentinel (`globalThis.__obotLocalOnlyGuard`).
+ * That name belongs to a control in another repo, it identifies exactly one culprit, and
+ * a canary that only recognises the bird that already escaped is not a canary. The
+ * question asked here is the general one: are these the same functions this module saw
+ * at load, before any request had run.
+ *
+ * The references are captured at module load. Every module in this tool is loaded before
+ * the server binds its port, and nothing can arm a patch before that without being a
+ * static import of this tool — which is a different and much louder problem.
+ */
+const READERS = () => ({
+  'fs.readFileSync': fs.readFileSync,
+  'fs.readdirSync': fs.readdirSync,
+  'fs.readFile': fs.readFile,
+  'fs.createReadStream': fs.createReadStream,
+  'fs/promises.readFile': fsp.readFile,
+  'fs/promises.readdir': fsp.readdir,
+});
+const AT_LOAD = READERS();
+
+/**
+ * `{ intact, replaced }` — `replaced` names every reader that is no longer the function
+ * this process started with. An empty list is the healthy answer, and it is the answer
+ * a caller should insist on before believing any figure on the page: a disarmed reader
+ * makes every count on this surface a guess, which is a page-level fact rather than a
+ * panel-level one.
+ */
+export function fsIntegrity() {
+  const now = READERS();
+  const replaced = Object.keys(AT_LOAD).filter((k) => now[k] !== AT_LOAD[k]);
+  return { intact: replaced.length === 0, replaced };
+}
 
 /** The hub module this runs, relative to a hub clone. */
 export const COLLECTOR = ['scripts', 'lib', 'collect', 'decision-log.mjs'];

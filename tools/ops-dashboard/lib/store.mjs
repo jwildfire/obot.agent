@@ -16,6 +16,7 @@
 // so if one of these ever *does* reach an assembled site, the build fails instead
 // of publishing it.
 import fs from 'node:fs';
+import { readFailure } from './absent.mjs';
 import path from 'node:path';
 
 // Assembled from halves for the same reason the deploy guard is: a file that
@@ -56,13 +57,42 @@ export function writeCache(workspace, name, value) {
   fs.writeFileSync(path.join(dir, `${name}.json`), `${JSON.stringify(stamp({ at: new Date().toISOString(), value }), null, 2)}\n`);
 }
 
-/** A cached sweep, or null when it is missing or older than `maxAgeMin`. */
+/**
+ * A cached sweep, or null when it is missing or older than `maxAgeMin`.
+ *
+ * `null` means "there is nothing here to use" and every caller may treat it that way.
+ * What changed for jwildfire/obot.agent#215 is that it no longer means *why*: a cache
+ * that was never written and one this process could not open both produced `null`, so
+ * `collectRCs` could not tell "no sweep yet" from "the cache could not be read" and
+ * sat promising a sweep forever. The reason rides on `readCacheFailure` instead of on
+ * the return value, so no caller has to change to keep working.
+ */
 export function readCache(workspace, name, maxAgeMin = 30) {
+  return readCacheResult(workspace, name, maxAgeMin).cache;
+}
+
+/**
+ * The same read, with the reason kept. `{ cache, read, why }`:
+ *
+ *   cache  what `readCache` returns — the entry, or null
+ *   read   false only when the source could not be opened or parsed; an absent cache
+ *          is a legitimately empty answer and reads as `true`
+ *   why    one sentence, empty when `read`
+ */
+export function readCacheResult(workspace, name, maxAgeMin = 30) {
+  const file = path.join(opsDir(workspace), 'cache', `${name}.json`);
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    const f = readFailure(e, file);
+    return { cache: null, read: f.absent, why: f.absent ? '' : f.why };
+  }
   try {
-    const raw = JSON.parse(fs.readFileSync(path.join(opsDir(workspace), 'cache', `${name}.json`), 'utf8'));
+    const raw = JSON.parse(text);
     const ageMin = (Date.now() - Date.parse(raw.at)) / 60000;
-    return { value: raw.value, ageMin, stale: ageMin > maxAgeMin };
+    return { cache: { value: raw.value, ageMin, stale: ageMin > maxAgeMin }, read: true, why: '' };
   } catch {
-    return null;
+    // Present, opened, and not usable. That is a damaged cache, not a missing one —
+    // and it will stay damaged until something rewrites it, so saying so matters.
+    return { cache: null, read: false, why: `${file} is not readable JSON` };
   }
 }

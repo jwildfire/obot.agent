@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 
-import { readCache, writeCache, opsDir } from './store.mjs';
+import { readCache, readCacheResult, writeCache, opsDir } from './store.mjs';
 import { parseIQ, iqComplete } from './iq.mjs';
 import { fingerprint, applyTriage } from './triage.mjs';
 import { rankQueue } from './rank.mjs';
@@ -397,7 +397,11 @@ export const RC_FAIL = 'rcs-lane-failed';
  * "nothing there" and "there, and not yours" stays visible.
  */
 export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
-  const raw = readCache(workspace, RC_CACHE, maxAgeMin);
+  // The reason as well as the entry: a cache nobody could open used to be
+  // indistinguishable from a sweep that has not run, which left the panel promising
+  // a refresh that would never arrive (jwildfire/obot.agent#215).
+  const rawResult = readCacheResult(workspace, RC_CACHE, maxAgeMin);
+  const raw = rawResult.cache;
   // A failure record outlives its cache window: the question it answers is "has a
   // sweep ever worked here", and that does not go stale after twenty minutes.
   const failed = readCache(workspace, RC_FAIL, Infinity)?.value ?? null;
@@ -421,7 +425,7 @@ export function collectRCs(workspace, { agent = null, maxAgeMin = 20 } = {}) {
   // in flight, so the page must say so rather than promise a sweep. A cache that
   // exists but is stale still counts as read — its rows are real, just old.
   const error = !cached
-    ? (failed?.reason ?? (agent ? null : 'no sweep script at obot.agent/scripts/reviews-queue'))
+    ? (rawResult.why || failed?.reason || (agent ? null : 'no sweep script at obot.agent/scripts/reviews-queue'))
     : null;
   return {
     items, standard, ageMin: cached?.ageMin ?? null,
