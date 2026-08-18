@@ -109,3 +109,51 @@ export const allRead = (sources = {}) => Object.values(sources).every((s) => s?.
 /** The names of the sources that were not read, for a one-line "why this is empty". */
 export const unread = (sources = {}) => Object.entries(sources)
   .filter(([, s]) => !s?.present).map(([k]) => k);
+
+/**
+ * The other half of the rule: a source that could not be read is not an absent one.
+ *
+ * Requirement: jwildfire/obot.agent#206. Everything above this point is about not
+ * printing a figure nobody measured. This is about not explaining a failure as an
+ * absence — the same confusion one level down, and the more dangerous of the two,
+ * because "nothing is waiting on you" is a claim he acts on by going to bed.
+ *
+ * That is not hypothetical. `collectConfig` answered every read failure with
+ * `no config file`, and when a guard belonging to the public build re-armed the
+ * server's `node:fs`, the page told him his ten open config items did not exist. The
+ * file was there, readable, 22KB, unchanged. Only the reader had been disarmed.
+ *
+ * So: `ENOENT` is the ONLY thing that means "not there". Everything else — a
+ * permission change, a disk error, a foreign guard, a code nobody has seen yet —
+ * comes back as a fault carrying its errno, and the surface says so in his words.
+ */
+export const ABSENT_CODES = new Set(['ENOENT', 'ENOTDIR']);
+
+/**
+ * What to say about a failed read. Returns `{ absent, code, why }`:
+ *
+ *   absent  true only when the file genuinely is not there
+ *   code    the errno, or `null` when the failure carried none
+ *   why     one sentence, already in the register the surfaces use
+ *
+ * `absent` is what a caller branches on. Nobody should be string-matching an error
+ * message to decide what a page claims, which is how #206 stayed invisible.
+ */
+export function readFailure(err, file) {
+  const code = err?.code ?? null;
+  if (ABSENT_CODES.has(code)) return { absent: true, code, why: `${file} is not on this machine` };
+  if (code === 'EACCES' || code === 'EPERM') {
+    return { absent: false, code, why: `${file} exists but could not be read (${code}) — this process is not allowed to open it` };
+  }
+  // A guard belonging to some other program, installed on this process by an import.
+  // Named specifically because the remedy is nothing like the others: the file is
+  // fine and the reader is not (jwildfire/obot.agent#206).
+  if (code === 'ELOCALONLY') {
+    return {
+      absent: false,
+      code,
+      why: `${file} was refused by a local-only guard that has been installed on this process — something in this server's import graph reached into the public build. Nothing is wrong with the file.`,
+    };
+  }
+  return { absent: false, code, why: `${file} could not be read${code ? ` (${code})` : ''}: ${err?.message ?? err}` };
+}

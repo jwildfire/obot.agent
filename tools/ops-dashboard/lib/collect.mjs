@@ -15,28 +15,35 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 
 import { readCache, writeCache, opsDir } from './store.mjs';
 import { parseIQ, iqComplete } from './iq.mjs';
 import { fingerprint, applyTriage } from './triage.mjs';
 import { rankQueue } from './rank.mjs';
 import { classifyRC, readPolicy, releaseBranchesByRepo } from '../../navigator/classify.mjs';
+import { collectDecisionLogIsolated, collectorPath } from './hub-collect.mjs';
+import { readFailure } from './absent.mjs';
 
 /**
- * Open decisions, read from the hub clone's own collector.
+ * Open decisions, read from the hub clone's own collector — in its own process.
  *
  * Deliberately the clone and not the deployed `decisions.json`: the generated feed
  * only exists after a deploy, so a decision recorded five minutes ago would be
  * invisible here. The clone has it the moment it is written, and the collector is
  * the same code the site runs, so the two cannot disagree about what "open" means.
+ *
+ * Deliberately out of process, since jwildfire/obot.agent#206: the hub is a public
+ * build, and its import graph arms a guard that replaces `node:fs` process-wide so
+ * the site can never read this machine. Importing the collector here handed that
+ * guard the dashboard — which then could not read the config list or the Navigator
+ * sweep, and reported both to him as empty. `lib/hub-collect.mjs` carries the full
+ * account and the rule: no module under this tool imports anything from the hub.
  */
 export async function collectDecisions(hub) {
-  const mod = path.join(hub, 'scripts', 'lib', 'collect', 'decision-log.mjs');
+  const mod = collectorPath(hub);
   if (!fs.existsSync(mod)) return { items: [], error: `no decision collector at ${mod}` };
   try {
-    const { collectDecisionLog } = await import(pathToFileURL(mod).href);
-    const log = await collectDecisionLog();
+    const log = await collectDecisionLogIsolated(hub);
     return {
       log,
       // Answered inside a successor rather than on their own page, so out of the
@@ -113,11 +120,18 @@ export function nextConfigId(md = '') {
 export function collectConfig(workspace) {
   const file = configFile(workspace);
   let md;
-  try { md = fs.readFileSync(file, 'utf8'); } catch { return { items: [], error: 'no config file' }; }
+  try { md = fs.readFileSync(file, 'utf8'); } catch (e) {
+    // `no config file` is reserved for a file that genuinely is not there. Any other
+    // failure keeps its errno and is reported as a fault, because a page that
+    // explains a broken reader as an empty list tells him nothing is waiting on him
+    // (jwildfire/obot.agent#206).
+    const f = readFailure(e, file);
+    return { items: [], absent: f.absent, code: f.code, error: f.absent ? 'no config file' : f.why };
+  }
 
   const lines = md.split(/\r?\n/);
   const start = lines.findIndex((l) => /^##\s+.*\bopen\b/i.test(l));
-  if (start === -1) return { items: [], error: 'config file has no "## Open" section' };
+  if (start === -1) return { items: [], absent: false, error: 'config file has no "## Open" section' };
 
   // An entry runs from its bullet to the next bullet or heading, and its own
   // lines are load-bearing: an indented line inside a field is the literal thing

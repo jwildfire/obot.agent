@@ -244,9 +244,25 @@ test('an entry with no id still renders rather than disappearing', () => {
 });
 
 test('a workspace with no config file degrades instead of throwing', () => {
-  const { items, error } = collectConfig(tmp());
+  const { items, error, absent } = collectConfig(tmp());
   assert.deepEqual(items, []);
   assert.ok(error);
+  assert.equal(absent, true, 'genuinely missing is the only thing allowed to read as missing');
+});
+
+// jwildfire/obot.agent#206: the file was there, 22KB, readable by anyone else on the
+// machine, and the page said "no config file". Whatever stops the read next time, it
+// must not be able to borrow that sentence.
+test('a config file that exists but cannot be read is a fault, not an empty list', () => {
+  const ws = tmp();
+  // A directory where the file should be: a real read failure that is not ENOENT.
+  fs.mkdirSync(path.join(ws, '.claude', 'blockers.md'), { recursive: true });
+  const { items, error, absent, code } = collectConfig(ws);
+  assert.deepEqual(items, []);
+  assert.equal(absent, false);
+  assert.equal(code, 'EISDIR');
+  assert.notEqual(error, 'no config file', 'the absent sentence is reserved for absence');
+  assert.match(error, /could not be read/);
 });
 
 test('the artifact route refuses anything that is not a decision folder', () => {

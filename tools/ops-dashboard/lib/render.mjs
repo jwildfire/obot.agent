@@ -132,9 +132,12 @@ const item = (it) => {
 // `read: false` means the source behind this group could not be opened, so the
 // badge shows a dash rather than a count. A `0` beside "Sweeping GitHub…" is the
 // page asserting a number in the same breath as admitting it has none.
+// A bucket nobody could read is not a bucket that is empty, and on a phone there is
+// no hover to reveal the difference — so it is the one thing here that gets its own
+// colour rather than the muted grey of "nothing waiting" (jwildfire/obot.agent#206).
 const group = (title, items, empty, moved = 0, read = true) => `<h2 class="q-h">${esc(title)} <span class="q-n">${read ? items.length : UNMEASURED}</span>${
   moved ? `<span class="q-moved">${moved} pinned above</span>` : ''}</h2>
-${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="q-empty">${esc(empty)}</p>`}`;
+${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="${read ? 'q-empty' : 'q-unread'}">${esc(empty)}</p>`}`;
 
 /** "The GitHub sweep, the hub clone and the config list" — for the one-line why. */
 const unreadNames = (read) => {
@@ -400,6 +403,8 @@ const DASHBOARD_CSS = `
   .q-sub { font-size:0.72rem; color:var(--muted); line-height:1.25; min-width:0;
            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .q-empty { font-size:0.76rem; color:var(--muted); margin:0 0 0.2rem; overflow-wrap:anywhere; }
+  .q-unread { font-size:0.76rem; color:var(--ink); background:var(--warn-soft); border-left:3px solid var(--warn);
+    padding:0.35rem 0.5rem; margin:0 0 0.3rem; overflow-wrap:anywhere; }
   /* Wraps rather than ellipsizes: it is one short line naming one or two PRs, and
      the point of it is that the refs stay readable at 390px. */
   .q-aside { font-size:0.7rem; color:var(--faint); margin:0.1rem 0 0.4rem; line-height:1.35; }
@@ -700,7 +705,15 @@ export const ledgerNotes = (state, { full = false } = {}) => (state?.notes ?? []
  * banner when stale, the one-line swept stamp when alive. The stale rule is the one
  * thing neither view may lose — this is the surface he would trust to say a review
  * landed, and presenting a dead observer's content as current is the failure mode. */
-const sweepHead = (state, missing) => {
+const sweepHead = (state, missing, unreadable = null) => {
+  // Before absence: the file may be right there and unopenable. That is a fault in
+  // the reader, and it gets the loud banner rather than the tidy first-morning
+  // sentence — the sweep's whole job is to be believed about what is current, and
+  // presenting an unread observer as an un-run one is the same lie as a dead one
+  // presented as alive (jwildfire/obot.agent#206).
+  if (unreadable) {
+    return `<p class="dead"><strong>The sweep file could not be read</strong> — ${esc(unreadable.why)}. The sweep may well be running and current; this page cannot see it, so nothing below is a statement about the Navigator.</p>`;
+  }
   if (missing || !state) {
     // The remedy has to work on the machine that is reading it. On a new one the
     // LaunchAgent has never been installed, so `launchctl kickstart` answers
@@ -786,8 +799,8 @@ ${body}
  * for its dense readers, and the link here is how he reaches it when a number
  * needs its receipts.
  */
-export function navigatorShell({ state = null, missing = null, metrics = null, feed = [] } = {}) {
-  const body = `${sweepHead(state, missing)}
+export function navigatorShell({ state = null, missing = null, unreadable = null, metrics = null, feed = [] } = {}) {
+  const body = `${sweepHead(state, missing, unreadable)}
 ${ledgerNotes(state)}
 <p class="reclink"><a href="/navigator/record">Full sweep record →</a> <span class="reclink-why">the RC queue, delivery verdicts and discipline findings, whole — what these numbers are built beside</span></p>
 ${metricsHtml(metrics)}
@@ -801,8 +814,8 @@ ${feedHtml(feed)}`;
  * needs its receipts; every `##` section in the state file still renders as
  * itself, including ones this code has never heard of.
  */
-export function navigatorRecordShell({ state = null, missing = null } = {}) {
-  const body = `${sweepHead(state, missing)}
+export function navigatorRecordShell({ state = null, missing = null, unreadable = null } = {}) {
+  const body = `${sweepHead(state, missing, unreadable)}
 ${ledgerNotes(state, { full: true })}
 <p class="reclink"><a href="/navigator">← Metrics and what changed</a></p>
 ${state && !missing ? sectionsHtml(state.sections) : ''}`;
@@ -917,11 +930,20 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
   const decisionEmpty = queue.decisions?.error
     ? nothingYet('Open decisions could not be read', `${queue.decisions.error}; clone jwildfire/obot.roadmap beside obot.agent and reload`)
     : 'All answered.';
+  // Absent and unreadable get different sentences AND different remedies. Telling him
+  // to capture his first config item, when the ten he has are sitting in a file this
+  // process could not open, is the failure the requirement is named for. Anything
+  // that is not explicitly `absent` is treated as a fault — when in doubt, be loud.
   const configEmpty = queue.config?.error
-    ? nothingYet(
-      queue.config.error === 'no config file' ? 'No config list on this machine yet' : `The config list could not be read: ${queue.config.error}`,
-      'every setup step this machine needs would be listed in .claude/blockers.md, which is local and does not travel between machines; capture the first with obot.agent/tools/blocker-log',
-    )
+    ? (queue.config.absent === true
+      ? nothingYet(
+        'No config list on this machine yet',
+        'every setup step this machine needs would be listed in .claude/blockers.md, which is local and does not travel between machines; capture the first with obot.agent/tools/blocker-log',
+      )
+      : nothingYet(
+        `The config list could not be read — ${queue.config.error}`,
+        'this list is not empty, it is unread; nothing here can be trusted to say whether something needs you until the read succeeds',
+      ))
     : 'Nothing needs your keyboard.';
   // The sweep's age, when it has one and a newer attempt has since failed. Computed
   // and then discarded until now, so an offline machine read a six-hour-old queue

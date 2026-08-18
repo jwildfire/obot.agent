@@ -60,6 +60,7 @@ import { collectRoster } from './lib/roster.mjs';
 import { labelIsPinned, readPins, writePin } from './lib/pins.mjs';
 import { autoUpdate, captureCode, codeState, fetchHub, resolveHub } from './lib/provenance.mjs';
 import { markerPath, holdServeMarker } from './lib/serve-marker.mjs';
+import { readFailure } from './lib/absent.mjs';
 
 const HOST = '127.0.0.1';
 // One value for "the port this machine's dashboard lives on", because two things now
@@ -448,9 +449,16 @@ export function serve(args) {
       if (p === '/navigator' || p === '/navigator/' || p === '/navigator/record') {
         look();
         const file = path.join(args.workspace, ...SESSION_DIR, 'navigator-state.md');
+        // A sweep that has never run and a sweep file this process could not open are
+        // different facts with different remedies, and "No sweep file yet" was being
+        // said about both — including at 01:10 on a morning when the sweep was healthy
+        // and three minutes old (jwildfire/obot.agent#206).
         let md = null;
-        try { md = fs.readFileSync(file, 'utf8'); } catch { /* no sweep yet */ }
-        const stateArg = md ? { state: parseNavigatorState(md) } : { missing: file };
+        let failure = null;
+        try { md = fs.readFileSync(file, 'utf8'); } catch (e) { failure = readFailure(e, file); }
+        const stateArg = md
+          ? { state: parseNavigatorState(md) }
+          : (failure?.absent === false ? { unreadable: failure } : { missing: file });
         if (p === '/navigator/record') {
           return send(200, 'text/html; charset=utf-8', navigatorRecordShell(stateArg));
         }

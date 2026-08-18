@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import {
   MEASUREMENT_BEGINS, UNMEASURED, absentNote, allRead, countPhrase, figure, money,
-  moneyFigure, nothingYet, source, unread,
+  moneyFigure, nothingYet, readFailure, source, unread,
 } from '../lib/absent.mjs';
 
 test('a notice names what is absent and what would populate it', () => {
@@ -75,4 +75,37 @@ test('sources record what was read, and name what was not', () => {
 
 test('the first-morning line says the machine is not broken', () => {
   assert.match(MEASUREMENT_BEGINS, /measurement begins here/);
+});
+
+// The complement of the rule above, and the one #206 was filed for: a source that
+// could not be read must not be explained as a source that holds nothing.
+test('only ENOENT means the file is not there', () => {
+  const enoent = Object.assign(new Error('no such file'), { code: 'ENOENT' });
+  const f = readFailure(enoent, '/ws/.claude/blockers.md');
+  assert.equal(f.absent, true);
+  assert.equal(f.code, 'ENOENT');
+  assert.match(f.why, /not on this machine/);
+});
+
+test('a refusal by a foreign guard is a fault, and says the file is fine', () => {
+  const guarded = Object.assign(new Error('local-only guard'), { code: 'ELOCALONLY' });
+  const f = readFailure(guarded, '/ws/.claude/blockers.md');
+  assert.equal(f.absent, false, 'this is the exact case that was being reported as emptiness');
+  assert.match(f.why, /Nothing is wrong with the file/);
+});
+
+test('a permission failure names the permission, not the file', () => {
+  const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+  const f = readFailure(denied, '/ws/.claude/blockers.md');
+  assert.equal(f.absent, false);
+  assert.match(f.why, /not allowed to open it/);
+});
+
+test('an errno nobody has seen yet is still a fault, never an absence', () => {
+  const weird = Object.assign(new Error('the disk went away'), { code: 'EIO' });
+  const f = readFailure(weird, '/ws/x');
+  assert.equal(f.absent, false);
+  assert.match(f.why, /\(EIO\)/);
+  // And an error with no code at all: unknown is not absent.
+  assert.equal(readFailure(new Error('mystery'), '/ws/x').absent, false);
 });
