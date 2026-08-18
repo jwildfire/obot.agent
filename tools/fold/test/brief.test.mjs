@@ -297,3 +297,69 @@ test('--brief prints the brief and writes nothing', async () => {
   assert.equal(readBrief(w), null, 'a read is a read')
   assert.equal(existsSync(join(w, '.claude/fold/runs.jsonl')), false, 'and does not even record a run')
 })
+
+// --- critical config items, by id and never by text -------------------------
+//
+// @jwildfire, 2026-08-15: "use it sparingly. I'm going to be annoyed if you tell
+// me something is critical when it isn't." Criticality is earned rather than
+// asserted — a blocking reference GitHub confirmed open — and budgeted at three,
+// so this is a bounded set and not a second list. An id carries no item text, so
+// the local-only rule is untouched.
+
+test('critical config items are named by id, and the rest stay a count', () => {
+  const b = bulletsOf(composeBrief({ ...FIXTURE(), configOpen: 13, configCritical: ['c0016', 'c0017', 'c0019'] }))
+  const line = b.at(-1)
+  assert.match(line, /c0016, c0017, c0019/)
+  assert.match(line, /10 others/, 'the ten that are not critical stay a count')
+  assert.ok(visibleWords(line) <= MAX_BULLET_WORDS, `${visibleWords(line)} words: ${line}`)
+})
+
+test('an id is the only thing that can reach the brief from that list', () => {
+  const b = composeBrief({
+    ...FIXTURE(),
+    configOpen: 13,
+    configCritical: ['c0017 arm the 07:00 fold', { id: 'c0018', title: 'arm a scheduled wake' }, 'c0019'],
+  })
+  assert.equal(b.includes('arm the'), false, 'item text cannot reach the brief by being passed as an id')
+  assert.equal(b.includes('scheduled wake'), false)
+  assert.equal(b.includes('c0017'), false, 'a malformed id is dropped rather than repaired')
+  assert.match(b, /c0019/)
+})
+
+test('no critical items leaves the line exactly as it was', () => {
+  const b = bulletsOf(composeBrief({ ...FIXTURE(), configOpen: 13, configCritical: [] }))
+  assert.match(b.at(-1), /13 config items on your keyboard/)
+})
+
+test('every open item being critical drops the "others" clause rather than saying zero', () => {
+  const b = bulletsOf(composeBrief({ ...FIXTURE(), configOpen: 2, configCritical: ['c0016', 'c0017'] }))
+  assert.match(b.at(-1), /c0016, c0017/)
+  assert.equal(/others/.test(b.at(-1)), false)
+})
+
+// --- a brief is never composed out of failed queries ------------------------
+
+test('a git scan that failed does not become "nothing landed overnight"', () => {
+  const p = lines(composeBrief({ ...FIXTURE(), landed: [], landedUnknown: true }))[0]
+  assert.equal(/Nothing landed overnight/.test(p), false,
+    'a source that could not answer is not a quiet night')
+  assert.match(p, /could not be read/)
+  assert.match(p, /waiting on you/, 'the queue half is unaffected — it was readable')
+})
+
+test('a partial git scan says "at least", because the number is a floor', () => {
+  const p = lines(composeBrief({ ...FIXTURE(), landedUnknown: true }))[0]
+  assert.match(p, /at least 3 changes landed/)
+})
+
+test('--brief refuses to print a brief composed from a queue nobody could read', async () => {
+  const { run } = await import('../fold.mjs')
+  const w = workspace({ rcs: 1, blockers: 2 })
+  // No hub clone, so the decision collector cannot answer: the queue is unknown.
+  const { brief, exit, briefRequested } = await run(['--brief'], {
+    workspace: w, hub: join(w, 'nope'), now: NOW,
+  })
+  assert.equal(exit, 3)
+  assert.equal(briefRequested, true)
+  assert.equal(brief, null, 'nothing goes to stdout that a reader could mistake for the morning')
+})

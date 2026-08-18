@@ -50,10 +50,11 @@ const QUEUE_URL = 'https://jwildfire.github.io/obot.roadmap/roadmap.html'
  * is if something handed it in place of the number.
  */
 export function composeBrief({
-  landed = [], rcs = [], decisions = [], todos = [], configOpen = null,
+  landed = [], landedUnknown = false, rcs = [], decisions = [], todos = [],
+  configOpen = null, configCritical = [],
 } = {}) {
-  const bullets = queue({ rcs, decisions, todos, configOpen })
-  const text = paragraph({ landed, rcs, decisions })
+  const bullets = queue({ rcs, decisions, todos, configOpen, configCritical })
+  const text = paragraph({ landed, landedUnknown, rcs, decisions })
   return bullets.length ? `${text}\n\n${bullets.join('\n')}\n` : `${text}\n`
 }
 
@@ -64,7 +65,7 @@ export function composeBrief({
  * from counts and one title. It never summarises, because a composer that
  * summarises is one that can grow.
  */
-function paragraph({ landed, rcs, decisions }) {
+function paragraph({ landed, landedUnknown, rcs, decisions }) {
   const repos = [...new Set(landed.map((l) => l.repo))]
   const n = landed.length
   const where = repos.length === 0 ? ''
@@ -73,8 +74,15 @@ function paragraph({ landed, rcs, decisions }) {
     : ` across ${repos.length} repos`
 
   const recent = landed[0]?.title ? `, most recently: ${lower(cap(landed[0].title, TITLE_WORDS))}` : ''
+  // A scan that failed is never reported as a quiet night, in either direction:
+  // with nothing readable the sentence says so, and with a partial answer the
+  // number is stated as the floor it is. The Navigator's sweep once reported
+  // "seven repos, two release candidates, workers clean" with all seven queries
+  // failed, and that is the shape this line would otherwise take.
+  const floor = landedUnknown ? 'at least ' : ''
   const progress = n
-    ? `Overnight ${n} change${n === 1 ? '' : 's'} landed${where}${recent}.`
+    ? `Overnight ${floor}${n} change${n === 1 ? '' : 's'} landed${where}${recent}.`
+    : landedUnknown ? 'What landed overnight could not be read on this run.'
     : 'Nothing landed overnight.'
 
   const waiting = []
@@ -101,7 +109,7 @@ function paragraph({ landed, rcs, decisions }) {
  * page lying to keep its shape. Everything else yields, and whatever does not fit
  * is counted on one line rather than dropped in silence.
  */
-function queue({ rcs, decisions, todos, configOpen }) {
+function queue({ rcs, decisions, todos, configOpen, configCritical = [] }) {
   const out = []
   for (const r of rcs) out.push(bullet('Review', r.title ?? short(r.key), r.url))
   for (const d of decisions) out.push(bullet('Answer', `${d.key ? `${d.key}: ` : ''}${d.title}`, d.url))
@@ -115,9 +123,34 @@ function queue({ rcs, decisions, todos, configOpen }) {
   const remainder = todos.length - shown.length
   if (remainder > 0) out.push(bullet(null, `${remainder} more waiting on the queue`, QUEUE_URL))
 
-  if (config) out.push(bullet('Apply', `${config} config item${config === 1 ? '' : 's'} on your keyboard`, QUEUE_URL))
+  if (config) out.push(bullet('Apply', configText(config, configCritical), QUEUE_URL))
   return out
 }
+
+/**
+ * The config line: critical items by ID, everything else as a count.
+ *
+ * Criticality is earned rather than asserted — a blocking reference something
+ * else confirmed open — and budgeted at three, so this is a bounded set and not
+ * a second list. An id carries no item text, which is why it may be named at all:
+ * the list itself is local-only and the hub's deploy greps the assembled site for
+ * its sentinel. Anything that is not exactly `cNNNN` is DROPPED rather than
+ * repaired, so item text cannot reach this string by being passed in the wrong
+ * parameter.
+ *
+ * The reason the ids matter: c0017 is the item gating the fold's own schedule,
+ * and a brief that could not name it is a brief that cannot tell him why it is
+ * being written by hand.
+ */
+function configText(open, critical) {
+  const ids = [...new Set((critical ?? []).filter((c) => typeof c === 'string' && CONFIG_ID.test(c.trim())).map((c) => c.trim().toLowerCase()))]
+  if (!ids.length) return `${open} config item${open === 1 ? '' : 's'} on your keyboard`
+  const others = Math.max(0, open - ids.length)
+  const rest = others ? ` and ${others} other${others === 1 ? '' : 's'}` : ''
+  return `${ids.length} critical config item${ids.length === 1 ? '' : 's'} (${ids.join(', ')})${rest}`
+}
+
+const CONFIG_ID = /^c\d{4}$/i
 
 // The verb at the front, the thing in plain words, the link at the end. A line
 // that wraps on his phone is still one line, so the bound is on words and never
