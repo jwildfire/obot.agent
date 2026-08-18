@@ -521,37 +521,42 @@ const ageWords = (ms) => {
  *
  * Healthy is printed for the reason the audit-freshness check settled on and the
  * dashboard's provenance line repeats: a detector that only speaks when something is
- * wrong is indistinguishable from one that has stopped. The headline shapes are
- * bold ALL-CAPS with no punctuation inside the emphasis, because the dashboard's
- * alarm styling is a case-sensitive match on exactly that (`ALARM_RE`,
- * ops-dashboard/lib/navigator.mjs) — a hyphen in `AUTO-UPDATE` would render the
- * alarm as ordinary grey text, which is the bug obot.agent#152 fixed once already.
+ * wrong is indistinguishable from one that has stopped.
+ *
+ * Two shapes, and the difference is load-bearing rather than cosmetic. The verdicts
+ * are PLAIN lines and the detail is bullets, because the dashboard's parser only
+ * alarm-tests plain lines inside a section — a bullet is a row and never an alarm
+ * (ops-dashboard/lib/navigator.mjs). And the headlines are bold ALL-CAPS with no
+ * punctuation inside the emphasis, because that test is a case-sensitive match on
+ * exactly that shape: a hyphen in `AUTO-UPDATE` renders the alarm as ordinary grey
+ * text, which is the bug obot.agent#152 fixed once already. Both traps are the same
+ * trap — a verdict that cannot reach the page is indistinguishable from a clean one.
  */
 export function renderSelfUpdate(record, now = new Date()) {
   const lines = ['## Checkout — the code this machine is running', '']
   if (!record) {
-    lines.push('- **AUTO UPDATE BROKEN** — no update was attempted this sweep. Nothing here says the checkout is current.')
+    lines.push('**AUTO UPDATE BROKEN** — no update was attempted this sweep. Nothing here says the checkout is current.')
     return `${lines.join('\n')}\n`
   }
-  const s = record.sweep
-  lines.push(s?.short
-    ? `- sweep: \`${s.short}\` — this run's own code, loaded ${ageWords(now.getTime() - Date.parse(s.startedAt)) ?? 'just now'}`
-    : '- sweep: which commit this run is executing could not be read')
 
   const c = record.checkout ?? {}
-  if (c.ok && c.moved) lines.push(`- checkout: \`${String(c.to).slice(0, 7)}\` on \`${c.branch}\` — ${c.reason}`)
-  else if (c.ok) lines.push(`- checkout: \`${String(c.to ?? '').slice(0, 7)}\` on \`${c.branch}\` — ${c.reason}`)
-  else lines.push(`- **AUTO UPDATE FAILED** — ${c.reason} The checkout is untouched.`)
+  lines.push(c.ok
+    ? `checkout: \`${String(c.to ?? '').slice(0, 7)}\` on \`${c.branch}\` — ${c.reason}`
+    : `**AUTO UPDATE FAILED** — ${c.reason}. The checkout is untouched.`)
 
   for (const con of record.consumers ?? []) {
-    if (con.ok && (con.act === 'restart' || con.act === 'start')) {
-      lines.push(`- ${con.id}: ${con.act === 'start' ? 'started' : 'restarted'} — ${con.reason}`)
-    } else if (con.ok) {
-      lines.push(`- ${con.id}: not restarted — ${con.reason}`)
-    } else {
-      lines.push(`- **DASHBOARD RESTART FAILED** — ${con.reason}`)
-    }
+    if (!con.ok) lines.push(`**DASHBOARD RESTART FAILED** — ${con.reason}`)
+    else if (con.act === 'restart' || con.act === 'start') lines.push(`${con.id}: ${con.act === 'start' ? 'started' : 'restarted'} — ${con.reason}`)
   }
-  lines.push(`- never restarted: ${CONSUMER_POLICY.never.map((n) => `${n.what} (${n.why})`).join('; ')}.`)
+
+  lines.push('')
+  const s = record.sweep
+  lines.push(s?.short
+    ? `- sweep: \`${s.short}\` — the code this run is executing, loaded ${ageWords(now.getTime() - Date.parse(s.startedAt)) ?? 'just now'}`
+    : '- sweep: which commit this run is executing could not be read')
+  for (const con of record.consumers ?? []) {
+    if (con.ok && con.act !== 'restart' && con.act !== 'start') lines.push(`- ${con.id}: not restarted — ${con.reason}`)
+  }
+  lines.push(`- never restarted: ${CONSUMER_POLICY.never.map((n) => `${n.what} — ${n.why}`).join('; ')}.`)
   return `${lines.join('\n')}\n`
 }
