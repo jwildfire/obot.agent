@@ -312,7 +312,12 @@ export function planRestart({ marker, health: h, headSha, lastLookMs: lookMs, qu
     // distinguished because the marker already had exactly the right shape.
     return out('start', 'stale-marker', `the dashboard advertised port ${marker.port} and its process (pid ${marker.pid}) is gone — starting it again`)
   }
-  if (h && h.code && headSha && h.code.sha === headSha) {
+  // Nothing to restart onto. Only reachable when the checkout could not be read at
+  // all, and restarting a server against an unknown target is motion without a reason.
+  if (!headSha) {
+    return out('skip', 'unknown-head', 'the checkout could not be read, so there is no commit to restart onto — the running dashboard is left alone')
+  }
+  if (h && h.code && h.code.sha === headSha) {
     return out('skip', 'already-current', `the running dashboard is already serving \`${headSha.slice(0, 7)}\``)
   }
   if (!h) {

@@ -352,3 +352,9 @@ test('the replacement is started with that environment, not the sweep bare', () 
   assert.ok(opts?.env?.PATH, 'the spawn must carry an explicit PATH')
   assert.ok(opts.env.PATH.includes('/usr/bin'))
 })
+
+test('an unreadable checkout restarts nothing — there is no commit to restart onto', () => {
+  const r = planRestart({ marker: live(), health: { inflight: 0, idleMs: 10 * 60000, code: { sha: 'old' } }, headSha: null })
+  assert.equal(r.act, 'skip')
+  assert.equal(r.code, 'unknown-head')
+})
