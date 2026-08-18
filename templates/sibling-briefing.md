@@ -1,10 +1,3 @@
-<!-- how to use: this is the briefing a lead session hands a spawned sibling. Copy the block
-below, fill in every `{…}` placeholder, and pass it as the spawn's prompt ahead of the
-`TASK:` line (see skills/session-spawn/SKILL.md). Only `## Context` is composed per spawn —
-everything under it is fixed text and does not count against the ~300-word context budget.
-Keep the context under ~300 words: one line per fact, and skip anything the sibling can
-rediscover by reading the code. -->
-
 ## Your identity
 
 - **You are worker `{W-id}`.** It was claimed for you before you were spawned, it is in

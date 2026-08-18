@@ -985,3 +985,34 @@ test('an error is never the last real line, however late it arrives', () => {
   assert.equal(t.detail, 'checking the trigger condition');
   assert.match(t.error, /^API Error/);
 });
+
+// The status note is the other half of the field, and it was never scrubbed —
+// obot.agent#177.
+//
+// `cleanDetail` was applied to `jobLine` and `jobError` and not to `statusOf`, which
+// reads `o.detail` and `o.needs` raw and writes them into eight different notes. So
+// the task tag was clean and the status beside it still said "how to use: this is the
+// briefing a lead session hands a spawned sibling", on the same row, on the page
+// @jwildfire reads. Verified by calling it: four of its branches rendered the
+// template comment verbatim before this.
+const BOILERPLATE = '<!-- how to use: this is the briefing a lead session hands a spawned sibling. Copy the block below -->';
+
+test('the status note never renders template boilerplate, in any branch', () => {
+  const base = { worker: true, updatedAt: NOW.toISOString(), timeline: { last: 'done', closed: true, at: null } };
+  for (const state of ['working', 'blocked', 'done', 'stopped', 'failed']) {
+    const note = statusOf({ ...base, state, detail: BOILERPLATE, needs: BOILERPLATE }, NOW).note;
+    assert.ok(!/how to use/.test(String(note ?? '')), `${state}: template text is not a status`);
+    assert.ok(!/<!--/.test(String(note ?? '')), `${state}: a comment is not a status`);
+  }
+});
+
+test('scrubbing the note does not empty it: each branch keeps its own sentence', () => {
+  // The fallback matters as much as the filter. A blocked row whose only detail was
+  // boilerplate must still say it is blocked, not go blank and read as healthy.
+  const base = { worker: true, updatedAt: NOW.toISOString(), timeline: { last: 'done', closed: true, at: null } };
+  assert.match(statusOf({ ...base, state: 'blocked', detail: BOILERPLATE, needs: BOILERPLATE }, NOW).note, /blocked/);
+  assert.match(statusOf({ ...base, state: 'working', detail: BOILERPLATE }, NOW).note, /working/);
+  assert.match(statusOf({ ...base, state: 'done', detail: BOILERPLATE }, NOW).note, /closed out/);
+  // and a real detail still comes through untouched
+  assert.match(statusOf({ ...base, state: 'working', detail: 'running roster tests' }, NOW).note, /running roster tests/);
+});

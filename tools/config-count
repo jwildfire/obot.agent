@@ -13,9 +13,9 @@
 // only — published pages carry a count at most". This is the thing that carries
 // the count.
 //
-//   node obot.agent/tools/config-count            # write the file
-//   node obot.agent/tools/config-count --dry-run  # print it, write nothing
-//   node obot.agent/tools/config-count --check    # exit 1 if the file is stale
+//   obot.agent/tools/config-count            # write the file
+//   obot.agent/tools/config-count --dry-run  # print it, write nothing
+//   obot.agent/tools/config-count --check    # exit 1 if the file is stale
 //
 // ## Why this is a separate tool and not a line in the dashboard
 //

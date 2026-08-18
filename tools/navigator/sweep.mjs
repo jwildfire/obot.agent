@@ -65,8 +65,8 @@ import { buildStamp, renderSelfUpdate, selfUpdate } from './selfupdate.mjs'
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
 // wake.mjs; this file supplies the readings and appends the log the Navigator tails.
 import { hostWasAway, idleDetection, judgedWorkers, listenerState, outsideWindow,
-         deliverable, parseWakeLog, pending as pendingWakes, readJobs, readyBacklog,
-         wakeLine, wakeSection } from './wake.mjs'
+         deliverable, misreadHolds, parseWakeLog, pending as pendingWakes, readJobs,
+         readyBacklog, wakeLine, wakeSection } from './wake.mjs'
 
 export { classifyRC, discoverRepos }
 
@@ -478,6 +478,11 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
   // workspaces produced four WAITING detections on this channel, which is exactly
   // the kind of noise that teaches a reader to stop reading it.
   const detections = pendingWakes(jobs, { now, judged, hostWasAway: away, workspace: WS })
+  // What the gate refused to believe (obot.agent#176). Reported beside the pending
+  // list and never delivered: a suppression that produces no output is
+  // indistinguishable from a gate that never ran, which is this programme's own
+  // recurring defect and not one to reproduce inside the fix for it.
+  const misread = misreadHolds(jobs, { now, hostWasAway: away, workspace: WS })
   const idle = idleDetection(jobs, { now, backlog, backlogCapped, pendingCount: detections.length, hostWasAway: away })
   const all = idle ? [...detections, idle] : detections
 
@@ -496,12 +501,13 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
       held,
       listener,
       outside: outsideWindow(jobs, { now, judged }),
+      misread,
       jobsRead,
       awayNote: away
         ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
         : null,
     }),
-    note: `${all.length} pending, ${deliver.length} delivered, channel ${listener.armed ? 'armed' : 'DOWN'}`,
+    note: `${all.length} pending, ${deliver.length} delivered, ${misread.length} misread suppressed, channel ${listener.armed ? 'armed' : 'DOWN'}`,
   }
 }
 

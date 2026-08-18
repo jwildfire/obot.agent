@@ -94,6 +94,40 @@ condition still holds** before acting on it, because minutes have passed since t
 brief was written and a worker may have woken up or a pull request may have moved.
 A condition that has resolved itself is a condition you leave alone.
 
+**Re-verify a `waiting` or `dead` session against the timeline, never against the
+state file.** The harness DERIVES those states from the session's own prose, so a
+sentence describing an action somebody else has to take is read as this session being
+blocked on it. That is not a hypothesis: on 2026-08-17 it put W0033 on the wake
+channel as "waiting 12m and nobody has resolved it — needs: restart ops-dashboard",
+five minutes after the same session stamped a terminal result, while it was in fact
+reviewing a peer's follow-up and verifying two merges. No restart command was ever
+run and no permission prompt was ever raised in it
+([obot.agent#176](https://github.com/jwildfire/obot.agent/issues/176)). You went live
+an hour before that fired.
+
+One question, answered by one append-only file, and a `yes` means the condition is
+not real and you close nothing:
+
+```bash
+python3 -c "import json,sys;[print(e['at'],e.get('state'),str(e.get('detail',''))[:70]) for e in map(json.loads,open(sys.argv[1]))]" ~/.claude/jobs/<id>/timeline.jsonl
+```
+
+- Has it emitted anything after the LAST `blocked` entry? Then it went on working,
+  whatever the state file says.
+
+Do NOT use `firstTerminalAt` for this. It is a first-write-wins watermark the harness
+never resets, so it says "this session has ever closed out" and never "this session's
+current run is finished" — it is true for 31 of the 113 job records on this machine,
+and it is true for W0007, which closed out, was resumed four minutes later, and then
+sat twenty hours on a real permission prompt. Ordering against it marks the genuine
+stall harder than the fabricated one.
+
+`tools/navigator/wake.mjs` applies the same test, and holds any fresh `waiting`
+reading for one sweep before anyone is woken at all, so a session that fails it should
+not be in your brief. Check anyway. The whole point of this rule is that the record which
+told you to act is the record that was wrong, and leaving a genuinely stalled session
+open costs one cycle while closing a working one costs its work.
+
 ### 3. You record your own actions as `call` lines. You DO NOT write verdicts
 
 Every action you take goes in the delivery record, actor-stamped, so your work is

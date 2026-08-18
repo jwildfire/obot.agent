@@ -356,9 +356,9 @@ The hub validates it again on arrival and refuses the whole payload on any field
 a number or a date. That reader is the half that survives someone editing this one.
 
 ```bash
-node obot.agent/tools/config-count             # write it
-node obot.agent/tools/config-count --dry-run   # print it, write nothing
-node obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
+obot.agent/tools/config-count             # write it
+obot.agent/tools/config-count --dry-run   # print it, write nothing
+obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
 ```
 
 ## One site, several tabs

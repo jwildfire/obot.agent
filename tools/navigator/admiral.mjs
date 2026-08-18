@@ -363,6 +363,20 @@ export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
   const out = []
   for (const job of jobs) {
     if (!isWorker(job) || !job.firstTerminalAt) continue
+    // A SESSION THAT RESUMED IS NOT A CLOSEOUT (obot.agent#176, one condition over).
+    // `firstTerminalAt` is a first-write-wins watermark the harness never resets, so
+    // a worker that closed out and was then handed more work carries it for the life
+    // of the record — and this scan had no liveness filter while the two other job
+    // scans in this file have one. The row it produced asserts "closed out Nm ago"
+    // in front of an agent holding `claude stop`, about a session that is mid-work.
+    // Five records on this machine spent 129 to 575 minutes in that state, one of
+    // them publishing a release tag on `stable` through most of its 575.
+    //
+    // Positive evidence only: a LIVE session with nothing after its terminal stamp is
+    // still reported, because a gap is only ever reported and an unreported one is a
+    // closeout nobody judges. What is dropped is only the case the timeline settles.
+    if (isLive(job) && job.lastActivityAt &&
+        Date.parse(job.lastActivityAt) > Date.parse(job.firstTerminalAt)) continue
     const mins = minsSince(job.firstTerminalAt, now)
     // Bounded at both ends: below `minMins` the Navigator has simply not got to it
     // yet, and beyond the window is history nobody can judge any more. What falls
