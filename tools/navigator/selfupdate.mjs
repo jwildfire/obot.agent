@@ -457,6 +457,25 @@ export function takeLock(workspace, { now = Date.now } = {}) {
 }
 
 /**
+ * The process about to be replaced, described from the marker alone.
+ *
+ * `upMin` is how long it had been serving, which is the only thing an old build can
+ * still tell us about itself: a process that predates the health endpoint cannot name
+ * the commit it is running, and once it has been signalled it cannot name anything.
+ */
+export function previousProcess(marker, now = new Date()) {
+  const since = marker?.startedAt ?? null
+  const t = since ? Date.parse(since) : NaN
+  const upMin = Number.isFinite(t) ? Math.max(0, Math.round((now.getTime() - t) / 60000)) : null
+  return {
+    pid: marker?.pid ?? null,
+    since,
+    upMin,
+    words: upMin === null ? null : (upMin < 60 ? `up ${upMin}m` : `up ${Math.round(upMin / 60)}h`),
+  }
+}
+
+/**
  * The whole step, in the order the failure modes demand.
  *
  * Fast-forward first, restart second, record third — and the record is written on
@@ -486,14 +505,22 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
         lastLookMs: lastLookMs(lastSeen, now()),
       })
       if (plan.act === 'restart' || plan.act === 'start') {
+        // What the restart rescued him from, taken before it happens, because
+        // afterwards there is nobody left to ask. A build old enough to have no health
+        // endpoint cannot say which commit it was serving — the first real restart on
+        // this machine replaced one eighteen hours and four merges old and the record
+        // could only say `was: null`. How long it had been up is on disk in the marker,
+        // it answers the same question well enough to act on, and it is the difference
+        // between "a restart happened" and "a restart was overdue".
+        const prev = previousProcess(marker, now())
         const r = restart({
           root, workspace, port, logFile,
           pid: plan.act === 'restart' ? marker?.pid : null,
           start: true,
         })
         consumers.push({ id: 'ops-dashboard', act: plan.act, code: r.code, ok: r.ok,
-                         reason: r.ok ? r.reason : `${plan.reason}, but ${r.reason}`,
-                         was: h?.code?.short ?? null, serving: r.serving ?? null, at: now().toISOString() })
+                         reason: r.ok ? `${r.reason}${prev.words ? `, replacing one ${prev.words}` : ''}` : `${plan.reason}, but ${r.reason}`,
+                         was: h?.code?.short ?? null, previous: prev, serving: r.serving ?? null, at: now().toISOString() })
       } else {
         consumers.push({ id: 'ops-dashboard', act: plan.act, code: plan.code, ok: plan.act !== 'refuse',
                          reason: plan.reason, serving: h?.code?.short ?? null })
