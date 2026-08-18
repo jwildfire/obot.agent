@@ -41,6 +41,21 @@ jwildfire
 
 <b>The one-character fix that issue proposes was measured before being adopted, and rejected.</b> Feeding the guard an unwrapped mutation with <code>MUTATION.search(seg)</code> in place returns <i>defer</i>: quoted spans are blanked before matching and a mutation lives entirely inside the quoted <code>-f query=</code>, so the check would have matched nothing and the guard's central case would have stopped firing silently. <code>split_segments</code> now returns spans instead of substrings, cut from two length-identical views of the same text — stripped for command shape, raw for the payload — which is what makes a per-segment mutation check possible at all.
 
+<b>The effect, read off the guard itself rather than off a passing test.</b> Each command fed to both versions of the hook, verdict as returned:
+
+<pre>
+case                                              before   after
+empty token in front of a write                   defer    deny
+mint by substitution (cannot fail safely)         defer    deny
+variable this call never assigned                 defer    deny
+mint + check + write, one call                    defer    defer
+bare graphql READ beside a prefixed mutation      deny     defer
+unwrapped graphql mutation, alone                 deny     deny
+the wrapper                                       defer    defer
+</pre>
+
+The last two rows are the invariants: the guard keeps its teeth on an unattributed mutation, and the sanctioned lane stays open. The three new denials are the ways a credential can be empty at the moment of the write; the one new deferral is #234.
+
 <b>Tests.</b> 13 new across two files on the original defect, plus 2 on the audit lane; 7 more added here (5 on the credential check, 1 encoding #234's probe table, 1 pinning that a refusal describes a route that exists). Each was confirmed red against this branch before the fix: 5 failures on the guard, 1 on the wrapper. Full suite green — 1107 tests, 1107 pass, plus <code>obot-policy validate</code>.
 
 ## Technical briefing
