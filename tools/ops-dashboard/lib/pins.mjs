@@ -87,7 +87,13 @@ export const pinnedRoles = (pins = emptyPins()) => STANDING_ROLES.filter(
   (r) => isPinned({ id: null, label: r.tag }, pins),
 );
 
-/** His pins as recorded, or none — an unreadable file is never a crash. */
+/**
+ * His pins as recorded, or none — an unreadable file is never a crash.
+ *
+ * `read` rides along since jwildfire/obot.agent#215. Rendering is happy with an empty
+ * set either way; `writePin` is not, and must not be, because this file is written by
+ * read-modify-write and an empty read means "erase everything he pinned".
+ */
 export function readPins(workspace) {
   try {
     const raw = JSON.parse(fs.readFileSync(pinsPath(workspace), 'utf8'));
@@ -95,9 +101,11 @@ export function readPins(workspace) {
     for (const [k, v] of Object.entries(raw?.overrides ?? {})) {
       if (typeof v === 'boolean') overrides[k] = v;
     }
-    return { overrides, at: raw?.at ?? null };
-  } catch {
-    return emptyPins();
+    return { overrides, at: raw?.at ?? null, read: true };
+  } catch (e) {
+    // Absent is a legitimate empty set: nothing has ever been pinned here. Anything
+    // else is a set this process could not see, and the two must not be merged.
+    return { ...emptyPins(), read: e?.code === 'ENOENT' };
   }
 }
 
@@ -113,6 +121,12 @@ export function writePin(workspace, { key, pinned }) {
   if (!k || k.length > 200) throw new Error('a pin needs a key');
   ensureStore(workspace);
   const pins = readPins(workspace);
+  // The refusal that keeps this from being a delete. A failed read hands back an empty
+  // override set, and writing that back erases every pin he has ever set — silently,
+  // on the click he expected to add one (jwildfire/obot.agent#215).
+  if (!pins.read) {
+    throw new Error('the pin file could not be read, so it will not be overwritten — pinning would erase the pins already in it');
+  }
   if (pinned === null || pinned === undefined) delete pins.overrides[k];
   else pins.overrides[k] = !!pinned;
   const out = { _note: SENTINEL, at: new Date().toISOString(), overrides: pins.overrides };

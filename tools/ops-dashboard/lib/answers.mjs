@@ -129,7 +129,12 @@ export function recordAnswer(workspace, answer, { hub = null, now = new Date() }
   // Every live record for this artifact, not just the current one: records
   // written before #120 were never marked, and each of them has to be told
   // explicitly that it has been replaced.
-  const existing = readAnswers(workspace).filter((a) => a.artifact === artifact && a.status !== SUPERSEDED);
+  const all = readAnswers(workspace);
+  // Refuse rather than write a record that cannot supersede its predecessors: with an
+  // unreadable store every answer looks like the first one, which is #120 all over
+  // again by a different route (jwildfire/obot.agent#215).
+  if (all[UNREADABLE]) throw new Error(`${all[UNREADABLE]}, so this answer will not be recorded — it could not be told what it replaces`);
+  const existing = all.filter((a) => a.artifact === artifact && a.status !== SUPERSEDED);
   const twin = existing.find((a) => a.fingerprint === fp);
   if (twin) {
     // The same answer again. Count the click so the repeat is legible, and leave
@@ -216,10 +221,19 @@ const backfill = (r, hub) => {
 export const STORELESS = Symbol.for('obot.answers.storeless');
 const storeless = () => Object.defineProperty([], STORELESS, { value: true });
 
+// And the third state, since jwildfire/obot.agent#215: a store that exists and could
+// not be listed. It also arrives as an empty array, so the panel keeps working — but
+// `recordAnswer` has to refuse, because writing against an empty read is how the #120
+// supersede logic silently stops working and every click writes a fresh record.
+export const UNREADABLE = Symbol.for('obot.answers.unreadable');
+const unreadable = (why) => Object.defineProperty([], UNREADABLE, { value: why });
+
 /** Every answer ever recorded, newest first. Nothing is ever removed. */
 export function readAnswers(workspace, { hub = null } = {}) {
   let names = [];
-  try { names = fs.readdirSync(answersDir(workspace)).filter((n) => n.endsWith('.json')); } catch { return storeless(); }
+  try { names = fs.readdirSync(answersDir(workspace)).filter((n) => n.endsWith('.json')); } catch (e) {
+    return e?.code === 'ENOENT' ? storeless() : unreadable(`the answer store could not be read (${e?.code ?? e?.message})`);
+  }
   return names
     .map((n) => { try { return backfill(normalize(JSON.parse(fs.readFileSync(path.join(answersDir(workspace), n), 'utf8'))), hub); } catch { return null; } })
     .filter(Boolean)

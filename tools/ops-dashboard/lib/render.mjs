@@ -872,11 +872,16 @@ const answerRow = (a, now) => {
 
 const answersPanel = (answers, deliverer, now) => {
   const waiting = answers.filter((a) => a.status === 'captured');
-  const alarm = waiting.length && !deliverer?.alive
+  // `alive === false` is a fact and earns the alarm. `alive === null` is this process
+  // not knowing, and an accusation made out of not knowing is worse than silence — it
+  // sends him to restart a service that is fine (jwildfire/obot.agent#215).
+  const alarm = waiting.length && deliverer?.alive === false
     ? `<p class="alarm"><strong>${waiting.length} answer${waiting.length === 1 ? '' : 's'} of yours ${waiting.length === 1 ? 'is' : 'are'} going nowhere.</strong>
       Nothing is listening — the Navigator sweep is not running${deliverer?.sweptAt ? ` (last swept ${esc(deliverer.sweptAt)})` : ''}, so no agent will pick ${waiting.length === 1 ? 'it' : 'them'} up.<br>
       <code>launchctl kickstart -k gui/$UID/com.obot.navigator-sweep</code></p>`
-    : '';
+    : (waiting.length && deliverer?.alive === null
+      ? `<p class="q-unread">Whether anything is listening could not be determined — ${esc(deliverer.why ?? 'the sweep\u2019s state file could not be read')}. The sweep may well be running; nothing here is a claim that it is not.</p>`
+      : '');
   return `<div class="answers">
       <h2>Your answers <span class="q-n">${answers[STORELESS] ? UNMEASURED : answers.length}</span></h2>
       ${alarm}
@@ -888,7 +893,23 @@ const answersPanel = (answers, deliverer, now) => {
     </div>`;
 };
 
-export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, workspace, hub, generated = new Date() }) {
+/**
+ * The loudest thing this page can say about itself: its own readers have been replaced.
+ *
+ * Every number below a disarmed reader is a guess, so this is a page-level statement
+ * and it goes above the header rather than into a panel. It is deliberately not about
+ * any particular culprit — the check is "are these the functions this process started
+ * with", which catches whatever arms itself next (jwildfire/obot.agent#215, after
+ * #206 where a guard from the public build did exactly this and every panel reported
+ * the result as ordinary emptiness).
+ */
+const integrityBanner = (integrity) => (!integrity || integrity.intact ? '' : `<p class="dead">
+  <strong>This page cannot be trusted right now.</strong> Something has replaced this server's own file readers
+  (${esc(integrity.replaced.join(', '))}), so every count below may be an empty list standing in for a failed read.
+  Restart the dashboard and, if it comes back, treat it as a repeat of
+  <a href="https://github.com/jwildfire/obot.agent/issues/206">#206</a>.</p>`);
+
+export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, integrity = null, workspace, hub, generated = new Date() }) {
   const critical = queue.critical ?? [];
   const snoozed = queue.snoozed ?? [];
   const cleared = queue.cleared ?? [];
@@ -909,13 +930,22 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
   // (jwildfire/obot.roadmap#223). Two of the three collectors already returned the
   // reason; only the decisions one ever reached the page, four elements below a
   // heading that contradicted it.
+  // The collectors already know whether they read their source; the view used to
+  // re-derive it from `error` and get a different answer. `collectRCs` deliberately
+  // reports `error: null` when there is no cache but a sweep script exists, so
+  // `!error` came out true with zero items and the header stated `0 release
+  // candidates` about a number nobody had measured (jwildfire/obot.agent#215).
+  // `??` rather than `||`: a fixture that carries no `read` field keeps the old
+  // behaviour, a collector that says `read: false` is believed.
   const read = {
-    rc: !queue.rcs?.error,
-    decision: !queue.decisions?.error,
-    config: !queue.config?.error,
+    rc: queue.rcs?.read ?? !queue.rcs?.error,
+    decision: queue.decisions?.read ?? !queue.decisions?.error,
+    config: queue.config?.read ?? !queue.config?.error,
   };
+  // An unread source always carries a reason. `collectRCs` leaves `error` null on the
+  // never-swept path, and a `—` with an empty tooltip is a worse answer than a zero.
   const sourceWhy = {
-    rcs: queue.rcs?.error ?? '',
+    rcs: queue.rcs?.error ?? (read.rc ? '' : 'no GitHub sweep has completed on this machine yet, so there is no count to show'),
     decisions: queue.decisions?.error ?? '',
     config: queue.config?.error ?? '',
   };
@@ -978,6 +1008,7 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
 </head>
 <body>
 
+${integrityBanner(integrity)}
 <header class="top">
   <span class="brand">🍊😺 Operations</span>
   ${tabs('ops')}
@@ -1041,7 +1072,9 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
       <button class="send" id="send" disabled>Record this decision</button>
       <p class="note">${deliverer?.alive === false
     ? 'Nothing is listening yet — the Navigator sweep is not running on this machine, so an answer recorded here will sit unread until it is installed: <code>obot.agent/tools/navigator/install-launchd</code>.'
-    : 'Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.'}</p>
+    : (deliverer?.alive === null
+      ? 'Your click is recorded on this machine. Whether the Navigator is listening could not be determined from here, so this page is not promising it will be picked up within five minutes — only that it is written down.'
+      : 'Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.')}</p>
       <p class="ok" id="ok" hidden></p>
     </div>
     <div class="triage" id="triage" hidden>
