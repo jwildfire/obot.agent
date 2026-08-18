@@ -480,6 +480,10 @@ printf 'obot-merge: policy OK (%s lane) - merging PR #%s in %s as obotclaw[bot] 
 # The mint is the first irreversible step; the seam exists so the test suite can
 # exercise the merge path without one.
 TOKEN="$("${OBOT_APP_TOKEN_CMD:-$SCRIPT_DIR/obot-app-token}")" || fail "token mint failed"
+# An empty token is not a failed mint as far as the shell is concerned, and `gh`
+# reads an empty GH_TOKEN as unset - so it would fall back to @jwildfire's own
+# credential and record the merge and its audit comment as his (obot.agent#207).
+[ -n "$TOKEN" ] || fail "token mint produced an empty token. Nothing was merged and no audit comment was posted."
 
 if [ "$LANE" = "approval" ]; then
   BASE_BRANCH="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["baseRefName"])')"

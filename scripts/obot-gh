@@ -58,14 +58,33 @@ mint() {
     || fail "token mint failed - see the obot-identity skill's Failure modes"
 }
 
+# Resolve a token into $TOKEN, or abort the script.
+#
+# This exists because `env GH_TOKEN="$(mint)" gh "$@"` looks equivalent and is not.
+# A command substitution in an assignment *prefix* has its exit status discarded -
+# the surrounding command's status is what survives - and `fail`'s `exit 1` inside
+# `$( )` only leaves the substitution's subshell. So a failed mint printed its error
+# to stderr, GH_TOKEN was set to the empty string, and the write ran anyway. `gh`
+# treats an empty GH_TOKEN as unset and falls back to the ambient credential, which
+# is @jwildfire's: the wrapper written to stop his history recording things he did
+# not do would itself have produced one, reporting success (obot.agent#207).
+#
+# `TOKEN="$(mint)"` on its own line is a plain assignment, so the status is the
+# substitution's and `set -e` sees it. The emptiness check is belt-and-braces for a
+# minter that exits 0 with nothing on stdout.
+mint_or_die() {
+  TOKEN="$(mint)"
+  [ -n "$TOKEN" ] || fail "token mint produced an empty token. Refusing to run: \`gh\` reads an empty GH_TOKEN as unset and would send this out as @jwildfire."
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --who)
       # `gh api user` is not available to an installation token (403); the
       # GraphQL viewer is, and it is the same question.
-      tok="$(mint)"
+      mint_or_die
       printf 'writes through obot-gh are attributed to: '
-      GH_TOKEN="$tok" gh api graphql -f query='query{viewer{login}}' --jq .data.viewer.login
+      GH_TOKEN="$TOKEN" gh api graphql -f query='query{viewer{login}}' --jq .data.viewer.login
       exit 0
       ;;
     --as-jeremy) AS_JEREMY=true; shift ;;
@@ -146,4 +165,5 @@ PY
   exec env -u GH_TOKEN -u GITHUB_TOKEN gh "$@"
 fi
 
-exec env GH_TOKEN="$(mint)" gh "$@"
+mint_or_die
+exec env GH_TOKEN="$TOKEN" gh "$@"

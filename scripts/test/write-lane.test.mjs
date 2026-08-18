@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -83,6 +85,43 @@ test('no fenced command writes to GitHub on the ambient token', () => {
   assert.deepEqual(offenders, [],
     'these fenced commands write to GitHub as @jwildfire — route them through ' +
     'obot.agent/scripts/obot-gh (obot.agent#197):\n' + offenders.join('\n'));
+});
+
+test('a failed mint stops the write instead of emptying the token (#207)', () => {
+  // The defect the wrapper itself shipped with, and the sharpest instance of the
+  // house failure mode: it printed "token mint failed", then ran the write anyway
+  // and exited 0. `env GH_TOKEN="$(mint)" gh "$@"` discards the substitution's exit
+  // status — `fail`'s `exit 1` inside `$( )` only leaves the subshell — so GH_TOKEN
+  // became the empty string, `gh` read empty as unset, and the write went out on the
+  // ambient credential: as @jwildfire, from the wrapper built to prevent exactly that.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'obot-gh-mint-'));
+  try {
+    const failingMint = path.join(dir, 'failmint');
+    fs.writeFileSync(failingMint, '#!/bin/bash\necho "mint failed: simulated" >&2\nexit 1\n');
+    fs.chmodSync(failingMint, 0o755);
+
+    // A stand-in `gh` that records the fact it ran at all. If the wrapper reaches it,
+    // a real write would have reached GitHub.
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const ranMarker = path.join(dir, 'gh-ran');
+    fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/bash\ntouch ${ranMarker}\n`);
+    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+
+    const res = spawnSync(path.join(ROOT, 'scripts/obot-gh'),
+      ['issue', 'edit', '1', '-R', 'jwildfire/obot.agent', '--add-label', 'bug'], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`,
+               OBOT_APP_TOKEN_CMD: failingMint, OBOT_GH_TOKEN: '' },
+      });
+
+    assert.equal(fs.existsSync(ranMarker), false,
+      'obot-gh ran gh after the mint failed — the write would have gone out as @jwildfire');
+    assert.notEqual(res.status, 0, 'obot-gh must exit non-zero when the mint fails');
+    assert.match(res.stderr, /mint failed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the wrapper is executable and refuses to become a merge lane', () => {
