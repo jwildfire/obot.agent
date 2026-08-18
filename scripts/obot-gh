@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# obot-gh - run a gh command as obotclaw[bot] instead of as @jwildfire.
+#
+#   obot-gh issue edit 197 -R jwildfire/obot.agent --add-label bug
+#   obot-gh api -X POST /repos/jwildfire/obot.roadmap/issues/215/sub_issues -f sub_issue_id=123
+#   obot-gh --who                      # print the login these writes will be attributed to
+#
+# WHY THIS EXISTS (obot.agent#197). Issue and comment *bodies* were already
+# correct, because the app token was passed to `gh issue create`. Everything
+# structural was not: labels, milestones, sub-issue links, project additions and
+# board moves all ran on the ambient `gh` token, which authenticates as
+# @jwildfire. Two days of roadmap scaffolding therefore reads, on ~100 issue
+# timelines, as though he personally parented and staged a roadmap he has not
+# seen. The sharpest case is hub#215 - the requirement about not letting an
+# agent's inference read as his approval - whose own timeline says he applied a
+# label he has never seen.
+#
+# The mechanism was never in doubt; the pattern used for `gh issue create` simply
+# was not carried to the rest. So the fix is not another line in a skill file
+# telling agents to remember. It is this wrapper plus the PreToolUse guard in
+# hooks/attribution-guard.sh, which refuses a structural write that is about to
+# run unauthenticated as him. Remembering is what failed for two days.
+#
+# NO TOKEN IS EVER STORED. A fresh 1-hour installation token is minted per
+# invocation (obot-identity skill: "mint fresh per command; never store one").
+# A caller doing many writes in one process can mint once and export
+# OBOT_GH_TOKEN; this script reuses that and skips the mint.
+#
+# THE PROJECT BOARD IS THE ONE THING THIS CANNOT FIX. The obotclaw app is
+# installed on a *user* account, and a GitHub App installation cannot reach a
+# user-owned ProjectsV2 board at all - verified 2026-08-17: the app token gets
+# FORBIDDEN "Resource not accessible by integration" on the board's node id and
+# NOT_FOUND on user(login:"jwildfire"){projectV2(number:1)}. Board moves
+# therefore have no honest bot identity available today. They are not silently
+# passed through: `obot-gh project ...` refuses, and the only route is the
+# explicit `--as-jeremy`, which records every such write to
+# .claude/attribution.journal and says on stderr whose name it is going out
+# under. That converts an invisible default into a counted, deliberate
+# exception - the honest maximum until the platform limit is lifted.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+JOURNAL="$WORKSPACE/.claude/attribution.journal"
+
+AS_JEREMY=false
+REASON=""
+
+fail() { printf 'obot-gh: %s\n' "$1" >&2; exit 1; }
+
+mint() {
+  if [ -n "${OBOT_GH_TOKEN:-}" ]; then
+    printf '%s' "$OBOT_GH_TOKEN"
+    return
+  fi
+  "${OBOT_APP_TOKEN_CMD:-$SCRIPT_DIR/obot-app-token}" \
+    || fail "token mint failed - see the obot-identity skill's Failure modes"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --who)
+      # `gh api user` is not available to an installation token (403); the
+      # GraphQL viewer is, and it is the same question.
+      tok="$(mint)"
+      printf 'writes through obot-gh are attributed to: '
+      GH_TOKEN="$tok" gh api graphql -f query='query{viewer{login}}' --jq .data.viewer.login
+      exit 0
+      ;;
+    --as-jeremy) AS_JEREMY=true; shift ;;
+    --reason)    REASON="${2:?--reason needs a value}"; shift 2 ;;
+    -h|--help)   sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)           break ;;
+  esac
+done
+
+[ $# -gt 0 ] || fail "nothing to run. Usage: obot-gh <gh args...>   (or --who)"
+
+# The merge lane is obot-merge's, and only obot-merge's. Without this the wrapper
+# would be a hole in merge-gate-guard: that hook matches a bare `gh pr merge`, and
+# `obot-gh pr merge` does not look like one to it.
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "merge" ]; then
+  fail "merges go through obot.agent/scripts/obot-merge, which enforces the base-branch policy and needs @jwildfire's explicit approval."
+fi
+
+IS_PROJECT=false
+[ "${1:-}" = "project" ] && IS_PROJECT=true
+
+if $IS_PROJECT && ! $AS_JEREMY; then
+  cat >&2 <<'MSG'
+obot-gh: a GitHub App cannot touch a user-owned ProjectsV2 board.
+
+  The obotclaw app is installed on @jwildfire's user account. Its installation
+  token gets FORBIDDEN "Resource not accessible by integration" on the "obot
+  Roadmap" board, so there is no bot identity available for a board move today
+  (obot.agent#197). This is a platform limit, not a missing flag.
+
+  A board move therefore goes out under his name whatever you do. If it must
+  happen now, say so out loud and it will be recorded:
+
+    obot-gh --as-jeremy project item-edit ...
+
+  The standing fix is his to make: move the board to an organisation, or grant
+  the app project access if GitHub ever offers it for user-account installations.
+MSG
+  exit 1
+fi
+
+if $AS_JEREMY; then
+  # Every non-project use must justify itself in writing. The project case is the
+  # one whose reason is already known and unavoidable, so it does not pay friction
+  # it cannot act on.
+  if [ -z "$REASON" ]; then
+    if $IS_PROJECT; then
+      REASON='platform: a GitHub App cannot reach a user-owned ProjectsV2 board'
+    else
+      fail "--as-jeremy needs --reason '<why this write cannot be attributed to the bot>'"
+    fi
+  fi
+
+  mkdir -p "$(dirname "$JOURNAL")"
+  JOURNAL="$JOURNAL" REASON="$REASON" WORKER="${OBOT_WORKER_ID:-unknown}" \
+  python3 - "$@" <<'PY'
+import json, os, sys, time
+rec = {
+    "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    "actor": "jwildfire",
+    "worker": os.environ["WORKER"],
+    "reason": os.environ["REASON"],
+    "cwd": os.getcwd(),
+    "argv": sys.argv[1:],
+}
+# One short line, opened O_APPEND: atomic enough for concurrent siblings without
+# a lock, in the manner of .claude/blockers.journal.
+with open(os.environ["JOURNAL"], "a") as fh:
+    fh.write(json.dumps(rec) + "\n")
+PY
+
+  printf '\n' >&2
+  printf '  !! THIS WRITE GOES OUT AS @jwildfire, NOT AS obotclaw[bot].\n' >&2
+  printf '     reason: %s\n' "$REASON" >&2
+  printf '     recorded in %s\n' "$JOURNAL" >&2
+  printf '\n' >&2
+
+  exec env -u GH_TOKEN -u GITHUB_TOKEN gh "$@"
+fi
+
+exec env GH_TOKEN="$(mint)" gh "$@"
