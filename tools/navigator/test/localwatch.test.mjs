@@ -21,7 +21,7 @@ import { execFileSync } from 'node:child_process'
 import {
   ALARM_BROKEN, ALARM_FINDING, BEHIND_COMMITS, HELD_GRACE_MIN, NOISE_SEGMENTS,
   PUBLISH_BRANCHES, UNPROPOSED_DAYS, UNPUSHED_HOURS,
-  classifyStatus, classifyWorktree, claimants, clonePosition, localSection,
+  classifyStatus, classifyWorktree, claimants, clonePosition, localSection, newestMtime,
   readWorktrees, resolveRemote, unproposedBranches, worktreeReading,
 } from '../localwatch.mjs'
 import { ALARM_RE, parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
@@ -157,6 +157,35 @@ test('an unreadable fleet ledger is not an empty fleet — the row is stale and 
   assert.equal(c.kind, 'unjudged')
   assert.equal(c.alarm, false)
   assert.match(c.why, /could not be read/)
+})
+
+test('a change whose age could not be measured is UNKNOWN, never 56 years stranded', () => {
+  // The first live run reported `obot.agent w0060-commit-identity` as stranded with one
+  // tracked change "untouched for 20683d" — an epoch timestamp wearing a number. The
+  // worktree belonged to a worker that was actively committing at that moment, and the
+  // path had gone from under `statSync` between the status call and the stat.
+  //
+  // A failed measurement became a confident, false, alarming one. Unknown is its own
+  // answer: zero would read as 1970, and 1970 reads as abandoned.
+  const c = classifyWorktree(dirty(0, { newestMs: null }), { claimants: [], now })
+  assert.equal(c.kind, 'unknown-age')
+  assert.equal(c.alarm, false)
+  assert.match(c.why, /could not be/i)
+})
+
+test('a deletion is still dated — the parent directory remembers when the file went', () => {
+  const dir = tmp()
+  fs.mkdirSync(path.join(dir, 'scripts'))
+  fs.writeFileSync(path.join(dir, 'scripts', 'kept.txt'), 'x')
+  // `gone.txt` never existed on disk: this is the shape `git status` reports for a
+  // tracked file the worker deleted, and the only mtime available is its directory's.
+  const ms = newestMtime(dir, ['scripts/gone.txt'])
+  assert.ok(ms > 0, 'a deleted path must not measure as the epoch')
+  assert.equal(ms, fs.statSync(path.join(dir, 'scripts')).mtimeMs)
+})
+
+test('a change set where nothing at all can be dated measures as null, not as zero', () => {
+  assert.equal(newestMtime('/no/such/place/at/all', ['a/b.txt']), null)
 })
 
 test('a clean worktree is clean and a worktree that could not be read is neither', () => {

@@ -195,17 +195,12 @@ export function readWorktrees(root, { git = gitRead } = {}) {
  */
 export function worktreeReading(repo, wt, { git = gitRead, stat = statMtime } = {}) {
   const base = { repo, path: wt.path, branch: wt.branch, main: !!wt.main,
-                 tracked: 0, untracked: 0, noise: 0, skippedUntracked: 0, newestMs: 0, read: false }
+                 tracked: 0, untracked: 0, noise: 0, skippedUntracked: 0, newestMs: null, read: false }
   const porcelain = git(wt.path, ['status', '--porcelain'])
   if (porcelain === null) return { ...base, error: 'its working tree could not be read' }
   const s = classifyStatus(porcelain, { main: wt.main })
-  let newestMs = 0
-  for (const p of s.paths) {
-    const m = stat(join(wt.path, p))
-    if (m && m > newestMs) newestMs = m
-  }
   return { ...base, read: true, tracked: s.tracked, untracked: s.untracked, noise: s.noise,
-           skippedUntracked: s.skippedUntracked, newestMs, error: null }
+           skippedUntracked: s.skippedUntracked, newestMs: newestMtime(wt.path, s.paths, { stat }), error: null }
 }
 
 /**
@@ -252,7 +247,14 @@ export function classifyWorktree(reading, { claimants: live, now = Date.now(), g
   }
   const substantive = (reading.tracked ?? 0) + (reading.untracked ?? 0)
   if (substantive === 0) return { ...base, kind: 'clean', why: 'nothing uncommitted' }
-  const ageMs = Math.max(0, now - (reading.newestMs || 0))
+  // Unknown is its own answer. Zero would read as 1970, and 1970 reads as abandoned —
+  // which is exactly how a live worker's worktree came to be reported as stranded for
+  // twenty thousand days on the first run this section ever made.
+  if (!Number.isFinite(reading.newestMs) || reading.newestMs <= 0) {
+    return { ...base, kind: 'unknown-age',
+             why: `${reading.tracked} tracked change(s), ${reading.untracked} untracked path(s), but nothing in it could be dated — its age could not be measured, so whether it is abandoned is unknown` }
+  }
+  const ageMs = Math.max(0, now - reading.newestMs)
   const withAge = { ...base, ageMs, ageText: ageText(ageMs) }
   const what = `${reading.tracked} tracked change${reading.tracked === 1 ? '' : 's'}, ${reading.untracked} untracked path${reading.untracked === 1 ? '' : 's'}`
   if (ageMs < graceMin * MIN) {
@@ -321,7 +323,33 @@ export function gitRead(root, args, { timeout = 10000 } = {}) {
   } catch { return null }
 }
 
-const statMtime = (p) => { try { return statSync(p).mtimeMs } catch { return 0 } }
+const statMtime = (p) => { try { return statSync(p).mtimeMs } catch { return null } }
+
+/**
+ * When a working tree was last written, or null when nothing in it can be dated.
+ *
+ * NULL, NEVER ZERO. The first live run reported a worker's worktree as stranded with
+ * one tracked change "untouched for 20683d" — an epoch timestamp wearing a number,
+ * produced because a failed `statSync` returned 0 and `now - 0` is fifty-six years.
+ * The worker was committing at that moment and the path had gone from under the stat
+ * between the status call and the read. A measurement that failed had become a
+ * confident, false, alarming one, which is the same shape as the defect this whole
+ * module exists to catch (obot.agent#215: absent and unreadable are different facts).
+ *
+ * A deleted path is still dated: deleting a file writes its parent directory, so the
+ * directory is the honest reading for the one case `git status` reports about a path
+ * that is not there. Only when neither the path nor its directory can be read does
+ * this give up, and giving up says so.
+ */
+export function newestMtime(root, paths = [], { stat = statMtime } = {}) {
+  let newest = null
+  for (const p of paths) {
+    const full = join(root, p)
+    const ms = stat(full) ?? stat(dirname(full))
+    if (ms !== null && (newest === null || ms > newest)) newest = ms
+  }
+  return newest
+}
 
 /**
  * The remote whose URL actually names the repository, never whichever one is called
@@ -428,6 +456,7 @@ export function localSection(found = {}, now = Date.now()) {
   const held = verdicts.filter((v) => v.kind === 'held')
   const unjudged = verdicts.filter((v) => v.kind === 'unjudged')
   const unread = verdicts.filter((v) => v.kind === 'unread')
+  const undated = verdicts.filter((v) => v.kind === 'unknown-age')
   const active = verdicts.filter((v) => v.kind === 'active')
   const cloneAlarms = clones.filter((c) => c.alarm)
   const cloneUnread = clones.filter((c) => c.read === false)
@@ -442,10 +471,11 @@ export function localSection(found = {}, now = Date.now()) {
   // partial view and a partial view presented as a verdict is the failure one door
   // down from the one this file is about.
   const fetchFailed = found.fetchFailed ?? []
-  if (live === null || unread.length || cloneUnread.length || !fetchAge || fetchFailed.length || branches.unread) {
+  if (live === null || unread.length || undated.length || cloneUnread.length || !fetchAge || fetchFailed.length || branches.unread) {
     const why = []
     if (live === null) why.push('the live agent ledger could not be read, so no worktree here can be called ownerless — an unreadable fleet is not an empty one')
     if (unread.length) why.push(`${unread.length} working tree(s) could not be read`)
+    if (undated.length) why.push(`${undated.length} dirty working tree(s) could not be dated, so age says nothing about them either way`)
     if (cloneUnread.length) why.push(`${cloneUnread.length} checkout position(s) could not be measured`)
     if (!fetchAge) why.push('no fetch has ever completed on this machine, so every position below is unmeasured rather than current')
     if (fetchFailed.length) why.push(`the fetch failed for ${fetchFailed.join(', ')}, so those positions are older than the stamp above them says`)
@@ -478,6 +508,7 @@ export function localSection(found = {}, now = Date.now()) {
   group('Worktrees a live worker may still hold', held)
   group('Worktrees whose owner could not be established', unjudged)
   group('Worktrees that could not be read', unread)
+  group('Worktrees whose age could not be measured', undated)
   group('Branches nobody ever proposed', branches.findings)
   group('Checkouts out of step with their remote', cloneAlarms)
   return lines.join('\n') + '\n'
