@@ -17,8 +17,8 @@ import { execFileSync } from 'node:child_process'
 
 import {
   CONSUMER_POLICY, QUIET_MS, buildStamp, fastForward, lastLookMs, planFastForward,
-  planRestart, readCheckout, recordPath, renderSelfUpdate, restartDashboard, restartEnv,
-  selfUpdate,
+  planRestart, previousProcess, readCheckout, recordPath, renderSelfUpdate, restartDashboard,
+  restartEnv, selfUpdate,
 } from '../selfupdate.mjs'
 import { parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
 
@@ -357,4 +357,34 @@ test('an unreadable checkout restarts nothing — there is no commit to restart 
   const r = planRestart({ marker: live(), health: { inflight: 0, idleMs: 10 * 60000, code: { sha: 'old' } }, headSha: null })
   assert.equal(r.act, 'skip')
   assert.equal(r.code, 'unknown-head')
+})
+
+test('the record says what the restart replaced, since afterwards nobody can be asked', () => {
+  const now = new Date('2026-08-18T01:11:49Z')
+  const p = previousProcess({ pid: 87091, startedAt: '2026-08-17T07:18:34Z' }, now)
+  assert.equal(p.pid, 87091)
+  assert.equal(p.upMin, 1073)
+  assert.equal(p.words, 'up 18h')
+})
+
+test('a marker that cannot say when it started is unknown, never "just started"', () => {
+  assert.equal(previousProcess({ pid: 1 }, new Date()).words, null)
+  assert.equal(previousProcess(null, new Date()).words, null)
+})
+
+test('a restart names what it rescued him from, even when the old build could not', () => {
+  const rec = selfUpdate({
+    root: '/repo', workspace: tmp(), stamp: { short: 'aaa1111', startedAt: new Date().toISOString() },
+    ff: () => ({ ok: true, code: 'current', moved: false, from: 'newsha', to: 'newsha', branch: 'main', reason: 'already at `origin/main`' }),
+    marker: { state: 'live', pid: 87091, port: 7326, site: 'ops-dashboard', startedAt: new Date(Date.now() - 18 * 3600 * 1000).toISOString() },
+    // The build being replaced is old enough to have no health endpoint, which is the
+    // case this exists for: it cannot say which commit it is serving.
+    health: () => null,
+    lastSeen: { surfaces: { '/': new Date(Date.now() - 30 * 60000).toISOString() } },
+    restart: () => ({ ok: true, code: 'restarted', serving: 'newsha', reason: 'the dashboard answered on http://127.0.0.1:7326/ serving `newsha`' }),
+  })
+  const c = rec.consumers[0]
+  assert.equal(c.was, null, 'an old build genuinely cannot say, and the record must not invent it')
+  assert.match(c.reason, /replacing one up 18h/)
+  assert.equal(c.previous.pid, 87091)
 })
