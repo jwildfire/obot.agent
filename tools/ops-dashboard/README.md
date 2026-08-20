@@ -74,6 +74,19 @@ One queue, three sources:
 
 In that order, his (2026-08-15): "RCs first. then decisions, then config items."
 
+Below all three, and asking nothing of him, sit the two read-only panels:
+
+- **Next ten** — what gets picked up next, rank declared and everything else derived
+  (jwildfire/obot.roadmap#278).
+- **Delivered** — what reached him. One completion per row, and the row is the SENTENCE
+  saying what he can now do that he could not before, with the issue number as small
+  print under it. Written by whoever closed the requirement, through
+  `tools/landing-log`, which refuses a summary that is a list of issue numbers. Under it,
+  only the things he asked for that have *not* been found where they were meant to land,
+  each with its age and what the fetch actually returned — `unchecked` is rendered
+  differently from `not-landed`, because a landing nobody could look at is not a landing
+  that failed (jwildfire/obot.roadmap#257).
+
 
 Clicking a decision opens the artifact in the main area and the answer controls in
 the sidebar. **Adopt all is one click** — it is repeatedly his complete answer, and

@@ -35,6 +35,8 @@ import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
  * stops: "first look" is not "nothing changed", and "unknown" gives the reason
  * rather than a plausible-looking window (jwildfire/obot.roadmap#205).
  */
+export { deliveredPanel };
+
 export function lastLookTitle(v) {
   if (!v || v.state === 'unknown') {
     return `When you last opened this page is unknown${v?.why ? ` — ${v.why}` : ''}. Nothing is being guessed in its place.`;
@@ -334,6 +336,84 @@ const collapsed = (title, rows, describe) => (rows.length ? `<details class="q-f
  * sentence with the age of what is actually on screen — never a silent substitution of
  * old for current.
  */
+/**
+ * What reached him — the delivered half of his page (jwildfire/obot.roadmap#257).
+ *
+ * @jwildfire, 2026-08-20, after five requirements closed inside twenty-five minutes
+ * and nothing told him: "I like the summary of the closed items in the top 10, but
+ * make them a plain language executive summary instead of a bunch of issue numbers.
+ * Make sure that those are passed to you properly (and passed to me) whenever they
+ * are created."
+ *
+ * THE SENTENCE IS THE DELIVERABLE AND THE NUMBER IS A CITATION. That ordering is the
+ * requirement, not a rendering preference: "#251, #256 and #264 closed" is the exact
+ * failure being named, and "When the system says it stopped a runaway agent, it now
+ * has to prove the process died" is what it should have said. So the summary is the
+ * row and the reference is small print under it, never the other way round.
+ *
+ * IT IS NOT A FOURTH BUCKET. Like the ranked head it sits under, this is read-only,
+ * it has no control of any kind, and it asks him for nothing — his queue holds three
+ * things that need him and that rule is jwildfire/obot.roadmap#220. What it adds is
+ * the one thing the three buckets never carried: what he GOT.
+ *
+ * TWO HALVES, BECAUSE A PROMISE AND A FINISH FAIL DIFFERENTLY. Above, what completed
+ * and the sentence for each. Below, only what he asked for that has NOT been found
+ * where he was told to look, with its age — a list of promises everything is fine
+ * with is a list nobody reads, and the org chart went missing for a day precisely
+ * because nothing measured the distance between "being drafted" and "on his screen".
+ */
+const deliveredPanel = (d, now = new Date()) => {
+  if (!d) return '';
+  const head = (n) => `<h2 class="q-h">Delivered <span class="q-n">${n}</span></h2>`;
+  const wrap = (body, n) => `<section class="dlv" aria-label="What reached you, read only">
+${head(n)}
+${body}
+</section>`;
+
+  if (!d.read) {
+    return wrap(`<p class="q-unread">${esc(nothingYet('What reached you could not be read',
+      `${d.why || 'the landing record did not answer'}; this is not an empty day, it is an unread one`))}</p>`, UNMEASURED);
+  }
+  if (!d.armed) {
+    return wrap(`<p class="q-empty">${esc(nothingYet('Nothing has been written on this machine yet',
+      'a completion is recorded the moment a requirement closes, with one sentence saying what you can now do that you could not before; nothing has recorded one here'))}</p>`, UNMEASURED);
+  }
+
+  const shipped = (d.closures ?? []).filter((c) => String(c.summary ?? '').trim());
+  const owed = (d.promises ?? []).filter((p) => p.state !== 'landed');
+  const rows = shipped.length
+    ? `<ul class="dlv-list">${shipped.map(deliveredRow).join('')}</ul>`
+    : '<p class="q-empty">Nothing has completed yet today.</p>';
+  const asks = owed.length
+    ? `<p class="q-aside">Asked for and not yet found where it was meant to land</p>
+<ul class="dlv-list">${owed.map((p) => promiseRow(p, now)).join('')}</ul>`
+    : '';
+  return wrap(`${rows}
+${asks}
+<p class="q-aside">Read-only. Every line was written by whoever finished the work, at the moment it closed.</p>`, shipped.length);
+};
+
+/** One completion. The sentence, then the citation — in that order, always. */
+const deliveredRow = (c) => `<li class="dlv-row"><span class="dlv-line">${esc(c.summary)}</span>`
+  + `<span class="dlv-cite">${esc(c.issue ?? '')}${c.worker ? ` &middot; ${esc(c.worker)}` : ''}</span></li>`;
+
+/**
+ * One outstanding ask, in his words, with what the fetch actually found.
+ *
+ * `unchecked` gets its own sentence and its own colour. A landing nobody could look
+ * at is not a landing that failed, and rendering the two the same way is the collapse
+ * this workspace has already paid for twice (obot.agent#215).
+ */
+const promiseRow = (p, now) => {
+  const age = ageWords(Math.round((p.ageHours ?? 0) * 60));
+  const found = p.state === 'unchecked'
+    ? `has not been checked &mdash; ${esc(p.detail || 'nothing has looked')}`
+    : `not there &mdash; ${esc(p.detail || 'the fetch found nothing')}`;
+  return `<li class="dlv-row dlv-owed"><span class="dlv-ask">${esc(p.asked ?? '')}</span>`
+    + `<span class="dlv-why ${p.state === 'unchecked' ? 'unknown' : 'gone'}">${found}</span>`
+    + `<span class="dlv-cite">${esc(p.landing ?? '')}${age ? ` &middot; asked ${esc(age)} ago` : ''}</span></li>`;
+};
+
 const rankHeadPanel = (m) => {
   if (!m) return '';
   const head = `<h2 class="q-h">Next ten <span class="q-n">${m.declaredRead ? m.items.length : UNMEASURED}</span></h2>`;
@@ -623,6 +703,28 @@ const DASHBOARD_CSS = `
                background:var(--paper); color:var(--accent); cursor:pointer; font-family:var(--mono); }
   .overbudget { font-size:0.7rem; color:var(--warn); border:1px solid var(--warn); border-radius:6px;
                 padding:0.2rem 0.4rem; margin:0 0 0.5rem; }
+
+  /* What reached him (jwildfire/obot.roadmap#257). Every rule here wraps: the rail
+     has no min-width:0, so one unbreakable token in an agent-written sentence widens
+     the whole 220px track and pushes the page sideways at 390px. white-space:nowrap
+     is banned in this block for the same reason and a test asserts its absence. */
+  .dlv { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.5rem; }
+  .dlv-list { list-style:none; margin:0 0 0.4rem; padding:0; }
+  .dlv-row { display:flex; flex-direction:column; gap:0.05rem; min-width:0;
+             padding:0.3rem 0 0.35rem 0.45rem; border-left:3px solid var(--good); margin-bottom:0.3rem; }
+  .dlv-row.dlv-owed { border-left-color:var(--warn); }
+  /* The sentence. It is the deliverable, so it gets the row's weight and it is never
+     clamped: a summary cut at two lines is a summary that stops before the point. */
+  .dlv-line { font-size:0.8rem; line-height:1.35; color:var(--ink); overflow-wrap:anywhere; }
+  .dlv-ask { font-size:0.8rem; line-height:1.35; color:var(--ink); overflow-wrap:anywhere; }
+  /* The citation, and it is small print under the sentence by design — "#251, #256
+     and #264 closed" is the failure this panel was built against. */
+  .dlv-cite { font-size:0.64rem; font-family:var(--mono); color:var(--faint); overflow-wrap:anywhere; }
+  /* Two states, two colours, because a landing nobody could check must not look like
+     a landing that failed (obot.agent#215). */
+  .dlv-why { font-size:0.66rem; color:var(--muted); overflow-wrap:anywhere; }
+  .dlv-why.gone { color:var(--crit); }
+  .dlv-why.unknown { color:var(--warn); }
 
   /* The installation qualification, in the main pane. */
   .iq { padding:0.9rem 1rem; overflow-y:auto; max-width:60rem; }
@@ -1091,7 +1193,7 @@ const integrityBanner = (integrity) => (!integrity || integrity.intact ? '' : `<
   Restart the dashboard and, if it comes back, treat it as a repeat of
   <a href="https://github.com/jwildfire/obot.agent/issues/206">#206</a>.</p>`);
 
-export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, integrity = null, rankHead = null, workspace, hub, generated = new Date() }) {
+export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, integrity = null, rankHead = null, delivered = null, workspace, hub, generated = new Date() }) {
   const critical = queue.critical ?? [];
   const snoozed = queue.snoozed ?? [];
   const cleared = queue.cleared ?? [];
@@ -1225,6 +1327,7 @@ ${integrityBanner(integrity)}
     ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
     ${collapsed('Cleared', cleared, (it) => (it.triage?.action === 'done' ? 'marked done' : 'dismissed'))}
     ${rankHeadPanel(rankHead)}
+    ${deliveredPanel(delivered, generated)}
   </nav>
 
   <main class="main" id="main">

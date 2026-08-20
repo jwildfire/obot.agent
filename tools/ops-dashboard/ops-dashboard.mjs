@@ -53,6 +53,7 @@ import { buildSessionFeed } from './lib/feed.mjs';
 import { parseDeliveryJournal } from './lib/log-view.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
 import { rankPanel } from './lib/rankhead.mjs';
+import { collectDelivered } from './lib/delivered.mjs';
 import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
@@ -283,6 +284,11 @@ async function page(args, lastLook = null) {
     // readFileSync; the state beside it comes from a cache refreshed behind the page,
     // so an unauthenticated `gh` costs the derivation and never the order.
     rankHead: rankPanel(args.workspace),
+    // What reached him (jwildfire/obot.roadmap#257). Read inline like the declared
+    // order above it and for the same reason: it is a local file through the tool
+    // that owns it, and putting the delivery lane behind a refresh interval would be
+    // the failure being fixed wearing a different hat.
+    delivered: collectDelivered(args.workspace),
     workspace: args.workspace,
     hub: args.hub,
   });
