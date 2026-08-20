@@ -199,3 +199,28 @@ test('an unreadable decision registry refuses to route rather than routing to no
   assert.equal(r.kind, 'unrouted');
   assert.equal(pendingAnswers(b.ws).length, 0);
 });
+
+test('a dry run writes nothing at all, on every one of the four destinations', () => {
+  const b = bed();
+  for (const said of [
+    'branch protections, option A',
+    'answer: fits nothing whatsoever',
+    'a goals page in the hub would be good',
+    'private: something',
+  ]) {
+    const r = routeSpoken(said, { ...opts(b), dryRun: true });
+    assert.ok(r.kind);
+  }
+  assert.equal(pendingAnswers(b.ws, { hub: b.hub }).length, 0);
+  assert.equal(readUnrouted(b.ws, { all: true }).items.length, 0);
+  assert.equal(fs.existsSync(path.join(b.ws, '.claude', 'ops', 'answers')), false,
+    'and it does not even bring the store into existence');
+});
+
+test('a dry run still says what the verdict would be', () => {
+  const b = bed();
+  const r = routeSpoken('branch protections, option A', { ...opts(b), dryRun: true });
+  assert.equal(r.kind, 'answer');
+  assert.equal(r.decision.id, 'D0022');
+  assert.equal(r.verdict, 'words-only', 'no artifact page here, so no option is claimed');
+});

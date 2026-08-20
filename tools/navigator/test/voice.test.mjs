@@ -59,3 +59,9 @@ test('the sweep renders the section it is handed, and says so when it was handed
   assert.ok(without.split('\n').find((l) => ALARM_RE.test(l) && /VOICE/.test(l)),
     'and it is an alarm, because "no reading" is not "nothing was said"')
 })
+
+test('a section rendered by hand reports the lane without claiming a poll it did not do', () => {
+  const md = unroutedSection([], { now: NOW, lane: { armed: true, read: null } })
+  assert.doesNotMatch(md, ALARM_RE)
+  assert.match(md, /did not poll/i)
+})

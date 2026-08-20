@@ -39,7 +39,6 @@
 // verbatim words. Nothing here commits, publishes, or posts anything — and `poll`
 // deliberately leaves ideas and `private:` items untouched for the lane that has
 // always filed them, so that an answer of his can never reach the public ideas board.
-import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -106,10 +105,10 @@ function main() {
 
   if (cmd === 'route' || cmd === 'answer') {
     const text = needText();
-    // `route` is the dry run: it must not write, so it gets a throwaway workspace.
-    const workspace = cmd === 'route' ? fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'voice-dry-')) : WS;
+    // `route` is the dry run and writes nothing anywhere — a preview that records an
+    // answer of his is not a preview.
     const snapshot = readQueue(WS).queue;
-    const r = routeSpoken(text, { workspace, hub: HUB, queue: snapshot });
+    const r = routeSpoken(text, { workspace: WS, hub: HUB, queue: snapshot, dryRun: cmd === 'route' });
     if (cmd === 'answer' && value('--reminder') && (r.kind === 'answer' || r.kind === 'unrouted')) {
       // Stamp the item he dictated, so the list itself is the receipt.
       const id = value('--reminder');
@@ -166,7 +165,12 @@ function main() {
     return out(`resolved ${rec.id} — kept, not deleted.`);
   }
 
-  if (cmd === 'section') return out(unroutedSection(readUnrouted(WS).items).trimEnd());
+  if (cmd === 'section') {
+    // Rendered by hand, so it reports the lane state without claiming a poll it did
+    // not do. A section that is silent about a lane nobody polls is the failure this
+    // whole tool exists to make visible.
+    return out(unroutedSection(readUnrouted(WS).items, { lane: { armed: isArmed(WS), read: null } }).trimEnd());
+  }
 
   if (cmd === 'arm' || cmd === 'disarm') {
     setArmed(WS, cmd === 'arm');

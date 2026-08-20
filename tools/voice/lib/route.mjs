@@ -136,7 +136,7 @@ export function resolveUnrouted(workspace, id, { by = 'an agent', note = null, n
  * are handed straight back to the lane that already handles them.
  */
 export function routeSpoken(text, {
-  workspace, hub, queue, now = new Date(), channel = VOICE_CHANNEL, by = VOICE_BY,
+  workspace, hub, queue, now = new Date(), channel = VOICE_CHANNEL, by = VOICE_BY, dryRun = false,
 } = {}) {
   const raw = String(text ?? '');
   if (PRIVATE_RE.test(raw)) return { kind: 'private', text: raw, by };
@@ -149,7 +149,7 @@ export function routeSpoken(text, {
     const reason = `the open decision list could not be read, so nothing here can say what this is an answer to — ${live.why}`;
     return {
       kind: 'unrouted', reasonKind: 'registry-unreadable', reason, by,
-      item: recordUnrouted(workspace, { text: raw, reason, reasonKind: 'registry-unreadable', now }),
+      item: dryRun ? null : recordUnrouted(workspace, { text: raw, reason, reasonKind: 'registry-unreadable', now }),
     };
   }
 
@@ -161,9 +161,11 @@ export function routeSpoken(text, {
     const verdict = verdictFrom(m.rest, art.options);
     // His whole sentence is the answer, subject and all. Nothing is trimmed into a
     // tidier one: #265 is explicit that what is recorded is what he said.
-    const { record, duplicate } = recordAnswer(workspace, {
-      artifact: m.decision.slug, verdict, words: raw.trim(), by, channel,
-    }, { hub, now });
+    // `dryRun` writes nothing at all. It is how `voice-decisions route` shows what
+    // WOULD happen — a preview that records an answer of his is not a preview.
+    const { record, duplicate } = dryRun
+      ? { record: { verdict: verdict || 'words-only', words: raw.trim() }, duplicate: false }
+      : recordAnswer(workspace, { artifact: m.decision.slug, verdict, words: raw.trim(), by, channel }, { hub, now });
     return {
       kind: 'answer', by, channel, decision: m.decision, matchedBy: m.by, confidence: m.confidence,
       verdict: record.verdict, rest: m.rest, record, duplicate,
@@ -174,7 +176,7 @@ export function routeSpoken(text, {
     const reasonKind = m.kind === 'ambiguous' ? 'ambiguous' : 'unsure';
     return {
       kind: 'unrouted', reasonKind, reason: m.reason, candidates: m.candidates ?? [], by,
-      item: recordUnrouted(workspace, { text: raw, reason: m.reason, reasonKind, candidates: m.candidates ?? [], now }),
+      item: dryRun ? null : recordUnrouted(workspace, { text: raw, reason: m.reason, reasonKind, candidates: m.candidates ?? [], now }),
     };
   }
 
@@ -186,7 +188,7 @@ export function routeSpoken(text, {
       : 'you said this was an answer and there are no open decisions right now, so there was nothing for it to answer';
     return {
       kind: 'unrouted', reasonKind: 'declared-no-match', reason, candidates: live.decisions, by,
-      item: recordUnrouted(workspace, { text: raw, reason, reasonKind: 'declared-no-match', candidates: live.decisions, now }),
+      item: dryRun ? null : recordUnrouted(workspace, { text: raw, reason, reasonKind: 'declared-no-match', candidates: live.decisions, now }),
     };
   }
   return { kind: 'idea', text: raw, best: m.best ?? 0, by };
@@ -221,6 +223,10 @@ export function unroutedSection(items = [], { now = new Date(), lane = null } = 
       lines.push('voice: the car lane is NOT ARMED on this machine, so nothing polls the Reminders list and '
         + 'nothing he dictates can land. Arm it with `obot.agent/tools/voice-decisions arm`. '
         + 'It is not an alarm: it has never been armed, and the lane still works run by hand.');
+    } else if (lane.read === null || lane.read === undefined) {
+      // Armed, but this particular reading did not poll — the CLI renders the section
+      // by hand and must not claim a read it did not do.
+      lines.push('voice: armed. This reading did not poll the Reminders list; the five-minute sweep does that.');
     } else if (lane.read === false) {
       lines.push(`voice: **VOICE LANE BROKEN** — the Reminders list could not be read this sweep`
         + `${lane.why ? ` (${lane.why})` : ''}. Nothing he dictated has been routed, and this is not a quiet lane — `
