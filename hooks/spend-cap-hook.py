@@ -10,14 +10,10 @@ typing `claude --bg ...` into a Bash call, which is how every background sibling
 created. Only a `PreToolUse` hook sees that, so this is the piece that makes the cap
 independent of an agent remembering to check.
 
-NOT INSTALLED BY THIS PULL REQUEST. Registering a hook means editing `hooks/`, which
-is a policy carve-out path, so it is @jwildfire's to approve. When he does, it is one
-row in `hooks/install.sh`:
-
-    "spend-cap-hook:PreToolUse:Bash"
-
-(the file will need to move to hooks/ at that point; it lives here so this change
-stays on the standard lane).
+REGISTERED BY THIS PULL REQUEST, which is why this one is on the ATTESTED lane:
+`hooks/` is a policy carve-out path and registering a guard that can deny a spawn
+is @jwildfire's call, not an agent's. It is one row in `hooks/install.sh`, and the
+hook does not take effect on this machine until `hooks/install.sh` is run.
 
 Contract, matching the merge gate and the attribution guard:
   - stdout: one JSON object with hookSpecificOutput.permissionDecision = "deny",
