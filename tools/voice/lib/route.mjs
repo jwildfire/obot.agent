@@ -38,6 +38,7 @@ import { ensureStore, SENTINEL } from '../../ops-dashboard/lib/store.mjs';
 import { readArtifact, verdictFrom } from './artifact.mjs';
 import { buildQueue, readQueue, voiceDir } from './handles.mjs';
 import { matchSpoken, normalizeSpoken } from './match.mjs';
+import { isPrivate, keepPrivate } from './private.mjs';
 
 /** The channel stamped on the record, so an answer says where it came from. */
 export const VOICE_CHANNEL = 'voice (dictated)';
@@ -47,7 +48,6 @@ export const VOICE_BY = 'voice-router';
 export const UNROUTED_OVERDUE_MIN = 30;
 
 const unroutedDir = (workspace) => path.join(voiceDir(workspace), 'unrouted');
-const PRIVATE_RE = /^\s*private\s*:/i;
 const key = (text) => crypto.createHash('sha256')
   .update(normalizeSpoken(text).tokens.join(' ')).digest('hex').slice(0, 12);
 
@@ -139,7 +139,12 @@ export function routeSpoken(text, {
   workspace, hub, queue, now = new Date(), channel = VOICE_CHANNEL, by = VOICE_BY, dryRun = false,
 } = {}) {
   const raw = String(text ?? '');
-  if (PRIVATE_RE.test(raw)) return { kind: 'private', text: raw, by };
+  // One rule, and the write happens here rather than in a caller that spelled the rule
+  // differently. `kept` used to be a counter incremented next to no write at all.
+  if (isPrivate(raw)) {
+    const kept = dryRun ? { written: true, file: null, why: '' } : keepPrivate(workspace, raw, { now });
+    return { kind: 'private', text: raw, by, kept: kept.written, file: kept.file, why: kept.why };
+  }
 
   const live = buildQueue(hub, { now });
   if (!live.read) {
@@ -147,6 +152,10 @@ export function routeSpoken(text, {
     // machine cannot see the open decisions" are indistinguishable — and one of them
     // is an answer of his. Refusing is the only honest move (obot.agent#206/#215).
     const reason = `the open decision list could not be read, so nothing here can say what this is an answer to — ${live.why}`;
+    // Recorded only when a caller is handling one sentence deliberately. The scheduled
+    // poll checks `reasonKind` and leaves the item alone instead, because branding every
+    // idea on the list "could not route" is this machine's fault being written onto his
+    // notes.
     return {
       kind: 'unrouted', reasonKind: 'registry-unreadable', reason, by,
       item: dryRun ? null : recordUnrouted(workspace, { text: raw, reason, reasonKind: 'registry-unreadable', now }),
@@ -177,6 +186,23 @@ export function routeSpoken(text, {
     return {
       kind: 'unrouted', reasonKind, reason: m.reason, candidates: m.candidates ?? [], by,
       item: dryRun ? null : recordUnrouted(workspace, { text: raw, reason: m.reason, reasonKind, candidates: m.candidates ?? [], now }),
+    };
+  }
+
+  // Before anything becomes an idea: does it name a decision he answered RECENTLY?
+  // That is an answer arriving late — a correction, or a second thought — and with the
+  // decision no longer open there is nothing for it to match. Filing it as an idea
+  // publishes it, completes the reminder, and leaves him with the narration's promise
+  // that an unmatched sentence "stays on the list" being false on exactly the path he
+  // is most likely to take.
+  const late = matchSpoken(raw, { ...live, decisions: live.recent ?? [] }, { snapshot: null, now });
+  if (late.kind === 'match') {
+    const reason = `"${late.decision.handle}" was already decided${late.decision.decidedOn ? ` on ${late.decision.decidedOn}` : ''}, `
+      + 'so there is no open question for this to be an answer to. It is kept exactly as you said it, '
+      + 'because a second thought about a decision is not an idea for the queue.';
+    return {
+      kind: 'unrouted', reasonKind: 'already-decided', reason, candidates: [late.decision], by,
+      item: dryRun ? null : recordUnrouted(workspace, { text: raw, reason, reasonKind: 'already-decided', candidates: [late.decision], now }),
     };
   }
 
@@ -211,8 +237,17 @@ const ago = (min) => (min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${String(m
  * failure he cannot act on without seeing what was heard — so it is on the row,
  * clipped, in a file that lives under `.claude/` and is never committed.
  */
-export function unroutedSection(items = [], { now = new Date(), lane = null } = {}) {
+export function unroutedSection(items = [], { now = new Date(), lane = null, read = true, why = '' } = {}) {
   const lines = ['## Voice answers that reached no decision — his words, kept whole', ''];
+
+  // A store that could not be opened is not a store with nothing in it. This section
+  // used to be handed `.items` alone, so an unreadable directory rendered the clean
+  // line — a positive claim about his dictated sentences, made from a failed read.
+  if (read === false) {
+    lines.push(`voice: **UNROUTED STORE READING BROKEN** — the sentences that reached no decision could not be read`
+      + `${why ? ` (${why})` : ''}. Nothing here says any landed, and nothing here says none were lost.`);
+    return `${lines.join('\n')}\n`;
+  }
 
   // THE LANE ITSELF IS A FINDING. A section that only ever reports unrouted sentences
   // is silent in exactly two situations that look identical from here — nothing was
@@ -231,8 +266,28 @@ export function unroutedSection(items = [], { now = new Date(), lane = null } = 
       lines.push(`voice: **VOICE LANE BROKEN** — the Reminders list could not be read this sweep`
         + `${lane.why ? ` (${lane.why})` : ''}. Nothing he dictated has been routed, and this is not a quiet lane — `
         + 'it is a lane nobody can hear.');
+    } else if (lane.queueRead === false) {
+      // The snapshot is what the vocabulary and every ordinal are resolved against. A
+      // file that exists and cannot be parsed is a different fault from one that was
+      // never written, and reporting the second for the first sends whoever reads it
+      // to produce an episode that already exists.
+      lines.push(`voice: **VOICE QUEUE READING BROKEN** — the queue snapshot he was last read could not be parsed`
+        + `${lane.queueWhy ? ` (${lane.queueWhy})` : ''}. Nothing dictated can be matched to a position, and the `
+        + 'vocabulary this lane matches against is unknown.');
     } else {
       lines.push(`voice: armed and read${lane.routed ? `, ${lane.routed} answer(s) routed this sweep` : ', nothing new dictated'}.`);
+    }
+    // Left alone because they pre-date the queue he was read. Counted rather than
+    // silent: a growing number here means the ideas lane is not draining the list.
+    if (lane.stale) {
+      lines.push(`  ${lane.stale} item(s) on the list are older than the queue he was last read, so they were left alone `
+        + 'rather than answered against a list that did not exist when he said them. They are ideas waiting for `reminders-to-ideas`.');
+    }
+    // And the one that must shout: the stamp is the mechanism that stops an item being
+    // read again, so a failed one repeats every sweep with nothing saying why.
+    if (lane.unstamped) {
+      lines.push(`  **VOICE RECEIPT FAILED** — ${lane.unstamped} receipt(s) could not be written back to the reminder. `
+        + 'The answer is recorded, but the item was not stamped, so he has no confirmation and the sweep will read it again.');
     }
     lines.push('');
   }

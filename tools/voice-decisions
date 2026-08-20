@@ -109,6 +109,16 @@ function main() {
     // answer of his is not a preview.
     const snapshot = readQueue(WS).queue;
     const r = routeSpoken(text, { workspace: WS, hub: HUB, queue: snapshot, dryRun: cmd === 'route' });
+    // A private note is completed once it is safely on disk, and only then: if the
+    // write was refused there is nothing to show for it and the reminder must stay.
+    if (cmd === 'answer' && value('--reminder') && r.kind === 'private' && r.kept) {
+      const id = value('--reminder');
+      osascriptRunner(`tell application "Reminders" to set completed of (first reminder whose id is "${asQuote(id)}") to true`);
+    }
+    if (cmd === 'answer' && r.kind === 'private' && !r.kept) {
+      process.stderr.write(`private note NOT kept: ${r.why}\n`);
+      if (flag('--kind')) { out('ROUTER-REFUSED'); return undefined; }
+    }
     if (cmd === 'answer' && value('--reminder') && (r.kind === 'answer' || r.kind === 'unrouted')) {
       // Stamp the item he dictated, so the list itself is the receipt.
       const id = value('--reminder');
@@ -169,7 +179,10 @@ function main() {
     // Rendered by hand, so it reports the lane state without claiming a poll it did
     // not do. A section that is silent about a lane nobody polls is the failure this
     // whole tool exists to make visible.
-    return out(unroutedSection(readUnrouted(WS).items, { lane: { armed: isArmed(WS), read: null } }).trimEnd());
+    const store = readUnrouted(WS);
+    return out(unroutedSection(store.items, {
+      read: store.read, why: store.why, lane: { armed: isArmed(WS), read: null },
+    }).trimEnd());
   }
 
   if (cmd === 'arm' || cmd === 'disarm') {

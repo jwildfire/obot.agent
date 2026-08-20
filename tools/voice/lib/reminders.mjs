@@ -33,6 +33,7 @@
 // read, and a failed read is never rendered as an empty inbox.
 import { spawnSync } from 'node:child_process';
 
+import { buildQueue } from './handles.mjs';
 import { routeSpoken } from './route.mjs';
 
 export const LIST = 'obot';
@@ -78,7 +79,11 @@ tell application "Reminders"
     try
       if body of r is not missing value then set rBody to body of r
     end try
-    set out to out & (id of r) & fieldSep & (name of r) & fieldSep & rBody & recSep
+    set rMade to ""
+    try
+      if creation date of r is not missing value then set rMade to (creation date of r) as string
+    end try
+    set out to out & (id of r) & fieldSep & (name of r) & fieldSep & rBody & fieldSep & rMade & recSep
   end repeat
   return out
 end tell`;
@@ -88,8 +93,15 @@ export function parseRecords(raw) {
   return String(raw ?? '').split(RS)
     .map((rec) => rec.split(FS))
     .filter((f) => f[0] && f[0].trim())
-    .map(([id, name = '', body = '']) => ({
-      id, name, body, text: body ? `${name}\n\n${body}` : name,
+    .map(([id, name = '', body = '', made = '']) => ({
+      id,
+      name,
+      body,
+      text: body ? `${name}\n\n${body}` : name,
+      // AppleScript hands back a locale string ("Thursday, August 20, 2026 at 2:30:00 PM").
+      // An unparseable or absent one is left null and read as "unknown", which the poll
+      // treats as stale rather than guessing.
+      created: made && Number.isFinite(Date.parse(made)) ? new Date(made).toISOString() : (made || null),
     }));
 }
 
@@ -130,25 +142,69 @@ const oneLine = (s, n = 140) => {
 export function pollReminders({
   workspace, hub, queue, list = LIST, run = osascriptRunner, now = new Date(), stamp = true,
 } = {}) {
+  const empty = { routed: [], unrouted: [], ideas: [], privates: [], stale: [], unstamped: [], blocked: [] };
   const pending = listPending({ list, run });
-  if (!pending.read) return { routed: [], unrouted: [], ideas: [], privates: [], read: false, why: pending.why };
+  if (!pending.read) return { ...empty, read: false, why: pending.why };
 
-  const out = { routed: [], unrouted: [], ideas: [], privates: [], read: true, why: '' };
+  // AN ANSWER HAS TO POST-DATE THE LIST IT ANSWERS. This poll re-reads every
+  // uncompleted item every five minutes and deliberately leaves ideas alone, and
+  // nothing on this machine drains them — so an idea sits there indefinitely while the
+  // open decisions change underneath it. Reproduced: an idea about the car-voice lane
+  // sat for two days, a decision named "car voice" was then published, and the next
+  // sweep recorded his QUESTION as his ANSWER to it, stamped it and completed it. Every
+  // other guard in the matcher reasons about one sentence against one queue at one
+  // instant; nothing bounded how old the sentence was, and the sweep supplied unlimited
+  // retries. This is that bound.
+  // Checked BEFORE anything is routed. When this machine cannot read the open
+  // decisions, nothing can be said about any item on the list — and routing them one by
+  // one branded every ordinary idea "⚠️ could not route" and recorded it, writing a
+  // fault of the machine onto his notes and stranding them there permanently.
+  const live = buildQueue(hub, { now });
+  if (!live.read) {
+    return {
+      ...empty,
+      read: true,
+      why: `the open decision list could not be read, so nothing on the list was routed — ${live.why}`,
+      blocked: pending.items.map((i) => ({ reminderId: i.id, heard: i.text, reason: live.why })),
+    };
+  }
+
+  const readAt = queue?.at ? Date.parse(queue.at) : null;
+  const out = {
+    ...empty,
+    read: true,
+    why: readAt ? '' : 'no decision queue has ever been read to him on this machine, so nothing on the list can be an answer to one',
+  };
+
   for (const item of pending.items) {
-    const r = routeSpoken(item.text, { workspace, hub, queue, now });
-    const row = { ...r, reminderId: item.id, heard: item.text };
+    const made = item.created ? Date.parse(item.created) : NaN;
+    const fresh = Boolean(readAt) && Number.isFinite(made) && made >= readAt;
+    const r = routeSpoken(item.text, { workspace, hub, queue, now, dryRun: !fresh });
+    const row = { ...r, reminderId: item.id, heard: item.text, created: item.created ?? null };
+
+    // Older than the list, or of unknown age: left exactly as it is. Not routed, not
+    // stamped, not counted as anything but what it is.
+    if (!fresh && (r.kind === 'answer' || r.kind === 'unrouted')) { out.stale.push(row); continue; }
     if (r.kind === 'private') { out.privates.push(row); continue; }
     if (r.kind === 'idea') { out.ideas.push(row); continue; }
+
+    // The rename and the completion ARE the mechanism that stops an item being read
+    // again, so a write that fails while the read succeeds puts the same sentence back
+    // in front of the router on every sweep after this one. The result is checked and
+    // reported rather than discarded.
+    const writes = [];
     if (r.kind === 'answer') {
       if (stamp) {
-        run(setName(item.id, `${RECEIPT_DONE} ${r.decision.handle} - recorded: ${oneLine(item.text)}`));
-        run(setDone(item.id));
+        writes.push(run(setName(item.id, `${RECEIPT_DONE} ${r.decision.handle} - recorded: ${oneLine(item.text)}`)));
+        writes.push(run(setDone(item.id)));
       }
       out.routed.push(row);
-      continue;
+    } else {
+      if (stamp) writes.push(run(setName(item.id, `${RECEIPT_HELD} could not route: ${oneLine(item.text)}`)));
+      out.unrouted.push(row);
     }
-    if (stamp) run(setName(item.id, `${RECEIPT_HELD} could not route: ${oneLine(item.text)}`));
-    out.unrouted.push(row);
+    const failed = writes.find((w) => w && w.ok === false);
+    if (failed) out.unstamped.push({ reminderId: item.id, kind: r.kind, why: failed.why || 'the write failed with no reason given' });
   }
   return out;
 }

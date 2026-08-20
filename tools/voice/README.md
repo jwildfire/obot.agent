@@ -79,6 +79,26 @@ So every close call is refused, and refusing is loud:
   and it needs no screen. Nothing new is ever added to that list — it is his voice-note
   inbox, and stamping a note he wrote is not the same as filing into it.
 
+## What a review found, and what each fix is
+
+The lane was reviewed adversarially before anyone armed it, with every finding required
+to be reproduced rather than argued. Four of them would have answered the wrong decision
+or published one of his answers, so the guards that came out of them are the load-bearing
+part of this module and each has a test named after the sentence that broke it:
+
+| what broke it | what it did | the rule now |
+|---|---|---|
+| "No, two weeks is plenty" | `no` was a position marker, so a refusal was filed as an answer to decision two at full confidence | markers are words nobody starts an answer with |
+| "Number one priority: leave branch protections alone" | the position was consulted before any name was scored | a position and a name that disagree is the ambiguous case |
+| "note format", "decision log" | the first word was stripped as filler, halving the score of the decision's own name | a filler word that is a handle's first word is never stripped |
+| "number eleven" | there was no word for the eleventh position, so it went to the ideas board | any position, in words or digits |
+| an idea sitting on the list for two days | a decision published later matched it and it became his answer to it | an answer must post-date the queue he was read |
+| a sentence about a decision decided yesterday | nothing open, so it was an idea, so it was published | recently decided decisions match too, as UNROUTED |
+| a registry whose shape changed | read as "he has decided everything", so every answer was an idea | a missing `artifacts` array is a failed read |
+| a rename that failed | the receipt never happened and the item repeated every five minutes | write results are checked and reported |
+| an unreadable unrouted store | rendered the same line as a clean lane | the read flag is carried into the section |
+| "Private: …" with a capital P | two rules disagreed; counted as kept, written nowhere | one rule, beside the routing, refusing a checkout |
+
 ## Matching, and why it is loose
 
 Transcription mangles words, so a handle that has to be said perfectly is a handle he
