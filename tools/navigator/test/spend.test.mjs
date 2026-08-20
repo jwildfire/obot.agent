@@ -470,10 +470,8 @@ test('--allow-unknown is the only way past an unknown reading, and it is explici
 
 // ------------------------------------------------------- the dispatcher honours it
 
-test('obot-auto refuses to launch past the cap', () => {
-  // The end of the chain: not "the module returns stop" but "the thing that starts
-  // an autonomous session will not start one". Run with --preflight-only, which
-  // spawns nothing.
+/** Run obot-auto --preflight-only (which spawns nothing) against a fixture week. */
+function preflight(byDay, now) {
   const dir = tmp()
   fs.mkdirSync(path.join(dir, '.claude'), { recursive: true })
   const cfg = path.join(dir, 'spend.json')
@@ -482,18 +480,37 @@ test('obot-auto refuses to launch past the cap', () => {
     ...process.env,
     OBOT_WORKSPACE: dir,
     OBOT_SPEND_CONFIG: cfg,
-    OBOT_SPEND_USAGE: usageFile(REAL_WEEK),
-    OBOT_SPEND_NOW: '2026-08-19T01:00:00Z',
+    OBOT_SPEND_USAGE: usageFile(byDay),
+    OBOT_SPEND_NOW: now,
     OBOT_SPEND_NO_REFRESH: '1',
     OBOT_SPEND_METER: path.join(dir, 'no-meter.json'),
   }
-  let code = 0; let err = ''
   try {
-    execFileSync(path.join(REPO, 'scripts', 'obot-auto'), ['--preflight-only'],
-                 { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] })
-  } catch (e) { code = e.status; err = e.stderr || '' }
-  assert.notEqual(code, 0, 'a breached cap must stop the launcher, not warn it')
-  assert.match(err, /spend/i)
+    const out = execFileSync(path.join(REPO, 'scripts', 'obot-auto'), ['--preflight-only'],
+                             { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] })
+    return { code: 0, out, err: '' }
+  } catch (e) { return { code: e.status, out: e.stdout || '', err: e.stderr || '' } }
+}
+
+test('obot-auto refuses to launch past the cap', () => {
+  // The end of the chain: not "the module returns stop" but "the thing that starts
+  // an autonomous session will not start one".
+  const r = preflight(REAL_WEEK, '2026-08-19T01:00:00Z')
+  assert.notEqual(r.code, 0, 'a breached cap must stop the launcher, not warn it')
+  // Named, not merely /spend/. This assertion used to be loose enough to pass on the
+  // WRONG failure: the check sat fourth in the pre-flight, CI has no `claude` on
+  // PATH, and the launcher was dying at "claude CLI not on PATH" long before it
+  // reached the cap. A check that cannot fail is not a check, and neither is one
+  // that cannot tell you which thing failed.
+  assert.match(r.err, /spend cap breached/i)
+})
+
+test('obot-auto is not stopped by the spend check when the cap is clear', () => {
+  // The other half, and the reason the assertion above can be trusted: under the cap
+  // the launcher gets past this gate and dies (or not) on something else entirely.
+  const r = preflight({ '2026-08-14': 549.89 }, '2026-08-15T01:00:00Z')
+  assert.doesNotMatch(r.err, /spend/i)
+  assert.match(r.out, /spend: OK/, 'and it reports the position it just read')
 })
 
 // ------------------------------------------------------------------ configuration
