@@ -1,0 +1,199 @@
+{
+  "$schema_note": "The branch-protection spec for the obot workspace: one entry per ROLED branch in scripts/policy.json, naming the exact rule that branch should carry. It is a proposal until @jwildfire chooses (obot.roadmap#272); 'status' below says which. scripts/obot-protect turns this file into API calls ('apply') and reads the live state back against it ('verify'). Nothing here is applied automatically, and the obotclaw App cannot apply or even read branch protection - it has no 'administration' permission, deliberately: an agent that can remove its own guardrail does not have one.",
+  "version": 1,
+  "status": "PROPOSED - nothing applied. Awaiting @jwildfire's choice on the decision artifact below.",
+  "requirement": "jwildfire/obot.roadmap#272",
+  "decision": "https://jwildfire.github.io/obot.roadmap/reports/decisions/2026-08-20-branch-protections/",
+  "measured": "2026-08-20",
+  "mechanism": {
+    "api": "classic branch protection - PUT /repos/{owner}/{repo}/branches/{branch}/protection",
+    "why_not_rulesets": "Rulesets add bypass actors, which this spec does not need: no rule here restricts WHO may merge, so obotclaw[bot] needs no exemption. Classic protection is also the mechanism already proven against the bot on safety.viz/main and gsm.safety/main since 2026-07 - every release merge on those branches went through it as obotclaw[bot]. Push restrictions ('restrictions') are organization-only and are left null on these user-owned repositories.",
+    "credential": "@jwildfire's own gh auth. Reading or writing protection needs repository admin; the obotclaw App has neither and must not be given them."
+  },
+  "tiers": {
+    "history-guard": {
+      "_summary": "Force-push and deletion are refused; everything else is unchanged. Direct pushes still work, so a branch that automation writes to directly keeps working exactly as it does today. This closes the only failure a scheduled session cannot undo - rewritten or deleted history.",
+      "requirePullRequest": false,
+      "requiredApprovals": 0,
+      "strictChecks": false,
+      "requireLinearHistory": false,
+      "allowForcePushes": false,
+      "allowDeletions": false,
+      "requireConversationResolution": false,
+      "enforceAdmins": false,
+      "requireSignatures": false,
+      "lockBranch": false,
+      "blockCreations": false
+    },
+    "pr-gate": {
+      "_summary": "history-guard, plus: a change reaches this branch only as a pull request. No human approval is required (requiredApprovals 0), so obot-merge merges exactly as it does now - the rule closes the direct-push hole, not the merge lane. Required checks are CI contexts that run on every pull request targeting this branch.",
+      "requirePullRequest": true,
+      "requiredApprovals": 0,
+      "strictChecks": false,
+      "requireLinearHistory": false,
+      "allowForcePushes": false,
+      "allowDeletions": false,
+      "requireConversationResolution": false,
+      "enforceAdmins": false,
+      "requireSignatures": false,
+      "lockBranch": false,
+      "blockCreations": false
+    },
+    "review-gate": {
+      "_summary": "pr-gate, plus one approving review. NOT RECOMMENDED and not used by any entry below: obotclaw[bot] cannot approve its own pull request, so this converts every merge into a manual one and double-gates the carve-out - @jwildfire would attest on the PR and then approve it again in the UI. Defined here so the option is visible rather than folklore.",
+      "requirePullRequest": true,
+      "requiredApprovals": 1,
+      "strictChecks": false,
+      "requireLinearHistory": false,
+      "allowForcePushes": false,
+      "allowDeletions": false,
+      "requireConversationResolution": false,
+      "enforceAdmins": false,
+      "requireSignatures": false,
+      "lockBranch": false,
+      "blockCreations": false
+    }
+  },
+  "neverSet": {
+    "_note": "Switches that would break the standard lane, and why each is pinned false in every tier. The verifier checks these are OFF as strictly as it checks the guards are ON - a protection that stops the agents is a failure of this spec, not a stricter version of it.",
+    "requiredApprovals >= 1": "obotclaw[bot] cannot approve its own PR; every standard-lane merge would need @jwildfire.",
+    "requireLinearHistory": "obot-merge's default strategy is a merge commit (--merge); linear history refuses it.",
+    "strictChecks": "'require branches to be up to date' forces a rebase whenever the base moves - an unattended session would stall on it.",
+    "requireConversationResolution": "one unresolved review comment blocks the merge with nobody awake to resolve it.",
+    "requireSignatures": "agent pushes are not GPG-signed.",
+    "lockBranch": "makes the branch read-only to everyone.",
+    "enforceAdmins": "left false on purpose so @jwildfire keeps a hand-operable override on every branch. He is the one person these rules are not defending against."
+  },
+  "branches": [
+    {
+      "repo": "jwildfire/safety.viz",
+      "branch": "main",
+      "role": "release",
+      "tier": "pr-gate",
+      "checks": ["Build, format, and test"],
+      "current": "protected since before 2026-08-18; already the proposed shape",
+      "why": "The released chart library. Every write in the last 25 commits arrived as a pull request, so the gate costs nothing.",
+      "botLane": "No effect. This exact rule has carried obotclaw[bot] release merges since 2026-07."
+    },
+    {
+      "repo": "jwildfire/safety.viz",
+      "branch": "dev",
+      "role": "integration",
+      "tier": "pr-gate",
+      "checks": ["Build, format, and test"],
+      "current": "unprotected",
+      "why": "The standard lane's landing branch. 0 of the last 25 commits were direct pushes; ci.yml runs on every pull request, including ready_for_review.",
+      "botLane": "No effect - obot-merge keeps merging on the standard lane with no flag."
+    },
+    {
+      "repo": "jwildfire/gsm.safety",
+      "branch": "main",
+      "role": "release",
+      "tier": "pr-gate",
+      "checks": ["ubuntu-latest (release)"],
+      "current": "protected since before 2026-08-18; already the proposed shape",
+      "why": "The released R package. Already gated, and proven against the bot.",
+      "botLane": "No effect."
+    },
+    {
+      "repo": "jwildfire/gsm.safety",
+      "branch": "dev",
+      "role": "integration",
+      "tier": "pr-gate",
+      "checks": ["ubuntu-latest (release)"],
+      "current": "unprotected",
+      "why": "0 of the last 25 commits were direct pushes; R-CMD-check.yaml runs on pull requests to dev.",
+      "botLane": "No effect."
+    },
+    {
+      "repo": "jwildfire/open.csr",
+      "branch": "main",
+      "role": "release",
+      "tier": "pr-gate",
+      "checks": ["Node — tests, guards, site", "R — opencsr testthat suite"],
+      "current": "unprotected",
+      "why": "The published CSR builder. 0 of the last 25 commits were direct pushes; ci.yml has no branch filter on pull_request, so both jobs report on a dev -> main release PR.",
+      "botLane": "No effect."
+    },
+    {
+      "repo": "jwildfire/open.csr",
+      "branch": "dev",
+      "role": "integration",
+      "tier": "pr-gate",
+      "checks": ["Node — tests, guards, site", "R — opencsr testthat suite"],
+      "current": "unprotected",
+      "why": "0 of the last 25 commits were direct pushes.",
+      "botLane": "No effect."
+    },
+    {
+      "repo": "jwildfire/open.gismo",
+      "branch": "main",
+      "role": "release",
+      "tier": "pr-gate",
+      "checks": [],
+      "current": "unprotected",
+      "why": "Untouched since the March initial commit. No required check: R-CMD-check.yaml and site-tests.yaml both filter pull_request to dev, so a dev -> main PR produces no check to require, and requiring one would block the branch permanently.",
+      "botLane": "No effect."
+    },
+    {
+      "repo": "jwildfire/open.gismo",
+      "branch": "dev",
+      "role": "integration",
+      "tier": "pr-gate",
+      "checks": ["R-CMD-check", "site-tests"],
+      "current": "unprotected",
+      "why": "12 of the last 25 commits were direct pushes, but every one predates the transfer - the newest is 2026-06-24 and the pushers (lauramaxwell, jharmon-gilead) are no longer collaborators. The current agent lane is pull requests only.",
+      "botLane": "No effect."
+    },
+    {
+      "repo": "jwildfire/obot.agent",
+      "branch": "main",
+      "role": "integration",
+      "tier": "pr-gate",
+      "checks": ["test"],
+      "current": "unprotected - THE GAP THIS REQUIREMENT EXISTS FOR",
+      "why": "The merge policy, obot-merge, obot-policy and hooks/ all live here. Today any token with contents:write can push a rewrite of scripts/policy.json straight to main: no pull request, no carve-out gate, no record. The carve-out is voluntary until this rule exists. 0 of the last 30 commits were direct pushes, so the gate costs nothing and closes everything.",
+      "botLane": "No effect. test.yml runs on every pull request with no path filter, so 'test' always reports."
+    },
+    {
+      "repo": "jwildfire/obot.agent",
+      "branch": "stable",
+      "role": "release",
+      "tier": "pr-gate",
+      "checks": ["test"],
+      "current": "unprotected",
+      "why": "The R2 lagging release branch; every release is a main -> stable PR on the attested lane. 0 of the last 25 commits were direct pushes.",
+      "botLane": "No effect - the attested lane already requires @jwildfire's flag, which this rule neither adds to nor replaces."
+    },
+    {
+      "repo": "jwildfire/obot.roadmap",
+      "branch": "main",
+      "role": "integration",
+      "tier": "history-guard",
+      "checks": [],
+      "current": "unprotected",
+      "why": "The hub, and the one branch that must keep taking direct pushes: 14 of the last 25 commits were direct commits, including the nightly scheduled roadmap-audit.yml push and @jwildfire's own. His 2026-07-04 grant is explicitly 'commit straight to main'. A pull-request gate here would break the nightly audit and the standing grant on the same day; a force-push and deletion ban costs nothing and still makes the hub's history unrewritable.",
+      "botLane": "No effect - direct pushes continue."
+    },
+    {
+      "repo": "jwildfire/demo-301",
+      "branch": "site",
+      "role": "release",
+      "tier": "history-guard",
+      "checks": [],
+      "current": "unprotected",
+      "why": "The live GitHub Pages source, published by scripts/publish-snapshot.py copying a run into a site checkout and pushing. All 10 of the last 10 commits were direct pushes. A pull-request gate would stop publishing until the flow is rewritten - see the artifact's Option B, which is exactly that trade.",
+      "botLane": "No effect - direct publishing continues."
+    },
+    {
+      "repo": "jwildfire/demo-301",
+      "branch": "main",
+      "role": "integration",
+      "tier": "history-guard",
+      "checks": [],
+      "current": "unprotected",
+      "why": "10 of the last 13 commits were direct pushes. They are all from the 2026-07-28/29 bootstrap and the lane has used pull requests since, but the pipeline rebuild writes here directly by design, and run-pipeline is currently red - requiring a check would block the branch outright.",
+      "botLane": "No effect."
+    }
+  ]
+}
