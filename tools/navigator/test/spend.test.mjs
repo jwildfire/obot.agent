@@ -36,8 +36,9 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 import {
-  ALARM_READING, ALARM_STOP, WARN_LEAD,
-  applyHalt, haltMarker, judge, loadConfig, readMeter, readUsage, refreshUsage,
+  ALARM_READING, ALARM_STOP, CALIB_MIN_PERCENT, WARN_LEAD,
+  applyHalt, calibrationPath, haltMarker, judge, loadConfig, nextCalibration,
+  pickCalibration, readMeter, readSpend, readUsage, refreshUsage,
   spendNote, spendSection, weekWindow,
 } from '../spend.mjs'
 import { ALARM_RE, parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
@@ -611,4 +612,97 @@ test('the hook defers when it has no fresh verdict rather than blocking the mach
   assert.equal(hook(spawn, { ageS: 7200 }), '', 'an hour-old verdict is not a reading')
   assert.equal(hook(spawn, { state: 'warn' }), '', 'a warning is a signal, not a gate')
   assert.equal(hook(spawn, { state: 'ok' }), '')
+})
+
+// ---------------------------------------------------------------- recalibration
+//
+// The denominator has to maintain itself. The bootstrap in config/spend.json is a
+// dated inference against one meter reading; if it stayed frozen it would be wrong
+// the moment prices, the plan, or the "+50% weekly limits promo through Aug 31"
+// change — and nobody edits a config file for any of those.
+
+test('a fresh meter reading re-derives the denominator', () => {
+  const c = nextCalibration({
+    meter: { usable: true, percent: 60, fetchedAt: '2026-08-25T10:00:00.000Z' },
+    weekSpentUsd: 1500, stored: null,
+  })
+  assert.equal(c.weeklyPercent, 60)
+  assert.equal(c.spentUsd, 1500)
+  assert.equal(c.meterFetchedAt, '2026-08-25T10:00:00.000Z')
+  assert.match(c.source, /live/)
+  // $25/point, against the bootstrap's $36.91 — the shape of what the promo expiring
+  // would look like, arrived at without anyone touching the file.
+  assert.equal(Number((c.spentUsd / c.weeklyPercent).toFixed(2)), 25)
+})
+
+test('the same meter fetch is never re-recorded, and a weak one is never recorded', () => {
+  const meter = { usable: true, percent: 60, fetchedAt: '2026-08-25T10:00:00.000Z' }
+  assert.equal(nextCalibration({ meter, weekSpentUsd: 1500, stored: { meterFetchedAt: meter.fetchedAt } }), null)
+  // Expired, and therefore describing a week that is over.
+  assert.equal(nextCalibration({ meter: { ...meter, usable: false }, weekSpentUsd: 1500, stored: null }), null)
+  // Too early in the week: one rounding step in an integer percentage moves the
+  // answer by tens of percent.
+  assert.equal(nextCalibration({ meter: { ...meter, percent: CALIB_MIN_PERCENT - 1 }, weekSpentUsd: 100, stored: null }), null)
+  assert.equal(nextCalibration({ meter, weekSpentUsd: 0, stored: null }), null)
+})
+
+test('the newer of the bootstrap and the machine-recorded calibration wins', () => {
+  const boot = { at: '2026-08-20T10:42:05.623Z', weeklyPercent: 99, spentUsd: 3654.11 }
+  const later = { at: '2026-08-27T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500 }
+  const older = { at: '2026-08-01T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500 }
+  assert.equal(pickCalibration({ calibration: boot }, later), later)
+  assert.equal(pickCalibration({ calibration: boot }, older), boot)
+  assert.equal(pickCalibration({ calibration: boot }, null), boot)
+  assert.equal(pickCalibration({ calibration: null }, later), later)
+})
+
+test('readSpend records the new calibration and prints which one it used', () => {
+  // A later week, with a meter fetch newer than the shipped bootstrap — which is the
+  // only way a re-derivation should take effect. The bootstrap wins against anything
+  // older than itself, and a test that did not set the dates this way passed its
+  // first assertion while the old denominator quietly stayed in force.
+  const ws = tmp()
+  const cfg = path.join(ws, 'spend.json')
+  fs.writeFileSync(cfg, JSON.stringify(CONFIG))
+  const env = {
+    OBOT_SPEND_CONFIG: cfg,
+    OBOT_SPEND_NO_REFRESH: '1',
+    OBOT_SPEND_USAGE: usageFile({ '2026-08-27': 800, '2026-08-28': 934.69 }),
+    OBOT_SPEND_METER: meterFile({ percent: 45, fetchedAt: '2026-08-29T00:30:00Z',
+                                  resetsAt: '2026-09-03T14:59:59.596883+00:00' }),
+  }
+  const now = new Date('2026-08-29T01:00:00Z')
+  const first = readSpend({ workspace: ws, hub: '/hub', env, now })
+  assert.equal(first.verdict.recalibrated, '2026-08-29T00:30:00.000Z')
+  assert.ok(fs.existsSync(calibrationPath(ws)))
+  // $1,734.69 over 45 points = $38.55/point, replacing the bootstrap's $36.91.
+  assert.equal(first.config.calibration.spentUsd, 1734.69)
+  assert.equal(first.config.calibration.weeklyPercent, 45)
+  assert.match(first.section, /calibrated 2026-08-29T00:30:00\.000Z/)
+  assert.match(first.section, /live/)
+
+  // Second pass, same meter fetch: nothing re-recorded, same denominator in force.
+  const second = readSpend({ workspace: ws, hub: '/hub', env, now })
+  assert.equal(second.verdict.recalibrated, null)
+  assert.equal(second.config.calibration.spentUsd, 1734.69)
+})
+
+test('an expired meter leaves the last recorded calibration standing', () => {
+  // The live case: the CLI has not re-fetched since before the reset, so nothing new
+  // can be derived — and the week must still be priced against something real.
+  const ws = tmp()
+  const cfg = path.join(ws, 'spend.json')
+  fs.writeFileSync(cfg, JSON.stringify(CONFIG))
+  const r = readSpend({
+    workspace: ws, hub: '/hub', now: new Date('2026-08-20T18:00:00Z'),
+    env: {
+      OBOT_SPEND_CONFIG: cfg, OBOT_SPEND_NO_REFRESH: '1',
+      OBOT_SPEND_USAGE: usageFile({ '2026-08-20': 40 }),
+      OBOT_SPEND_METER: meterFile({ percent: 99, fetchedAt: '2026-08-20T10:42:05Z' }),
+    },
+  })
+  assert.equal(r.verdict.recalibrated, null)
+  assert.equal(r.verdict.state, 'ok')
+  assert.equal(r.config.calibration.spentUsd, CALIBRATION.spentUsd, 'the bootstrap still applies')
+  assert.match(r.section, /expired/i)
 })

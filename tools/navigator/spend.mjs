@@ -346,6 +346,68 @@ export function judge({ meter, usage, config, now = new Date() }) {
            headline: `spend: OK — tonight ${pts(nightPoints)} of ${pts(headroom)} points, week ${percentUsed.toFixed(0)}% of ${stopAt}% stop line.` }
 }
 
+// --------------------------------------------------------------- recalibration
+
+/**
+ * Below this the ratio is too noisy to trust: a week that has barely started prices
+ * a point off a handful of dollars, and one rounding step in the meter's integer
+ * percentage moves the answer by tens of percent.
+ */
+export const CALIB_MIN_PERCENT = 20
+
+/**
+ * A fresh calibration, when the meter has been re-fetched since the last one.
+ *
+ * This is what keeps the denominator honest without anyone maintaining it. The
+ * bootstrap in `config/spend.json` is a dated inference; every subsequent meter
+ * fetch replaces it with a newer pair of real readings, so the number tracks a
+ * pricing change, a plan change, and the "+50% weekly limits promo through Aug 31"
+ * expiring, none of which anybody would remember to edit a file for.
+ *
+ * The lag is bounded by the cadence rather than argued about: the sweep observes a
+ * new `fetchedAtMs` within five minutes of it appearing and the artifact is at most
+ * ten minutes old, so the dollars paired with the percentage trail it by minutes.
+ * They trail rather than lead, which under-states dollars-per-point and therefore
+ * over-states the points a night has spent — conservative in the direction that
+ * trips sooner.
+ */
+export function nextCalibration({ meter, weekSpentUsd, stored }) {
+  if (!meter?.usable || !Number.isFinite(meter.percent) || meter.percent < CALIB_MIN_PERCENT) return null
+  if (!Number.isFinite(weekSpentUsd) || weekSpentUsd <= 0) return null
+  if (!meter.fetchedAt || (stored && stored.meterFetchedAt === meter.fetchedAt)) return null
+  return {
+    at: meter.fetchedAt,
+    meterFetchedAt: meter.fetchedAt,
+    weeklyPercent: meter.percent,
+    spentUsd: Number(weekSpentUsd.toFixed(2)),
+    source: 'live — re-derived from the meter this machine cached',
+  }
+}
+
+/** The newer of the shipped bootstrap and whatever the machine has since recorded. */
+export function pickCalibration(config, stored) {
+  const a = config?.calibration || null
+  if (!a) return stored || null
+  if (!stored?.at) return a
+  return Date.parse(stored.at) > Date.parse(a.at) ? stored : a
+}
+
+/** Where the machine remembers its own calibration. */
+export const calibrationPath = (workspace) =>
+  path.join(workspace, '.claude/session-hub/cache/spend-calibration.json')
+
+function readStoredCalibration(workspace) {
+  try { return JSON.parse(fs.readFileSync(calibrationPath(workspace), 'utf8')) } catch { return null }
+}
+
+function writeStoredCalibration(workspace, calib) {
+  try {
+    const p = calibrationPath(workspace)
+    fs.mkdirSync(path.dirname(p), { recursive: true })
+    fs.writeFileSync(p, JSON.stringify(calib, null, 1) + '\n')
+  } catch { /* the bootstrap still applies; the section names which one is in force */ }
+}
+
 // ------------------------------------------------------------------ the surfaces
 
 const detailLines = (v) => {
@@ -353,7 +415,7 @@ const detailLines = (v) => {
   d.push(`night ${v.night.day} (UTC day — for America/New_York it opens at 20:00 the evening before): ${v.night.spentUsd === null ? 'unmeasured' : money(v.night.spentUsd)} = ${pts(v.night.points)} of ${pts(v.night.headroomPoints)} available points (his cap ${pts(v.night.capPoints)})`)
   d.push(`week: ${v.week.spentUsd === null ? 'unmeasured' : money(v.week.spentUsd)} measured, meter at ${v.week.percentUsed === null ? '—' : `${v.week.percentUsed.toFixed(0)}%`} of the allowance (${v.week.source}), stop line ${v.week.stopPercent}%, resets ${v.week.endsAt ? `${v.week.endsAt.replace('T', ' ').slice(0, 16)}Z` : 'unknown'}`)
   const den = v.week.denominator
-  d.push(`denominator: ${den.what}${den.usdPerPoint ? `; 1 point ≈ ${money(den.usdPerPoint)} of API-equivalent spend, calibrated ${den.calibratedAt} from ${den.calibratedFrom}` : '; NOT CALIBRATED — dollars cannot be priced in points'}`)
+  d.push(`denominator: ${den.what}${den.usdPerPoint ? `; 1 point ≈ ${money(den.usdPerPoint)} of API-equivalent spend, calibrated ${den.calibratedAt} from ${den.calibratedFrom} (${den.source})` : '; NOT CALIBRATED — dollars cannot be priced in points'}`)
   d.push(`meter: ${v.reading.meter.read
     ? (v.reading.meter.expired
         ? `read but EXPIRED — ${v.reading.meter.why}; the week position below comes from the artifact alone`
@@ -448,9 +510,25 @@ export function readSpend({ workspace, hub, repoRoot = REPO_ROOT, env = process.
   if (!refresh.ok && !usage.ok) usage.why = refresh.why || usage.why
   const meterPath = env.OBOT_SPEND_METER || path.join(process.env.HOME || '', '.claude.json')
   const meter = readMeter(meterPath, now)
-  const verdict = judge({ meter, usage, config, now })
+
+  // Re-derive the denominator whenever the meter has been re-fetched. Without this
+  // the bootstrap in config/spend.json is frozen, and a frozen calibration is wrong
+  // the moment prices, the plan or a promotional limit changes — none of which
+  // anybody edits a file for.
+  let stored = readStoredCalibration(workspace)
+  const anchor = meter.resetsAt || config.weekAnchor || pickCalibration(config, stored)?.resetsAt || null
+  const window = anchor ? weekWindow(now, anchor) : null
+  const weekSpentUsd = window && usage.ok
+    ? window.days.reduce((n, d) => n + (usage.byDay.get(d) || 0), 0)
+    : null
+  const fresh = nextCalibration({ meter, weekSpentUsd, stored })
+  if (fresh) { writeStoredCalibration(workspace, fresh); stored = fresh }
+
+  const effective = { ...config, calibration: pickCalibration(config, stored) }
+  const verdict = judge({ meter, usage, config: effective, now })
   verdict.refresh = refresh
-  return { verdict, note: spendNote(verdict), section: spendSection(verdict), config }
+  verdict.recalibrated = fresh ? fresh.at : null
+  return { verdict, note: spendNote(verdict), section: spendSection(verdict), config: effective }
 }
 
 /** Cache the verdict for readers that must not pay for a node start (the hook). */
