@@ -46,6 +46,10 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { answersSection, deliverAnswers, pendingAnswers, unappliedDetections } from '../ops-dashboard/lib/answers.mjs'
+import { isArmed as voiceArmed } from '../voice/lib/armed.mjs'
+import { readQueue as voiceQueue } from '../voice/lib/handles.mjs'
+import { pollReminders } from '../voice/lib/reminders.mjs'
+import { readUnrouted, unroutedSection } from '../voice/lib/route.mjs'
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
          orphansAccepted, orphansOutsideWindow, parseIndexRows, parseRefLookup, readJson,
          refLookupQuery, registryDisagreement, shapeRepo, siteVersionFreshness,
@@ -229,7 +233,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -384,6 +388,16 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // produced this — a `staged` record nothing watched — was invisible precisely
   // because it lived somewhere nothing scheduled ever looked.
   lines.push('', answersSection(answers).trimEnd())
+
+  // And the same question asked of the other door he answers through
+  // (jwildfire/obot.roadmap#265). A car answer becomes an ordinary record in the store
+  // above, so that section already covers it once it lands; this one covers the two
+  // ways it never lands at all — a sentence that reached no decision, and a lane that
+  // nothing is polling. Rendered even when there is no reading, because "the voice
+  // lane was not read" and "nothing was dictated" are the same silence otherwise.
+  lines.push('', (voice && voice.trim())
+    ? voice.trimEnd()
+    : '## Voice answers that reached no decision — his words, kept whole\n\n**VOICE LANE READING BROKEN** — no reading of the car lane ran this sweep, so nothing here says whether anything he dictated was routed, lost, or heard at all.')
 
   // The Navigator session's own record, folded in whole (D0017, 2026-08-16). Two
   // writers, two files: the session appends to delivery.md and never touches this
@@ -891,6 +905,34 @@ const safeCarveout = () => {
 const safeRankhead = () => {
   try { return rankheadSection(collectRankHead(REPO_ROOT)) } catch (e) { return rankheadBroken(String(e.message)) }
 }
+/**
+ * The car lane (jwildfire/obot.roadmap#265) — and the reason it is the SWEEP that polls it.
+ *
+ * Nothing has ever polled the Reminders list Siri writes to: no LaunchAgent, no cron,
+ * not the fold, which skips it on purpose because `osascript` "can stall on a permission
+ * prompt". That objection is answered rather than argued with — `osascriptRunner` is
+ * bounded by a hard timeout and reports a failure as a failed read — but it is still his
+ * grant to give, so this polls only when something explicitly armed it and says which
+ * state it is in either way.
+ *
+ * It is here rather than in its own LaunchAgent because a lane that answers his decisions
+ * needs the same five-minute clock as the sweep that announces them, and because a second
+ * scheduled process is a second thing that can be quietly dead.
+ */
+const safeVoice = () => {
+  try {
+    const armed = voiceArmed(WS)
+    const poll = armed
+      ? pollReminders({ workspace: WS, hub: HUB, queue: voiceQueue(WS).queue })
+      : { read: true, why: '', routed: [], unrouted: [] }
+    return unroutedSection(readUnrouted(WS).items, {
+      lane: { armed, read: poll.read, why: poll.why, routed: poll.routed.length },
+    })
+  } catch (e) {
+    return '## Voice answers that reached no decision — his words, kept whole\n\n'
+      + `**VOICE LANE READING BROKEN** — ${String(e.message).slice(0, 160)}. Nothing he dictated was routed this run; this is not a quiet lane.\n`
+  }
+}
 // A broken wake must not break the sweep, and must not fail quietly either: the
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
@@ -992,7 +1034,7 @@ async function main() {
       // local store, they need no policy file, and an answer of his that nothing has
       // applied is exactly as undelivered when the RC sweep is broken.
       unapplied: unappliedDetections(safePending()) })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }) }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -1145,7 +1187,7 @@ async function main() {
   const currency = await safeCurrency()
   const rankhead = safeRankhead()
   const spend = safeSpend()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice() }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

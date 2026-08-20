@@ -178,6 +178,13 @@ export function recordAnswer(workspace, answer, { hub = null, now = new Date() }
     questions,
     unknownQuestions: unknown,
     words,
+    // Where the answer came from. Added for jwildfire/obot.roadmap#265: an answer he
+    // dictated from a car and one he clicked on the page are the same answer and the
+    // same record, but which door it came through is a fact about it that the receipt
+    // lane and any audit of the voice router need, and it is unrecoverable later. It
+    // is deliberately NOT part of the fingerprint: the same answer given twice through
+    // two doors is one answer, clicked twice.
+    channel: answer.channel ?? 'dashboard',
     clicks: 1,
     fingerprint: fp,
     supersedes: superseded,
@@ -195,6 +202,9 @@ export function recordAnswer(workspace, answer, { hub = null, now = new Date() }
 /** Records written before #120 called this state `staged`, and nothing watched it. */
 const normalize = (r) => ({
   clicks: 1, supersedes: [], supersededBy: null, history: [], questions: {}, unknownQuestions: [],
+  // Every record written before #265 came from the page, which is why the default is
+  // not "unknown": it is the true answer for all of them.
+  channel: 'dashboard',
   ...r,
   status: r.status === 'staged' || !r.status ? CAPTURED : r.status,
 });
