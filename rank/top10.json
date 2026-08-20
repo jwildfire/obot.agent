@@ -15,8 +15,8 @@
       "why": "the file with the most authority over every agent has no owner and no way to change it safely - and it currently names an active plan that does not exist on this machine"
     },
     {
-      "issue": 280,
-      "why": "the voice lane shipped today, so an episode per open decision is now the difference between three decisions he can answer from the car and three he cannot"
+      "issue": 267,
+      "why": "two workers have now collided on the same fix in one week - the Navigator's and mine, four hours apart on the deploy incident - and each collision spends fleet capacity twice on work that was already done"
     },
     {
       "issue": 252,
