@@ -294,6 +294,36 @@ minutes later. Guarded by
 [`scripts/test/merge-invocation.test.mjs`](scripts/test/merge-invocation.test.mjs) and
 [`scripts/test/merge-default.test.mjs`](scripts/test/merge-default.test.mjs).
 
+## Branch protections
+
+`obot-merge` enforces the merge policy on merges. It sees nothing else — a `git push`
+straight to `main` never reaches it. Branch protection is the layer under that, and
+[`scripts/protections.json`](scripts/protections.json) is its spec: one entry per roled
+branch in `policy.json`, with the exact rule that branch should carry and what it costs the
+standard lane.
+
+```bash
+obot.agent/scripts/obot-protect read      # what GitHub enforces right now
+obot.agent/scripts/obot-protect plan      # spec vs live; writes nothing
+obot.agent/scripts/obot-protect verify    # the same, exit 1 on any disagreement
+```
+
+Three things about it that are load-bearing:
+
+- **Applying is @jwildfire's.** `apply` refuses without `--approved '<where and when he
+  chose it>'`, and reads every branch back afterwards rather than trusting the PUT.
+- **The credential is his too.** Branch protection needs repository admin, and the obotclaw
+  App has none — `gh api .../protection` as the App returns 403. Keep it that way: an agent
+  that can remove its own guardrail does not have one.
+- **A rule that stops the agents is a bug in the spec, not a stricter version of it.** No
+  tier requires an approving review, linear history, up-to-date branches, resolved
+  conversations or signed commits; every one of those blocks `obot-merge` merging as
+  obotclaw[bot]. `verify` reports a branch that has *more* than the spec asks for as a
+  disagreement, for exactly that reason. Guarded by
+  [`scripts/test/protections.test.mjs`](scripts/test/protections.test.mjs).
+
+Requirement: [obot.roadmap#272](https://github.com/jwildfire/obot.roadmap/issues/272).
+
 ## Branching and release model (safety.viz only)
 
 This model applies to **safety.viz and nothing else** — it is not an ecosystem default.
