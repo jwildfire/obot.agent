@@ -914,7 +914,12 @@ const safeLandingState = () => {
  * a broken section about a check nobody asked to see.
  */
 const safeLandingCheck = () => {
-  try { landingTool(['check'], 45000) } catch { /* the record says `unchecked`, which is true */ }
+  // Two bounds, and the inner one is what actually holds: the tool spends at most its
+  // own wall-clock budget looking, and this spawn timeout is the backstop for a tool
+  // that somehow does not return at all. A count cap alone would let five landings
+  // against a black-holing host cost a minute of a five-minute cadence whose contract
+  // is the release-candidate queue rather than this.
+  try { landingTool(['check'], 30000) } catch { /* the record says `unchecked`, which is true */ }
 }
 
 const safeLandingRender = () => {

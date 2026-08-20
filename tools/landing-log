@@ -9,7 +9,8 @@ nothing in the house fired.
     landing-log closure --issue hub#264 --summary 'One sentence: what he can now
                         do that he could not before.' [--worker W0080] [--title '...']
     landing-log promise --asked 'his words' --landing <url|path|repo#n> [--date YYYY-MM-DD]
-    landing-log check   [--max 5] [--stale-min 30]   fetch each landing; record what it found
+    landing-log check   [--max 5] [--stale-min 30] [--budget-sec 15] [--timeout 6]
+                        fetch each landing; record what it found
     landing-log render                               the ## Landings section the sweep folds in
     landing-log list --json                          the record, for the wake and the dashboard
     landing-log --audit                              read-only; exit 1 on a finding
@@ -37,6 +38,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 
@@ -52,7 +54,18 @@ WS = pathlib.Path(os.environ.get("OBOT_WORKSPACE") or (pathlib.Path.home() / "Do
 # sweep open on the network.
 STALE_MIN = int(os.environ.get("OBOT_LANDING_STALE_MIN", "30"))
 MAX_CHECKS = int(os.environ.get("OBOT_LANDING_MAX_CHECKS", "5"))
-FETCH_TIMEOUT = int(os.environ.get("OBOT_LANDING_TIMEOUT", "8"))
+FETCH_TIMEOUT = int(os.environ.get("OBOT_LANDING_TIMEOUT", "6"))
+
+# And the bound that actually holds. `--max` caps how MANY landings are looked at; it
+# says nothing about how LONG looking takes, and five landings against a black-holing
+# host is five timeouts in series inside a sweep whose cadence is five minutes and
+# whose contract is the release-candidate queue rather than this. A count cap that can
+# still cost a minute is the kind of bound that reads as one and is not.
+#
+# What it does NOT do is drop anything quietly: the run says how many it did not
+# reach, and they are simply first in line next sweep. A silent truncation reads as
+# "checked everything" when it did not.
+BUDGET_SEC = int(os.environ.get("OBOT_LANDING_BUDGET_SEC", "15"))
 
 ISSUE_LANDING = re.compile(r"^(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)|hub|oa)#(\d+)$")
 
@@ -236,9 +249,13 @@ def cmd_promise(argv):
 
 
 def cmd_check(argv):
-    f = flags(argv, {"max", "stale-min"})
+    global FETCH_TIMEOUT
+    f = flags(argv, {"max", "stale-min", "budget-sec", "timeout"})
     limit = int(f.get("max", MAX_CHECKS))
     stale = int(f.get("stale-min", STALE_MIN))
+    budget = float(f.get("budget-sec", BUDGET_SEC))
+    if f.get("timeout"):
+        FETCH_TIMEOUT = int(f["timeout"])
     st = read_state(WS)
     if not st["armed"]:
         print("landing-log: not armed - nothing has been promised on this machine, so "
@@ -250,14 +267,27 @@ def cmd_check(argv):
         print("landing-log: nothing due - %d open promise(s), all checked within the "
               "last %dm" % (open_n, stale))
         return 0
+    started = time.monotonic()
     out = []
+    done = 0
     for p in due:
+        # Checked BEFORE the fetch rather than after it: the point is to not start a
+        # look there is no time left for. The first one always runs, so a budget
+        # smaller than a single timeout still makes progress rather than stalling
+        # the queue forever.
+        if done and time.monotonic() - started >= budget:
+            break
         state, detail = observe(p["landing"])
         write_observation(WS, p["id"], state, detail)
         out.append("  %s %s — %s (%s)" % (p["id"], p["landing"], state, detail))
-    print("landing-log: fetched %d landing(s)" % len(due))
+        done += 1
+    print("landing-log: fetched %d landing(s)" % done)
     for line in out:
         print(line)
+    if done < len(due):
+        print("landing-log: %d not reached - the %.0fs budget was spent; they are "
+              "first in line next run and nothing has been dropped"
+              % (len(due) - done, budget))
     return 0
 
 
