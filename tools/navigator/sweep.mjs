@@ -49,6 +49,7 @@ import { answersSection, deliverAnswers, pendingAnswers, unappliedDetections } f
 import { isArmed as voiceArmed } from '../voice/lib/armed.mjs'
 import { readQueue as voiceQueue } from '../voice/lib/handles.mjs'
 import { pollReminders } from '../voice/lib/reminders.mjs'
+import { episodeCoverage, episodesSection } from '../voice/lib/episodes.mjs'
 import { readUnrouted, unroutedSection } from '../voice/lib/route.mjs'
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
          orphansAccepted, orphansOutsideWindow, parseIndexRows, parseRefLookup, readJson,
@@ -233,7 +234,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -398,6 +399,15 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push('', (voice && voice.trim())
     ? voice.trimEnd()
     : '## Voice answers that reached no decision — his words, kept whole\n\n**VOICE LANE READING BROKEN** — no reading of the car lane ran this sweep, so nothing here says whether anything he dictated was routed, lost, or heard at all.')
+
+  // The other half of the same lane (jwildfire/obot.roadmap#280): the section above
+  // covers an answer that never landed, this one covers a decision he was never given a
+  // way to answer. An open artifact with no current episode is a gap in exactly the sense
+  // a closed requirement with no closure summary is — a condition, detected every five
+  // minutes, rather than something a person has to remember to go and look for.
+  lines.push('', (decisionEpisodes && decisionEpisodes.trim())
+    ? decisionEpisodes.trimEnd()
+    : '## Decision episodes — an open decision he can answer from the car\n\n**DECISION EPISODE READING BROKEN** — no reading ran this sweep, so nothing here says whether an open decision is waiting without an episode.')
 
   // The Navigator session's own record, folded in whole (D0017, 2026-08-16). Two
   // writers, two files: the session appends to delivery.md and never touches this
@@ -948,6 +958,23 @@ const safeVoice = () => {
       + `**VOICE LANE READING BROKEN** — ${String(e.message).slice(0, 160)}. Nothing he dictated was routed this run; this is not a quiet lane.\n`
   }
 }
+/**
+ * Does every open decision have an episode he could answer from a car?
+ *
+ * Read-only and offline: the registry and the artifact pages come out of the hub clone
+ * the checkout sweep already fast-forwards, and the ledger is local. Nothing here
+ * produces an episode — it reports that one is owed, which is the whole point of
+ * jwildfire/obot.roadmap#280 being a standing property rather than a batch somebody runs.
+ */
+const safeEpisodes = () => {
+  try {
+    return episodesSection(episodeCoverage({ hub: HUB, workspace: WS, now: new Date() }), { now: new Date() })
+  } catch (e) {
+    return '## Decision episodes — an open decision he can answer from the car\n\n'
+      + `**DECISION EPISODE READING BROKEN** — ${String(e.message).slice(0, 160)}. Whether an open decision is `
+      + 'waiting without an episode is unknown; this is the absence of the reading, not a finding that none is owed.\n'
+  }
+}
 // A broken wake must not break the sweep, and must not fail quietly either: the
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
@@ -1049,7 +1076,7 @@ async function main() {
       // local store, they need no policy file, and an answer of his that nothing has
       // applied is exactly as undelivered when the RC sweep is broken.
       unapplied: unappliedDetections(safePending()) })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -1202,7 +1229,7 @@ async function main() {
   const currency = await safeCurrency()
   const rankhead = safeRankhead()
   const spend = safeSpend()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice() }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes() }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

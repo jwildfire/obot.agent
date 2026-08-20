@@ -15,6 +15,15 @@ obot.agent/tools/voice-decisions script     # the narration an episode reads out
 obot.agent/tools/voice-decisions poll       # what he said, routed back
 ```
 
+And, above both of them, the standing property that decides when an episode gets made at
+all — [obot.roadmap#280](https://github.com/jwildfire/obot.roadmap/issues/280):
+
+```
+obot.agent/tools/voice-decisions episodes             # which open decisions are owed one
+obot.agent/tools/voice-decisions episode <handle>     # the shape and the close for one
+obot.agent/tools/voice-decisions episode-record …     # what shipped, and what it was made from
+```
+
 ## The out half
 
 `script` renders every open decision as speech. Each one is named the way a person
@@ -36,6 +45,41 @@ Twenty-one of the twenty-two decision artifacts have no `Option A/B/C` cards; th
 choices live in prose with the pick in a recommendation line. So there are two shapes,
 the script says which one it used, and an artifact it could not open produces a sentence
 saying so rather than a decision read out with nothing in it.
+
+## The standing property: an open decision HAS an episode
+
+`script` reads the whole queue out in one sitting. That is a queue read-out; an episode is
+per artifact, and the three he answered from a car on 2026-08-18 were per artifact.
+
+The requirement is not "make episodes for the open ones" — that produced nothing on the day
+it was written and would produce nothing next week either. It is that an open decision
+artifact HAS an episode: one is published, an episode follows, he answers, it stops
+mattering. So `episodeCoverage` in `lib/episodes.mjs` makes it a **condition the sweep
+detects every five minutes**, in exactly the way a closed requirement with no closure
+summary already is, and `safeEpisodes` in `tools/navigator/sweep.mjs` renders it on his
+page — verdict on an unindented line, spelled for the real `ALARM_RE`, clean line printed
+when nothing is owed so the section cannot be confused with a dead one.
+
+An episode is *current* while a fingerprint of its artifact's **spoken text** — the page
+with the markup taken off — still matches what was recorded when it shipped. Restyling a
+page is not a correction; a reworded sentence is. What happens when it does go stale is
+`CORRECTION_POLICY`, stated in one place and taken from
+[hub#266](https://github.com/jwildfire/obot.roadmap/issues/266) rather than invented here:
+the shipped episode stays up because he may already have heard it, the decision goes back
+to owing one, and the fresh episode opens with a correction he can hear.
+
+Writing one is `EPISODE-BRIEF.md`, next to this file. Rendering one is `render.py`, which
+is in the repository because the first three episodes were rendered by a script that lived
+only in a job's scratch directory.
+
+Two things this cannot see, and says so rather than reporting them as "nothing owed":
+
+- **A hub clone behind its remote.** Nothing on this machine pulls it — the five-minute
+  self-update fast-forwards the harness checkout and nothing else — so a decision published
+  an hour ago can be invisible rather than absent. The section prints how far behind it is.
+- **A decision he has already answered that nobody applied.** Its page still says open, so
+  its episode is genuinely current against the page it was made from. The staleness lives
+  one layer up, in the artifact, which is hub#266's half of the problem and not this one's.
 
 ## The back half
 

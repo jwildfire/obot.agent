@@ -23,6 +23,11 @@
 // Usage (from the workspace root — bare path, no `bash ` prefix, it has its own shebang):
 //   obot.agent/tools/voice-decisions queue [--json]
 //   obot.agent/tools/voice-decisions script [--json] [--no-write]
+//   obot.agent/tools/voice-decisions episodes [--json] [--exit-code]
+//   obot.agent/tools/voice-decisions episode <handle|id|slug|position> [--json]
+//   obot.agent/tools/voice-decisions episode-record --id <D0022> --uri <spotify:episode:...> [--title ...]
+//                                                  [--script <path>] [--words N] [--minutes M] [--correction]
+//                                                  [--backfill] [--note '<why>'] [--at <iso>] [--by W0087]
 //   obot.agent/tools/voice-decisions route --text '<what he said>' [--json]
 //   obot.agent/tools/voice-decisions answer --text '<what he said>' [--reminder <id>] [--json|--kind]
 //   obot.agent/tools/voice-decisions poll [--json] [--no-stamp]
@@ -45,8 +50,9 @@ import process from 'node:process';
 import { isArmed, setArmed } from './voice/lib/armed.mjs';
 import { buildQueue, readQueue, writeQueue } from './voice/lib/handles.mjs';
 import { RECEIPT_DONE, RECEIPT_HELD, asQuote, osascriptRunner, pollReminders } from './voice/lib/reminders.mjs';
+import { CORRECTION_POLICY, episodeCoverage, episodesSection, readEpisodes, recordEpisode } from './voice/lib/episodes.mjs';
 import { readUnrouted, resolveUnrouted, routeSpoken, unroutedSection } from './voice/lib/route.mjs';
-import { queueScript } from './voice/lib/speech.mjs';
+import { queueScript, soloScript, wordsForTarget } from './voice/lib/speech.mjs';
 
 const WS = path.resolve(process.env.OBOT_WORKSPACE || path.join(process.env.HOME ?? '', 'Documents/obot2'));
 const HUB = path.resolve(process.env.OBOT_HUB || path.join(WS, 'obot.roadmap'));
@@ -100,6 +106,74 @@ function main() {
     if (flag('--json')) return json({ ...s, fingerprint: q.fingerprint, at: q.at });
     out(s.text);
     process.stderr.write(`\n[${s.words} words, about ${s.minutes} min${s.overRuns ? ' — OVER the 5 minute guideline he set; say why or cut it' : ''}]\n`);
+    return undefined;
+  }
+
+  // The standing property of jwildfire/obot.roadmap#280: an open decision artifact HAS an
+  // episode he can answer from a car. `episodes` answers whether that holds right now,
+  // `episode` writes the narration for one of them, and `episode-record` is what makes
+  // the property checkable at all — an episode nobody recorded is an episode the sweep
+  // will report as owed, forever.
+  if (cmd === 'episodes') {
+    const cov = episodeCoverage({ hub: HUB, workspace: WS });
+    if (flag('--json')) return json(cov);
+    out(episodesSection(cov).trimEnd());
+    if (flag('--exit-code')) process.exit(cov.read === false || cov.missing.length || cov.stale.length ? 1 : 0);
+    return undefined;
+  }
+
+  if (cmd === 'episode') {
+    const selector = positional[0];
+    if (!selector) {
+      process.stderr.write('which one? usage: voice-decisions episode <handle|id|slug|position>\n');
+      process.exit(2);
+    }
+    const q = buildQueue(HUB);
+    // Read-only, deliberately. `script` stamps the queue snapshot because the moment the
+    // whole list is read out is the moment the vocabulary is fixed; a single-decision
+    // episode is a slice of that list and must never persist one, or an ordinal spoken in
+    // an earlier episode resolves against a queue that never existed.
+    const s = soloScript(q, selector, { hub: HUB });
+    if (flag('--json')) return json(s);
+    if (!s.item) { process.stderr.write(`${s.why}\n`); process.exit(2); }
+    out(s.text);
+    process.stderr.write(`\n[${s.words} words, about ${s.minutes} min at the measured rate`
+      + `${s.overRuns ? ` - OVER the ${wordsForTarget()}-word five minute guideline; say why in the episode or cut it` : ''}]\n`
+      + 'This is the shape and the close, not the episode. The words that matter come from reading the artifact '
+      + 'itself and checking every claim against the page or GitHub.\n');
+    return undefined;
+  }
+
+  if (cmd === 'episode-record') {
+    const id = value('--id');
+    if (!id) { process.stderr.write('usage: voice-decisions episode-record --id D0022 --uri spotify:episode:...\n'); process.exit(2); }
+    const q = buildQueue(HUB);
+    if (!q.read) { process.stderr.write(`${q.why}\n`); process.exit(4); }
+    const d = [...q.decisions, ...(q.recent ?? [])].find((x) => x.id === id || x.slug === id);
+    if (!d) { process.stderr.write(`no decision ${id} in the registry - not recording an episode against nothing\n`); process.exit(2); }
+    const rec = recordEpisode(WS, {
+      id: d.id,
+      slug: d.slug,
+      handle: d.handle,
+      title: value('--title'),
+      episodeUri: value('--uri'),
+      words: value('--words') ? Number(value('--words')) : null,
+      minutes: value('--minutes') ? Number(value('--minutes')) : null,
+      scriptPath: value('--script'),
+      correction: flag('--correction'),
+      backfill: flag('--backfill'),
+      note: value('--note'),
+      by: value('--by'),
+      at: value('--at') ?? new Date().toISOString(),
+      hub: HUB,
+    });
+    if (flag('--json')) return json(rec);
+    out(`recorded ${rec.id} "${rec.handle}" - ${rec.episodeUri ?? 'no episode uri given'}`);
+    if (!rec.artifactRead) {
+      out(`  WITHOUT a fingerprint: ${rec.artifactWhy}. Nothing can tell later whether this episode still matches its page.`);
+    }
+    if (rec.hubDirty) out('  the hub clone has uncommitted changes under reports/decisions, so the page this was derived from is not a published one.');
+    if (rec.supersedes) out(`  supersedes ${rec.supersedes}. ${CORRECTION_POLICY}`);
     return undefined;
   }
 
@@ -193,7 +267,7 @@ function main() {
   }
   if (cmd === 'armed') { const on = isArmed(WS); out(on ? 'armed' : 'not armed'); return process.exit(on ? 0 : 1); }
 
-  process.stderr.write('usage: voice-decisions queue|script|route|answer|poll|unrouted|resolve|section|arm|disarm|armed'
+  process.stderr.write('usage: voice-decisions queue|script|episodes|episode|episode-record|route|answer|poll|unrouted|resolve|section|arm|disarm|armed'
     + ' — see the header of this file\n');
   process.exit(2);
   return undefined;

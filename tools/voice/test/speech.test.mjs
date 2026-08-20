@@ -16,7 +16,7 @@ import test from 'node:test';
 
 import { buildQueue } from '../lib/handles.mjs';
 import { routeSpoken } from '../lib/route.mjs';
-import { WORDS_PER_MINUTE, decisionScript, queueScript } from '../lib/speech.mjs';
+import { WORDS_PER_MINUTE, decisionScript, queueScript, soloScript } from '../lib/speech.mjs';
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const NOW = new Date('2026-08-20T14:00:00Z');
@@ -167,4 +167,46 @@ test('the script reports its own length against the five minutes he asked for', 
   assert.ok(s.words > 20);
   assert.equal(s.minutes, Math.round((s.words / WORDS_PER_MINUTE) * 10) / 10);
   assert.equal(typeof s.overRuns, 'boolean');
+});
+
+test('SOLO: one decision is its own episode, and it still ends by telling him what to say', () => {
+  const h = hub();
+  const q = buildQueue(h, { now: NOW });
+  const s = soloScript(q, 'branch protections', { hub: h });
+  assert.equal(s.read, true);
+  assert.equal(s.item.id, 'D0022');
+  assert.match(s.close, /say/i);
+  assert.ok(s.text.trimEnd().endsWith(s.close.trimEnd()), 'the close is the last thing he hears');
+  assert.doesNotMatch(s.text, /D00\d\d/, 'no decision ids');
+  assert.doesNotMatch(s.text, /#\d+/, 'no issue numbers');
+  assert.doesNotMatch(s.text, /https?:\/\//, 'no URLs');
+  assert.doesNotMatch(s.text, /\b20\d\d-\d\d-\d\d\b/, 'no slugs or ISO dates');
+});
+
+test('SOLO ROUND TRIP: the example a single-decision episode gives him routes to that decision', () => {
+  const h = hub();
+  const q = buildQueue(h, { now: NOW });
+  const ws = tmp('speech-ws-');
+  for (const d of q.decisions) {
+    const s = soloScript(q, d.id, { hub: h });
+    const r = routeSpoken(s.item.example, { workspace: ws, hub: h, queue: q, now: NOW });
+    assert.equal(r.kind, 'answer', `the example for "${d.handle}" must route: ${s.item.example}`);
+    assert.equal(r.decision.id, d.id, 'and to the decision it was read out for');
+  }
+});
+
+test('SOLO: it does not narrate the other open decisions — an episode is per artifact', () => {
+  const h = hub();
+  const q = buildQueue(h, { now: NOW });
+  const s = soloScript(q, 1, { hub: h });
+  const others = q.decisions.filter((d) => d.id !== s.item.id);
+  for (const o of others) assert.doesNotMatch(s.text, new RegExp(o.handle, 'i'), `${o.handle} belongs to its own episode`);
+});
+
+test('SOLO: a selector that names nothing open refuses and says what IS open', () => {
+  const h = hub();
+  const s = soloScript(buildQueue(h, { now: NOW }), 'no such thing', { hub: h });
+  assert.equal(s.item, null);
+  assert.equal(s.text, '', 'nothing is narrated from a selector that matched nothing');
+  assert.match(s.why, /no open decision answers/);
 });
