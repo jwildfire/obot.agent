@@ -141,8 +141,15 @@ export const TRIGGERED_QUIET_MIN = 30
  * An unjudged closeout keeps nagging, because that is the backlog the whole role
  * exists to clear — it stops when a verdict is recorded, which is the correct
  * silencer. The floors keep that from being a wake every five minutes.
+ *
+ * `unapplied` is the same argument about one of his own decisions
+ * (jwildfire/obot.roadmap#241) and is deliberately NOT a once-only kind. A finish is
+ * an event and repeating it teaches him to ignore the channel; an answer he clicked
+ * that nothing has applied is a condition that stays true until an agent acts, and
+ * the nine hours of 2026-08-16 are exactly what one silent delivery buys. Its
+ * silencer is `ops-answers apply`, and nothing else.
  */
-export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, wedged: 60, idle: 45, delivered: 1440 }
+export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, wedged: 60, idle: 45, delivered: 1440, unapplied: 60 }
 
 /**
  * Kinds where the event is the whole condition, so one wake is the whole delivery.
@@ -718,7 +725,7 @@ export function hostWasAway(prevSweptIso, now = new Date()) {
  * the third time (verdict swallowed, detail kept), and the one alarm here that must
  * never be quiet is the one saying the alarms are not being delivered.
  */
-export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true, misread = [], completions = [], completionsHeld = [] } = {}) {
+export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true, misread = [], completions = [], completionsHeld = [], answers = [], answersHeld = [] } = {}) {
   const lines = ['## Wake — workers that stopped, and what completed', '']
   // Every detector here reads `~/.claude/jobs`. With no ledger on the machine the
   // pending list is empty because nothing was looked at, and "clear — every worker
@@ -742,6 +749,18 @@ export function wakeSection({ pending = [], delivered = [], held = [], listener 
   if (completionsHeld.length) {
     const fresh = completionsHeld.filter((c) => !/already delivered/.test(c.why ?? ''))
     if (fresh.length) lines.push(`held: ${fresh.length} completion(s) over this run's budget — they go out on the next sweep, nothing is dropped`)
+  }
+  // And what the channel carried about HIS OWN decisions (jwildfire/obot.roadmap#241).
+  // The count only: the rows themselves are in the answers section, and printing them
+  // twice would make one finding look like two. Stated here because a channel that
+  // never says how many of its lines ended at somebody is a channel in which
+  // 2026-08-16 happens again unnoticed.
+  if (answers.length) {
+    lines.push(`answers: ${answers.length} unapplied answer(s) of his woken to the Navigator this sweep — the rows are in the answers section below`)
+  }
+  if (answersHeld.length) {
+    const fresh = answersHeld.filter((a) => !/floor/.test(a.why ?? ''))
+    if (fresh.length) lines.push(`held: ${fresh.length} unapplied answer(s) over this run's budget — they go out on the next sweep, nothing is dropped`)
   }
   if (awayNote) lines.push(awayNote)
   if (outside) lines.push(`bounded: ${outside} unjudged closeout(s) older than ${WAKE_WINDOW_HOURS}h are not woken for — judge them from the delivery record, not from here`)

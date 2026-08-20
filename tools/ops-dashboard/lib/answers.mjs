@@ -403,18 +403,158 @@ export function deliverAnswers(workspace, { hub = null, now = new Date() } = {})
 }
 
 /**
+ * The two ways an answer of his goes unapplied, told apart — jwildfire/obot.roadmap#241.
+ *
+ * THE 16 AUGUST FAILURE WAS NOT A DETECTION FAILURE. He answered three decisions at
+ * 21:34, 21:37 and 21:39Z; the sweep announced all three inside six minutes and then
+ * re-computed `3 answers pending` 105 consecutive times over nine hours. Every one of
+ * those readings was correct and none of them reached anybody who could act, because
+ * the only thing carrying them was a file. This is that same finding, in the shape the
+ * one channel that reaches an actor already accepts.
+ *
+ * TWO CONDITIONS, BECAUSE THEY HAVE DIFFERENT REMEDIES. The overdue clock used to
+ * measure from his click alone, which cannot separate "nobody ever picked this up"
+ * from "somebody picked it up and dropped it":
+ *
+ *   captured  past the bar from his click        the DELIVERER is the suspect —
+ *                                                the sweep never announced it at all
+ *   delivered past the bar from the ANNOUNCEMENT an AGENT is the suspect — it was
+ *                                                told, and the artifact never changed
+ *
+ * The 16 August incident is the second, three times over, and the first clock reads
+ * them identically. Measuring `dropped` from `deliveredAt` also stops an answer that
+ * was announced thirty seconds ago from being called dropped merely because he clicked
+ * a long time before anything was listening.
+ *
+ * NEVER HIS WORDS. Same rule as `deliverAnswers`, for a sharper reason here: these
+ * lines are appended to the wake log and read out in a session, and what a session
+ * reads can end up in a scratchpad and then in a published wrapup. The decision id,
+ * the verdict and the clock are everything an agent needs; his prose belongs in the
+ * artifact he is deciding.
+ */
+export function unappliedDetections(pending = [], { now = new Date() } = {}) {
+  const out = [];
+  for (const a of pending) {
+    if (a.status === APPLIED || a.status === SUPERSEDED) continue;
+    const name = a.decisionId ?? a.artifact ?? a.id;
+    const dropped = a.status === DELIVERED && a.deliveredAt;
+    // The clock each condition is actually about. For `dropped` that is the moment
+    // the fleet was told, not the moment he clicked.
+    const since = dropped ? a.deliveredAt : a.at;
+    const min = ageMin(since, now);
+    if (min <= OVERDUE_MIN) continue;
+    const clicked = ago(ageMin(a.at, now));
+    out.push({
+      kind: 'unapplied',
+      key: `unapplied:${name}`,
+      condition: dropped ? 'dropped' : 'unclaimed',
+      // The record id, so a surface rendering one row per answer can match a
+      // detection to its row without re-deriving which of the three printed names
+      // this one is going by (obot.agent#180).
+      id: a.id,
+      name,
+      // No worker owns this, so the decision names itself. `job <id>` is what the
+      // scratchpad would otherwise print, which is the least actionable thing a
+      // wake can say.
+      worker: name,
+      artifact: a.artifact ?? null,
+      at: since,
+      minutes: min,
+      line: dropped
+        ? `${name} ${a.verdict} — he answered it ${clicked} ago and the artifact has not changed. `
+          + `It was announced to the fleet ${ago(min)} ago, so an agent was told and dropped it — `
+          + `apply it, then obot.agent/tools/ops-answers apply ${name} --evidence <url> --by <your id>`
+        : `${name} ${a.verdict} — he answered it ${clicked} ago and nothing has picked it up. `
+          + `The sweep never announced it, so the deliverer is the suspect rather than an agent — `
+          + `read it with obot.agent/tools/ops-answers pending`,
+      // The queue row's version of the same fact, in the second person, because that
+      // one is rendered on his own page rather than read out to the Navigator.
+      claim: {
+        label: 'answered, not applied',
+        detail: dropped
+          ? `you decided this ${clicked} ago and the artifact still has not changed`
+          : `you decided this ${clicked} ago and nothing has picked it up yet`,
+      },
+    });
+  }
+  return out.sort((x, y) => y.minutes - x.minutes);
+}
+
+/**
+ * The critical-pin claim on a queue row — `rank.mjs` route 2, filled for the first time.
+ *
+ * That seam has existed since the tag was built and its own header names this exact
+ * case ("the answer pipeline's OVERDUE … a clock decides it, so it cannot be talked
+ * up"). Nothing has ever written to it, which is why the one page he reads stayed
+ * silent about his own unapplied answer for nine hours.
+ *
+ * Attached here rather than in `collectDecisions` so the hub collector keeps knowing
+ * nothing about the local answer store, and so this stays a pure function over two
+ * lists that a test can seed both halves of.
+ */
+export function attachUnapplied(items = [], pending = [], { now = new Date() } = {}) {
+  const claims = new Map();
+  for (const d of unappliedDetections(pending, { now })) {
+    if (d.artifact) claims.set(d.artifact, d.claim);
+  }
+  if (!claims.size) return items;
+  return items.map((i) => {
+    const c = i?.artifact ? claims.get(i.artifact) : null;
+    return c ? { ...i, computed: c } : i;
+  });
+}
+
+/**
  * The Navigator's answers section. Rendered into `navigator-state.md`, which
  * means it also appears on the dashboard's Navigator tab for free (that tab
  * renders every `##` section, including ones it has never heard of).
+ *
+ * THE VERDICT LINE IS NOT DECORATION. Until #241 this section was a heading and a
+ * list of bullets, each overdue row led with `**OVERDUE**`, and neither could ever
+ * render as an alarm on that tab — for two independent reasons, both of which had to
+ * be fixed and only one of which is obvious:
+ *
+ *   1. `OVERDUE` is not in `ALARM_RE`'s vocabulary (GAP FINDING BREACHED FAILED DOWN
+ *      BROKEN), so the headline was ordinary text by the sweep's own rules;
+ *   2. and it would not have mattered if it were, because `parseNavigatorState`
+ *      alarm-tests preamble notes and unindented plain lines and NOTHING ELSE. A
+ *      `- ` bullet goes down a branch that never assigns `alarm` at all, and
+ *      `parseItem` strips `*`, so `**OVERDUE**` arrived on the page as the grey word
+ *      OVERDUE in the middle of a grey row.
+ *
+ * So the verdict is an unindented line under the heading — the same shape as the
+ * config, worker and landing ledger lines it sits beside: a headline that is the
+ * whole answer, then the rows under it. The clean case gets one too, because a
+ * section that says nothing when it is happy and nothing when it is broken is a
+ * section nobody can read.
  */
 export function answersSection(pending, { now = new Date() } = {}) {
   const lines = ['## Decision answers — recorded by @jwildfire, awaiting an agent', ''];
   if (!pending.length) {
     lines.push(pending[STORELESS]
-      ? '- no answer store on this machine yet — nothing has been recorded, so nothing can be pending. It appears the first time you answer a decision on the dashboard.'
-      : '- none — every answer he has recorded has been applied');
+      ? 'answers: no store on this machine yet — nothing has been recorded, so nothing can be pending. It appears the first time you answer a decision on the dashboard.'
+      : 'answers: none pending — every answer he has recorded has been applied');
     return `${lines.join('\n')}\n`;
   }
+
+  const late = unappliedDetections(pending, { now });
+  if (late.length) {
+    const dropped = late.filter((d) => d.condition === 'dropped').length;
+    const unclaimed = late.length - dropped;
+    const parts = [];
+    if (dropped) parts.push(`${dropped} announced to the fleet and dropped`);
+    if (unclaimed) parts.push(`${unclaimed} never picked up`);
+    // `ANSWER DELIVERY GAP` is in ALARM_RE's vocabulary on purpose and the tests
+    // assert it against the imported regex, never a copy of it (obot.agent#223).
+    lines.push(`answers: **ANSWER DELIVERY GAP** — ${late.length} answer(s) of his recorded and unapplied `
+      + `past the ${OVERDUE_MIN}m bar, oldest ${ago(late[0].minutes)} (${parts.join(', ')}). `
+      + 'An answer he clicked that nothing applies is a decision he has to make twice.');
+    for (const d of late) lines.push(`  ${d.line}`);
+  } else {
+    lines.push(`answers: ${pending.length} in flight, none past the ${OVERDUE_MIN}m bar — recorded and on their way, not dropped`);
+  }
+  lines.push('');
+
   for (const a of pending) {
     const min = ageMin(a.at, now);
     const overdue = min > OVERDUE_MIN ? '**OVERDUE** ' : '';
