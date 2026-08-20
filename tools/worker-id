@@ -39,9 +39,11 @@ them to return.
 Implements jwildfire/obot.roadmap#194; prerequisite for #184's closeout check.
 """
 
+import json
 import os
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 
@@ -52,6 +54,10 @@ from id_ledger import locked, read_journal  # noqa: E402
 
 WS = pathlib.Path(os.environ.get("OBOT_WORKSPACE") or (pathlib.Path.home() / "Documents/obot2"))
 JOBS = pathlib.Path(os.environ.get("OBOT_JOBS_DIR") or (pathlib.Path.home() / ".claude/jobs"))
+# How old the cached spend verdict may be and still be believed. The Navigator sweep
+# rewrites it every five minutes; an hour means the observer has been dead for eleven
+# cycles, and this gate defers rather than guessing.
+SPEND_MAX_AGE_S = int(os.environ.get("OBOT_SPEND_VERDICT_MAX_AGE") or 3600)
 
 
 def usage(code=0):
@@ -80,6 +86,38 @@ def flags(argv, allowed):
     return out, rest
 
 
+def spend_refusal():
+    """The nightly spend cap (jwildfire/obot.roadmap#275), as a claim-time gate.
+
+    Every dispatch of a worker passes through `claim` - obot-auto claims before it
+    launches, and session-spawn's contract is that a sibling claims before it spawns
+    - and nothing else does. The Navigator, prime and the admiral claim nothing, so
+    they are never gated by this: blinding the surfaces that REPORT the spend would
+    be the worst possible way to control it.
+
+    Reads the verdict the Navigator sweep already cached rather than measuring here.
+    A claim happens in front of every spawn and must not pay three seconds for the
+    usage generator; the sweep refreshes the verdict every five minutes and is the
+    thing whose job it is to keep it current. `obot-auto` runs the live check
+    (tools/spend-guard) in its pre-flight, so the heaviest dispatch on the machine
+    is measured rather than remembered.
+
+    No verdict, or one older than an hour, DEFERS. A dead sweep is the sweep's own
+    alarm to raise - the state file says so on every run - and a spend reading that
+    has broken must not become the thing that stops every worker on the machine.
+    """
+    cache = WS / ".claude/session-hub/cache/spend.json"
+    try:
+        if time.time() - cache.stat().st_mtime > SPEND_MAX_AGE_S:
+            return None
+        v = json.loads(cache.read_text())
+    except (OSError, ValueError):
+        return None
+    if v.get("state") != "stop":
+        return None
+    return v.get("why") or (v.get("headline") or "over the nightly spend cap").replace("**", "")
+
+
 def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         usage(0 if argv else 1)
@@ -92,6 +130,22 @@ def main(argv):
             print("worker-id: claim needs --slug (the short name the worker is known by)",
                   file=sys.stderr)
             return 1
+        # The nightly spend cap (jwildfire/obot.roadmap#275). Every dispatch of a
+        # worker passes through here - obot-auto claims before it launches, and
+        # session-spawn's contract is that a sibling claims before it spawns - and
+        # nothing else does, so this is the one place a refusal reaches both lanes
+        # without touching the observers. The Navigator, prime and the admiral claim
+        # nothing and are never gated by this: blinding the surfaces that REPORT the
+        # spend would be the worst possible way to control it.
+        #
+        # Refused BEFORE the journal is touched, so a refused claim burns no id and
+        # leaves no record of a worker that never ran.
+        refusal = spend_refusal()
+        if refusal:
+            print("worker-id: REFUSED - %s" % refusal, file=sys.stderr)
+            print("worker-id: no id issued and nothing spawned. This is the cap @jwildfire "
+                  "set on 2026-08-18; see obot.agent/config/spend.json.", file=sys.stderr)
+            return 2
         wid = claim(jp, f["slug"], f.get("task"), f.get("sub"))
         print(wid)  # stdout: the id, alone, for $(...)
         print("worker-id: claimed %s for %s — put it in the session name: %s"
