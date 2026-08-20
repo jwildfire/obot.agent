@@ -6,46 +6,46 @@
   "boundary": "The ten carrying `top10` are ranked and are what gets picked up next; the bench carrying `on-deck` is what a slot is filled from, unranked until one is promoted; everything else is open work with no claim on either.",
   "rank": [
     {
-      "issue": 278,
-      "why": "his instruction, and nothing below it means anything unless the order is real"
-    },
-    {
-      "issue": 275,
-      "why": "we consumed his week with no way to see it and nothing that could have stopped a dispatch; nothing unattended runs before it",
-      "review": "smaller than this rank assumed — spend measurement does exist; only the cadence and the threshold are missing"
-    },
-    {
       "issue": 272,
-      "why": "his word, critical, and obot.agent/main is where the merge policy lives"
+      "why": "his word, critical, and obot.agent/main is where the merge policy lives",
+      "review": "now one choice away — D0022 is live and the tooling is merged; it needs him to pick A, B or C and nothing else"
+    },
+    {
+      "issue": 257,
+      "why": "the org chart went undelivered for a day, and four workers finished on 08-20 with nothing telling him — the same gap twice, and he found it both times"
+    },
+    {
+      "issue": 241,
+      "why": "he answered a decision, clicked three times and asked twice whether it had landed — it had not; an answer that reaches disk and nowhere else is the failure he personally absorbed"
+    },
+    {
+      "issue": 252,
+      "why": "nobody can write the board, so every requirement's stage is wrong and every surface built on it inherits that"
     },
     {
       "issue": 279,
       "why": "gates the session that gates scheduling, and a planning session with him will finalise it, which removes the write-from-memory risk",
-      "review": "may need to be earlier"
-    },
-    {
-      "issue": 260,
-      "why": "git writes as him"
+      "review": "may need to be earlier — goes to rank 1 the moment he puts a date on the machine move, because the draft has to exist before that session rather than after"
     },
     {
       "issue": 263,
-      "why": "config artifacts"
+      "why": "one bullet left and it is his: he has never read a config card and said whether it is better"
     },
     {
-      "issue": 264,
-      "why": "config currency"
+      "issue": 260,
+      "why": "agent commits still go out under his name, and no token fixes that lane"
     },
     {
-      "issue": 251,
-      "why": "confirmed kills"
+      "issue": 265,
+      "why": "he answers decisions from the car with no screen and no issue number in his head — the lane he actually uses"
     },
     {
-      "issue": 256,
-      "why": "invisible work"
+      "issue": 281,
+      "why": "he asked for CRAN restoration by name and has already decided the approach; the only user-facing product work on the head"
     },
     {
       "issue": 274,
-      "why": "SafetyCensus design"
+      "why": "SafetyCensus rebuilt on metrics and reports, and the design needs his answer before any build starts"
     }
   ]
 }

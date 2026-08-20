@@ -28,10 +28,33 @@ const AS_GIVEN = [278, 275, 272, 279, 260, 263, 264, 251, 256, 274]
 // The requirement's own acceptance test
 // ---------------------------------------------------------------------------
 
-test('the store reproduces the ranking that already exists, exactly', () => {
-  const r = readRank(REPO)
+// #278's acceptance test: "if it cannot reproduce a ranking that already exists, it is
+// not ready to produce one that does not." It is asserted against a FIXTURE, not against
+// the live store. Run against the live store it proved the reader worked for exactly one
+// day and then froze the order permanently - so the first real re-rank failed the suite,
+// which is the store refusing its owner (rank/README.md: prime edits it, and his steering
+// overrides without discussion).
+test('the reader reproduces a declared ranking exactly, in order', () => {
+  const dir = tmp()
+  fs.mkdirSync(path.join(dir, 'rank'))
+  fs.writeFileSync(rankFile(dir), JSON.stringify({
+    repo: 'jwildfire/obot.roadmap',
+    label: 'top10',
+    bench: 'on-deck',
+    boundary: 'The ten carrying `top10` are ranked; the bench carrying `on-deck` is what a slot is filled from.',
+    rank: AS_GIVEN.map((issue) => ({ issue, why: 'the reason he was given for this rank' })),
+  }))
+  const r = readRank(dir)
   assert.equal(r.read, true, r.why)
   assert.deepEqual(r.declared.rank.map((i) => i.issue), AS_GIVEN)
+})
+
+test('the live store is readable and holds a full head of ten', () => {
+  const r = readRank(REPO)
+  assert.equal(r.read, true, r.why)
+  assert.equal(r.declared.rank.length, 10, 'the ranked head is ten - a short head is a slot nobody filled')
+  const issues = r.declared.rank.map((i) => i.issue)
+  assert.equal(new Set(issues).size, issues.length, 'an issue is ranked twice')
 })
 
 test('every ranked item carries a one-line why, because a rank he cannot interrogate is one he cannot steer', () => {
@@ -42,22 +65,41 @@ test('every ranked item carries a one-line why, because a rank he cannot interro
   }
 })
 
-test('the four reasons he was actually given are carried verbatim, not paraphrased', () => {
+// The reasons he was given on 2026-08-19 are guarded against PARAPHRASE, not against
+// re-ranking. An item leaves the head when it closes or when prime re-ranks — both are
+// the store working — so this asserts only over the rows still present. Pinning the
+// membership here once made a legitimate re-rank fail the suite, which is the opposite
+// of what a store owned by prime should do (obot.roadmap#278).
+const GIVEN = {
+  278: /nothing below it means anything unless the order is real/,
+  275: /nothing unattended runs before it/,
+  272: /obot\.agent\/main is where the merge policy lives/,
+  279: /removes the write-from-memory risk/,
+}
+
+test('a reason he was actually given is carried verbatim for as long as its row is on the head', () => {
   const why = Object.fromEntries(readRank(REPO).declared.rank.map((i) => [i.issue, i.why]))
-  assert.match(why[278], /nothing below it means anything unless the order is real/)
-  assert.match(why[275], /nothing unattended runs before it/)
-  assert.match(why[272], /obot\.agent\/main is where the merge policy lives/)
-  assert.match(why[279], /removes the write-from-memory risk/)
+  let checked = 0
+  for (const [issue, pattern] of Object.entries(GIVEN)) {
+    if (why[issue] === undefined) continue
+    assert.match(why[issue], pattern, `#${issue}'s reason has been paraphrased away from the one he was given`)
+    checked += 1
+  }
+  assert.ok(checked > 0, 'not one of the reasons he was given is still on the head - that is a rewrite, not a re-rank')
 })
 
-test('the two ranks prime has flagged for re-rank say so in the store, so a re-rank is cheap', () => {
-  const by = Object.fromEntries(readRank(REPO).declared.rank.map((i) => [i.issue, i]))
-  assert.match(by[275].review, /spend measurement does exist/)
-  assert.match(by[279].review, /earlier/)
-  // And nothing else claims to be under review — a caveat on every row is a caveat
-  // on none of them.
-  const flagged = readRank(REPO).declared.rank.filter((i) => i.review).map((i) => i.issue)
-  assert.deepEqual(flagged, [275, 279])
+test('a rank prime has flagged says so in the store, so a re-rank is cheap', () => {
+  const rows = readRank(REPO).declared.rank
+  const flagged = rows.filter((i) => i.review)
+  // A caveat has to say something. An empty or one-word review is a flag nobody can act on.
+  for (const row of flagged) {
+    assert.ok(typeof row.review === 'string' && row.review.trim().length > 10,
+      `#${row.issue}'s review says nothing actionable`)
+    assert.ok(!row.review.includes('\n'), `#${row.issue}'s review is not one line`)
+  }
+  // A caveat on every row is a caveat on none of them.
+  assert.ok(flagged.length < rows.length / 2,
+    `${flagged.length} of ${rows.length} rows are flagged for review - that is a queue prime has not ranked, not a set of caveats`)
 })
 
 test('the store holds the order and the reason and nothing GitHub already knows', () => {
