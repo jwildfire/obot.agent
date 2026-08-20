@@ -1,0 +1,51 @@
+{
+  "$note": "The ranked head of the requirement queue — jwildfire/obot.roadmap#278. THE ORDER AND THE ONE-LINE REASON, AND NOTHING ELSE. Title, state, milestone, blocked-ness, sub-issue progress and whether an item is still open are all DERIVED from GitHub at render time, keyed off the `top10` label. Anything you are tempted to add here that GitHub already knows will drift; that is the defect this file exists to avoid. Written by 🎩🤖 obot-prime, who owns strategy. See rank/README.md.",
+  "repo": "jwildfire/obot.roadmap",
+  "label": "top10",
+  "bench": "on-deck",
+  "boundary": "The ten carrying `top10` are ranked and are what gets picked up next; the bench carrying `on-deck` is what a slot is filled from, unranked until one is promoted; everything else is open work with no claim on either.",
+  "rank": [
+    {
+      "issue": 278,
+      "why": "his instruction, and nothing below it means anything unless the order is real"
+    },
+    {
+      "issue": 275,
+      "why": "we consumed his week with no way to see it and nothing that could have stopped a dispatch; nothing unattended runs before it",
+      "review": "smaller than this rank assumed — spend measurement does exist; only the cadence and the threshold are missing"
+    },
+    {
+      "issue": 272,
+      "why": "his word, critical, and obot.agent/main is where the merge policy lives"
+    },
+    {
+      "issue": 279,
+      "why": "gates the session that gates scheduling, and a planning session with him will finalise it, which removes the write-from-memory risk",
+      "review": "may need to be earlier"
+    },
+    {
+      "issue": 260,
+      "why": "git writes as him"
+    },
+    {
+      "issue": 263,
+      "why": "config artifacts"
+    },
+    {
+      "issue": 264,
+      "why": "config currency"
+    },
+    {
+      "issue": 251,
+      "why": "confirmed kills"
+    },
+    {
+      "issue": 256,
+      "why": "invisible work"
+    },
+    {
+      "issue": 274,
+      "why": "SafetyCensus design"
+    }
+  ]
+}

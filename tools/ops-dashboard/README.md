@@ -116,6 +116,47 @@ long-lived because nothing restarts it on a merge — writing a new shape into t
 file hands a running older server something it cannot parse. That is not hypothetical:
 it turned the live queue page into a 500 on 2026-08-16. The file name is the schema.
 
+### The ranked head — what comes next, below all three
+
+Under the three buckets, at the bottom of the queue, sits the next ten requirements in
+order (jwildfire/obot.roadmap#278). @jwildfire, 2026-08-18: *"Next 10 requirements show
+up at the bottom of the queue maybe. you're responsible for strategy, so you get the
+decision and then i can steer when i want to."*
+
+**It is a preview, never a fourth bucket.** Read-only, no control of any kind, every
+link leaving for GitHub. His queue holds exactly three things that need him and that
+rule is jwildfire/obot.roadmap#220; the moment this asks him for something it becomes a
+fourth obligation. `test/rank-head.test.mjs` asserts the absence of the ask rather than
+trusting anyone to remember it.
+
+**Rank is declared; everything else is derived.** Two things come from a file — the
+position and the one-line why, in `obot.agent/rank/top10.json`. Title, state, milestone,
+blocked-ness and sub-issue progress come from GitHub, keyed off the `top10` label
+@jwildfire asked for so the list is one API call away. A label carries membership and
+the file carries order; the two can disagree, and every disagreement is reported on the
+panel rather than silently resolved.
+
+**Two clocks, never merged.** "Ranked 2026-08-19, 3d old" is the order; "state refreshed
+4m ago" is everything beside it. The declaration is read inline on every render, so the
+order and the reasons survive an unauthenticated `gh`; only the derived half is cached
+and refreshed behind the page. A refresh that failed says so in its own sentence, with
+the age of what is actually on screen — never a silent substitution of old for current.
+An age nobody could measure prints as "not known", never as a zero. The order's age
+comes from `git log -1 -- rank/top10.json`, never the file's mtime, which a fresh clone
+stamps with the moment it was written.
+
+**A slot open is stated and left alone.** A `top10` label on a closed issue is a
+computed condition, so the sweep raises it as a finding
+(`tools/navigator/rankhead.mjs`) and this panel shows it. Neither chooses the
+replacement — that is 🎩🤖 obot-prime's — and the bench reaches both surfaces as a
+*count* so nothing either prints can be read as a recommendation. Nothing about it ever
+reaches his config list.
+
+Both surfaces read GitHub through the same module, spawned out of process by the
+dashboard, so the page and the sweep cannot disagree about what the ten are. The cache
+is `rank-head.json`, its failures `rank-head-failed.json`, under the same
+name-is-the-schema rule as `rcs-lane.json`. Full contract: [`rank/README.md`](../../rank/README.md).
+
 ## What the page is made of
 
 The page states three things about itself, on the healthy path as well as the bad one:

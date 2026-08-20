@@ -82,6 +82,9 @@ import { readCurrency } from './currency.mjs'
 // do nothing about it. Only the broken-section wording is imported here; the decision
 // and the write both live in tools/carveout-route.
 import { routingBroken } from './carveout.mjs'
+// The ranked head (jwildfire/obot.roadmap#278). Reported, never acted on: a `top10`
+// label on a closed issue is a slot open, and choosing what fills it is 🎩🤖 obot-prime's.
+import { collectRankHead, rankheadSection, readingBroken as rankheadBroken } from './rankhead.mjs'
 // The wake (hub#212). The sweep already knew a worker had stopped; what it could not
 // do was get the Navigator's attention, so workers stopped and then waited — twenty
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
@@ -197,7 +200,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -291,6 +294,15 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push((currency && currency.trim())
     ? currency.trimEnd()
     : '## Claim currency — what has been re-checked, and when\n\n**CLAIM CHECK BROKEN** — no claim was re-checked this sweep, so nothing here says a config item is still outstanding or that a decision page still frames a live question. Unknown, not clean.', '')
+
+  // What comes next, once his queue is empty (jwildfire/obot.roadmap#278). It sits
+  // directly above the RC queue because it is the same question one step later: that
+  // section is what is waiting on him now, this is what gets picked up after. Rendered
+  // even when clean — a detector that only speaks up on failure is indistinguishable
+  // from a dead one — and it asks nobody for anything.
+  lines.push((rankhead && rankhead.trim())
+    ? rankhead.trimEnd()
+    : '## Ranked head — the next ten, in order (rank declared, everything else derived)\n\n**RANK HEAD READING BROKEN** — no reading ran this sweep, so nothing here says what comes next or whether a slot has opened. Unknown, not clean.', '')
 
   lines.push(
     '## RC queue — open PRs awaiting or holding @jwildfire review',
@@ -748,6 +760,17 @@ const safeAdmiral = () => {
 const safeCarveout = () => {
   try { return runCarveout() } catch (e) { return routingBroken(String(e.message)) }
 }
+
+/**
+ * The ranked head, read from this checkout's `rank/top10.json` and from GitHub.
+ *
+ * Two `gh api` calls and a `git log`. It never writes, never files a config item and
+ * never names a replacement — the whole of its output is a statement about what the
+ * next ten currently are and whether anything has changed underneath the order.
+ */
+const safeRankhead = () => {
+  try { return rankheadSection(collectRankHead(REPO_ROOT)) } catch (e) { return rankheadBroken(String(e.message)) }
+}
 // A broken wake must not break the sweep, and must not fail quietly either: the
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
@@ -791,7 +814,7 @@ async function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -909,7 +932,8 @@ async function main() {
   const admiral = safeAdmiral()
   const local = safeLocal(repos)
   const currency = await safeCurrency()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency }))
+  const rankhead = safeRankhead()
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

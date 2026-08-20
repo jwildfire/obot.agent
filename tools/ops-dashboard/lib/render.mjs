@@ -21,6 +21,7 @@ import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
 import { wireHtml, WIRE_CSS } from './wire-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
+import { RANK_REL } from '../../navigator/rank.mjs';
 import { rosterHtml, ROSTER_CSS, emptyRoster } from './roster-view.mjs';
 import { agentsTableHtml, TABLE_CSS } from './roster-table.mjs';
 import { UNMEASURED, nothingYet } from './absent.mjs';
@@ -307,6 +308,123 @@ const collapsed = (title, rows, describe) => (rows.length ? `<details class="q-f
 
 // Palette, header and tab strip — shared by both tabs so the header is genuinely
 // persistent: the same markup and the same styles whichever view is on screen.
+/**
+ * The ranked head — what comes next, below his three buckets (jwildfire/obot.roadmap#278).
+ *
+ * @jwildfire, 2026-08-18: "Next 10 requirements show up at the bottom of the queue
+ * maybe. you're responsible for strategy, so you get the decision and then i can steer
+ * when i want to."
+ *
+ * IT IS A PREVIEW, NEVER A FOURTH BUCKET. His queue holds three things that need him —
+ * release candidates, decisions, config — and that rule is jwildfire/obot.roadmap#220.
+ * This sits under all of them, it is read-only, it has no control of any kind, and its
+ * every link leaves for GitHub. The moment it asks him for something it is a fourth
+ * obligation and the three-bucket rule dies quietly, so a test asserts the absence of
+ * an ask rather than trusting anyone to remember.
+ *
+ * RANK IS DECLARED, EVERYTHING ELSE IS DERIVED. The only two things here that come out
+ * of a file are the position and the one-line why — the reason is what makes the rank
+ * interrogable, and a rank he cannot interrogate is one he cannot steer. Title, state,
+ * milestone, blocked-ness and sub-issue progress all come from GitHub at read time,
+ * keyed off the `top10` label he asked for.
+ *
+ * IT AGES IN TWO PLACES BECAUSE IT HAS TWO SOURCES. "Ranked <date>, 3d old" is about
+ * the order; "state refreshed 4m ago" is about everything beside it. A list untouched
+ * for three days says so, and a reading that could not refresh says that in its own
+ * sentence with the age of what is actually on screen — never a silent substitution of
+ * old for current.
+ */
+const rankHeadPanel = (m) => {
+  if (!m) return '';
+  const head = `<h2 class="q-h">Next ten <span class="q-n">${m.declaredRead ? m.items.length : UNMEASURED}</span></h2>`;
+  if (!m.declaredRead) {
+    return `<section class="rank" aria-label="Ranked head, read only">
+${head}
+<p class="q-unread">${esc(nothingYet('The ranked head could not be read', `${m.declaredWhy}; the order lives in obot.agent/${RANK_REL} and is read from the checkout beside this workspace`))}</p>
+</section>`;
+  }
+  return `<section class="rank" aria-label="Ranked head, read only">
+${head}
+<p class="rank-clocks">${rankClocks(m)}</p>
+${rankState(m)}
+<ol class="rank-list">${m.items.map(rankRow).join('')}</ol>
+${m.boundary ? `<p class="q-aside">${esc(m.boundary)}</p>` : ''}
+${m.findings.map((f) => `<p class="rank-note">${rankFinding(f, m)}</p>`).join('')}
+<p class="q-aside">Read-only. Rank is 🎩🤖 obot-prime's; steering it overrides the order without discussion.</p>
+</section>`;
+};
+
+/** The order's own clock. Never a zero for an age nobody could measure. */
+const rankClocks = (m) => (m.touched?.read
+  ? `Ranked ${esc(m.touched.iso.slice(0, 10))}, ${esc(ageWords(m.touched.ageMin) ?? 'age unknown')}${
+    m.touched.dirty ? ', edited since and not committed' : ''}`
+  : `Rank age not known &mdash; ${esc(m.touched?.why ?? `${RANK_REL} could not be dated`)}`);
+
+/** The derived half's clock, and the one place stale is allowed to be shown at all. */
+const rankState = (m) => {
+  if (!m.read) {
+    return `<p class="rank-stale">${esc(m.error || 'No GitHub reading has completed on this machine yet')}. The order above is declared locally and is current; the state beside each row is not derived.</p>`;
+  }
+  if (m.error) {
+    return `<p class="rank-stale">Showing a reading ${esc(ageWords(m.ageMin) ?? 'of unknown age')}; the refresh since failed &mdash; ${esc(m.error)}. Nothing beside a row is current.</p>`;
+  }
+  const when = agoWords(m.ageMin);
+  return `<p class="rank-clocks">State refreshed ${esc(when ?? 'at an unknown time')}${
+    m.refreshing ? ', refreshing now' : ''} from <code>${esc(m.label ?? 'the membership label')}</code> on ${esc(m.repo ?? 'the hub')}</p>`;
+};
+
+/** One ranked requirement. Position and reason declared; the rest derived, or withheld. */
+const rankRow = (it) => {
+  const label = it.title ? it.title.replace(/^Requirement:\s*/, '') : `#${it.issue}`;
+  const name = it.url
+    ? `<a class="rank-title" href="${esc(it.url)}" target="_blank" rel="noopener">${esc(label)}</a>`
+    : `<span class="rank-title">${esc(label)}</span>`;
+  return `<li class="rank-row"><span class="rank-line"><span class="rank-n">${it.rank}</span>${name}</span>`
+    + `<span class="rank-why">${esc(it.why ?? 'no reason recorded')}</span>`
+    + (it.present
+      ? `<span class="rank-state">${esc(rankFacts(it))}</span>`
+      : `<span class="rank-state rank-unknown">not returned by GitHub in the last reading</span>`)
+    + (it.review ? `<span class="rank-note">under review: ${esc(it.review)}</span>` : '')
+    + '</li>';
+};
+
+/** Everything on a row that GitHub knows and the store must never claim. */
+const rankFacts = (it) => [
+  it.state ?? 'state unknown',
+  it.milestone,
+  it.blocked ? 'blocked' : null,
+  it.sub ? `${it.sub.completed}/${it.sub.total} sub-issues` : null,
+].filter(Boolean).join(' · ');
+
+/**
+ * A computed condition, stated and left alone.
+ *
+ * The slot line is the one this panel exists for and the one that must stop where it
+ * does: it says a slot is open and whose call the replacement is, and the bench appears
+ * as a COUNT so no reading of it can be mistaken for a recommendation.
+ */
+const rankFinding = (f, m) => {
+  const bench = m.bench?.read
+    ? `the <code>${esc(m.bench.label ?? 'on-deck')}</code> bench holds ${m.bench.open} open issue${m.bench.open === 1 ? '' : 's'}`
+    : 'the bench could not be counted in the last reading';
+  switch (f.kind) {
+    case 'slot-open':
+      return `Rank ${f.rank} is a slot: <a href="${esc(issueHref(m, f.issue))}" target="_blank" rel="noopener">#${f.issue}</a> is closed. Choosing what fills it is 🎩🤖 obot-prime's, and nothing here picks one &mdash; ${bench}.`;
+    case 'unlabelled-rank':
+      return `#${f.issue} is ranked ${f.rank} in the order and no longer carries <code>${esc(m.label ?? 'top10')}</code> on GitHub. The label carries membership and the file carries order; while they disagree, the one API call returns a different ten than this list shows.`;
+    case 'unranked-member':
+      return `#${f.issue} carries <code>${esc(m.label ?? 'top10')}</code> and has no rank. It is in the ten and the order does not say where.`;
+    case 'missing':
+      return `#${f.issue} is ranked ${f.rank} and GitHub did not return it. Its row is held open rather than dropped.`;
+    case 'count':
+      return `The order holds ${f.n}, not ten.`;
+    default:
+      return esc(`unrecognised finding: ${f.kind}`);
+  }
+};
+
+const issueHref = (m, n) => (m.repo ? `https://github.com/${m.repo}/issues/${n}` : `https://github.com/jwildfire/obot.roadmap/issues/${n}`);
+
 const SHELL_CSS = `
   :root {
     --paper:#F4F1EC; --card:#FDFCFA; --ink:#26211B; --muted:#6F6558; --faint:#9C917F;
@@ -404,6 +522,27 @@ const DASHBOARD_CSS = `
   .main .placeholder h2 { font-size:1rem; margin:0 0 0.4rem; color:var(--ink); }
   .main .placeholder p { margin:0 0 0.5rem; font-size:0.85rem; }
 
+  /* The ranked head — below the three buckets, read-only, and the only panel on this
+     page that shows something nobody has to act on. Everything here is sized to the
+     390px phone he reads the queue on: no fixed widths, nothing that refuses to wrap,
+     and every class that can carry a requirement title or a URL breaking inside a
+     word — the rail sets no min-width:0, so one unbreakable token widens the column. */
+  .rank { display:block; margin-top:1rem; padding-top:0.5rem; border-top:1px solid var(--line); }
+  .rank-list { list-style:none; margin:0.2rem 0 0; padding:0; display:flex; flex-direction:column; gap:0.3rem; }
+  .rank-row { display:flex; flex-direction:column; gap:0.05rem; border-left:3px solid var(--line); border-radius:0 5px 5px 0; padding:0.1rem 0.4rem; }
+  .rank-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
+  .rank-n { font-family:var(--mono); font-size:0.7rem; color:var(--faint); flex:none; min-width:1.1em; text-align:right; }
+  .rank-title { font-size:0.8rem; color:var(--ink); text-decoration:none; overflow-wrap:anywhere; }
+  .rank-title:hover { text-decoration:underline; }
+  .rank-why { font-size:0.7rem; color:var(--muted); line-height:1.35; overflow-wrap:anywhere; padding-left:1.5em; }
+  .rank-state { font-size:0.64rem; font-family:var(--mono); color:var(--faint); padding-left:1.5em; overflow-wrap:anywhere; }
+  .rank-unknown { color:var(--warn); }
+  .rank-clocks { font-size:0.66rem; color:var(--faint); margin:0.1rem 0 0.3rem; line-height:1.35; overflow-wrap:anywhere; }
+  .rank-stale { font-size:0.68rem; color:var(--warn); margin:0.1rem 0 0.35rem; line-height:1.35; overflow-wrap:anywhere; }
+  .rank-note { font-size:0.66rem; color:var(--muted); margin:0.25rem 0 0; line-height:1.35; overflow-wrap:anywhere; }
+  .rank-row .rank-note { padding-left:1.5em; }
+  .rank code { font-family:var(--mono); font-size:0.94em; overflow-wrap:anywhere; }
+  .rank a { color:var(--muted); }
   /* The sweep's age, printed only when a newer attempt has failed behind it. */
   .q-stale { font-size:0.7rem; color:var(--warn); margin:0.15rem 0 0.4rem; }
   /* The first morning on a new machine: what is absent, and what fills it. */
@@ -949,7 +1088,7 @@ const integrityBanner = (integrity) => (!integrity || integrity.intact ? '' : `<
   Restart the dashboard and, if it comes back, treat it as a repeat of
   <a href="https://github.com/jwildfire/obot.agent/issues/206">#206</a>.</p>`);
 
-export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, integrity = null, workspace, hub, generated = new Date() }) {
+export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, integrity = null, rankHead = null, workspace, hub, generated = new Date() }) {
   const critical = queue.critical ?? [];
   const snoozed = queue.snoozed ?? [];
   const cleared = queue.cleared ?? [];
@@ -1082,6 +1221,7 @@ ${integrityBanner(integrity)}
     ${clearedLine(queue.config.cleared)}
     ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
     ${collapsed('Cleared', cleared, (it) => (it.triage?.action === 'done' ? 'marked done' : 'dismissed'))}
+    ${rankHeadPanel(rankHead)}
   </nav>
 
   <main class="main" id="main">
