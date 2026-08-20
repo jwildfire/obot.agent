@@ -532,7 +532,10 @@ const DASHBOARD_CSS = `
   .rank-row { display:flex; flex-direction:column; gap:0.05rem; border-left:3px solid var(--line); border-radius:0 5px 5px 0; padding:0.1rem 0.4rem; }
   .rank-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
   .rank-n { font-family:var(--mono); font-size:0.7rem; color:var(--faint); flex:none; min-width:1.1em; text-align:right; }
-  .rank-title { font-size:0.8rem; color:var(--ink); text-decoration:none; overflow-wrap:anywhere; }
+  /* Two lines, hard — the same budget the queue rows take, and for the same reason: a
+     requirement title is a sentence, and ten unbounded ones would own his phone. The
+     reason under it is NOT clamped; it is the thing he steers from. */
+  .rank-title { font-size:0.8rem; color:var(--ink); text-decoration:none; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .rank-title:hover { text-decoration:underline; }
   .rank-why { font-size:0.7rem; color:var(--muted); line-height:1.35; overflow-wrap:anywhere; padding-left:1.5em; }
   .rank-state { font-size:0.64rem; font-family:var(--mono); color:var(--faint); padding-left:1.5em; overflow-wrap:anywhere; }
