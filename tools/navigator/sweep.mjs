@@ -100,6 +100,12 @@ import { collectRankHead, rankheadSection, readingBroken as rankheadBroken } fro
 import { hostWasAway, idleDetection, judgedWorkers, listenerState, outsideWindow,
          deliverable, misreadHolds, parseWakeLog, pending as pendingWakes, readJobs,
          readyBacklog, wakeLine, wakeSection } from './wake.mjs'
+// And the other half of the same lane (jwildfire/obot.roadmap#257). The wake carries
+// "a worker stopped"; this makes it also carry "something completed, here is the
+// sentence", and compares GitHub's closed requirements against the record so a
+// closure with no sentence is a finding rather than a silence.
+import { closedRequirements, completionDetections, landingsLine, landingsNote,
+         unsummarised } from './closures.mjs'
 
 export { classifyRC, discoverRepos }
 
@@ -133,6 +139,10 @@ const LOG = join(WS, '.claude/session-hub/navigator-sweep.log')
 const SCRATCHPAD_LOG = join(REPO_ROOT, 'tools', 'scratchpad-log')
 // The hub clone, for joining an artifact slug to the decision id he quotes.
 const HUB = process.env.OBOT_HUB || join(WS, 'obot.roadmap')
+// The hub as GitHub names it, for the closure detector: a requirement closes there
+// and nowhere else, and a closed issue in an implementation repo is a task rather
+// than something he is owed a sentence about (jwildfire/obot.roadmap#257).
+const HUB_REPO = process.env.OBOT_HUB_REPO || 'jwildfire/obot.roadmap'
 // This run's own build stamp, captured at load.
 //
 // The sweep is the component every other check trusts and it was the one most likely
@@ -146,6 +156,11 @@ const SELF = buildStamp(REPO_ROOT)
 // startup has to leave something behind, or "it did not come back" is the whole report.
 const DASHBOARD_LOG = join(WS, '.claude/session-hub/ops-dashboard.log')
 const CADENCE_MIN = 5
+// Completions delivered per run, budgeted apart from the stop-state wakes. Five,
+// because five is what actually happened on 2026-08-20 — four workers finishing
+// inside twenty-five minutes closed five requirements, and the run that has to
+// deliver all of them is exactly the run this exists for.
+const MAX_COMPLETIONS_PER_RUN = 5
 const MAX_EVENTS = 15
 // The snapshot keeps more history than the state file shows: the dashboard's
 // Navigator tab renders these events as a feed, and a feed that forgets everything
@@ -208,7 +223,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -262,6 +277,16 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
     ? (workers.ok ? `worker ledger: ${workers.summary}` : `**WORKER LEDGER FINDING** — ${workers.summary}`)
     : 'worker ledger: **NO READING** — `tools/worker-id --audit` did not run this sweep (missing, not executable, or timed out). The ledger\'s state is unknown, not clean.')
   for (const d of (workers?.detail) || []) lines.push(`  ${d}`)
+  lines.push('')
+  // The landing record (jwildfire/obot.roadmap#257). A third ledger line, and the
+  // question it asks is the one the other two cannot: not whether the record is
+  // internally sound, nor whether anything is writing to it, but whether anything
+  // REACHED HIM. A requirement closed with nobody saying what he can now do is a
+  // finding here, which is what makes the plain-English summary structural rather
+  // than an instruction — and an instruction is exactly what four workers had on
+  // 2026-08-20 when five requirements closed and nothing told him.
+  lines.push(landingsLine(landingsVerdict))
+  for (const d of (landingsVerdict?.detail) || []) lines.push(`  ${d}`)
   lines.push('')
   // The wake goes first — before the RC queue, before everything. The RC queue is
   // @jwildfire's work; this is the Navigator's own, it is the section that says
@@ -362,6 +387,16 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push('', (delivery && delivery.trim())
     ? delivery.trimEnd()
     : '## Delivery\n\n- **NO READING** — the delivery record could not be read this sweep, so no worker has been judged. That is the absence of the record, not a finding that nobody delivered.')
+
+  // And beside it, the same day seen from his end (jwildfire/obot.roadmap#257). The
+  // delivery record is what the agents did to the roadmap, judged by the Navigator;
+  // this is what a person can now do that he could not before, in the sentence
+  // whoever finished the work wrote at the moment it closed. They sit together
+  // because the pair is the whole answer to "what happened while I was away", and
+  // until now only the first half of it existed.
+  lines.push('', (landings && landings.trim())
+    ? landings.trimEnd()
+    : '## Landings — what reached him\n\n- **NO READING** — the landing record could not be read this sweep. Whether a completion reached him is unknown; this is the absence of the record, not a finding that nothing completed.')
 
   // The four checks that missed the night of 2026-08-15 (D0017). Rendered even when
   // clean, because a detector that only ever speaks up on failure is
@@ -584,6 +619,15 @@ function runChecks(repos, jobs = []) {
   return {
     backlog,
     backlogCapped,
+    // The closed issues this pass already fetched, handed on rather than re-fetched
+    // (jwildfire/obot.roadmap#257). `ORPHAN_QUERY` already asks for `number title
+    // closedAt labels` on every CLOSED issue, so the closure detector costs no call
+    // — and, more importantly, one reader means the discipline checks and the
+    // completion detector can never disagree about what closed.
+    items,
+    // Whether the hub itself was read. A repo that failed leaves `errors` behind and
+    // an unread hub must never render as "every closed requirement covered".
+    read: !errors.some((e) => e.startsWith(`${HUB_REPO}:`)),
     section: checksSection({
       audit,
       site,
@@ -605,7 +649,7 @@ function runChecks(repos, jobs = []) {
  * beside it, so the section can never read as a judged fleet because the delivery
  * lane broke. Delivery is last and cannot change what the section says.
  */
-function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
+function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [] }) {
   // `null` means the job ledger is not on this machine; every detector below reads
   // it, so the section has to say that rather than report a clear channel.
   const jobsRead = jobs !== null
@@ -627,14 +671,24 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
   const all = idle ? [...detections, idle] : detections
 
   const listener = listenerState(WAKE_BEAT, now)
-  const { deliver, held } = deliverable(all, parseLog(), now)
+  const log = parseLog()
+  const { deliver, held } = deliverable(all, log, now)
 
-  for (const d of deliver) {
+  // Completions ride the same channel and are budgeted SEPARATELY (hub#257). Sharing
+  // the per-run cap would let a fleet with three unjudged closeouts starve the one
+  // notification that reaches a person — which is the failure being fixed, arriving
+  // by a new route. They are once-only rather than floored, so the cap is a burst
+  // limit and nothing is lost: what it holds goes out on the next sweep.
+  const { deliver: shipped, held: shipHeld } =
+    deliverable(completions, log, now, { max: MAX_COMPLETIONS_PER_RUN })
+
+  for (const d of [...deliver, ...shipped]) {
     try { appendFileSync(WAKE_LOG, `${wakeLine(d, now.toISOString())}\n`) } catch { /* the section still carries it */ }
   }
 
   return {
     delivered: deliver,
+    completions: shipped,
     section: wakeSection({
       pending: all,
       delivered: deliver,
@@ -643,11 +697,13 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso }) {
       outside: outsideWindow(jobs, { now, judged }),
       misread,
       jobsRead,
+      completions: shipped,
+      completionsHeld: shipHeld,
       awayNote: away
         ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
         : null,
     }),
-    note: `${all.length} pending, ${deliver.length} delivered, ${misread.length} misread suppressed, channel ${listener.armed ? 'armed' : 'DOWN'}`,
+    note: `${all.length} pending, ${deliver.length} delivered, ${shipped.length} completion(s) sent, ${misread.length} misread suppressed, channel ${listener.armed ? 'armed' : 'DOWN'}`,
   }
 }
 
@@ -821,9 +877,52 @@ const safeRankhead = () => {
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
   try { return runWake(jobs, opts) } catch (e) {
-    return { delivered: [], note: `wake broken: ${String(e.message).slice(0, 80)}`,
-             section: `## Wake — workers that stopped\n\n**WAKE CHECK BROKEN** — ${String(e.message).slice(0, 160)}. No worker stop-state was read this run; this is not a quiet fleet.\n` }
+    return { delivered: [], completions: [], note: `wake broken: ${String(e.message).slice(0, 80)}`,
+             section: `## Wake — workers that stopped, and what completed\n\n**WAKE CHECK BROKEN** — ${String(e.message).slice(0, 160)}. No worker stop-state was read this run; this is not a quiet fleet.\n` }
   }
+}
+
+/**
+ * The landing record (jwildfire/obot.roadmap#257): what he was promised, and what
+ * reached him. Shelled like the ledger audits, for the same reason — the tool that
+ * owns the record owns the reading of it, so what this file renders and what was
+ * actually written can never disagree.
+ *
+ * `null` on any failure, and every consumer says "unknown, not clean" when it gets
+ * one. Nothing here ever reports an unread record as a quiet day.
+ */
+const landingTool = (args, timeout = 20000) => spawnSync(join(REPO_ROOT, 'tools', 'landing-log'), args,
+  { env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout })
+
+const safeLandingState = () => {
+  try {
+    const r = landingTool(['list', '--json'])
+    if (r.error || r.status !== 0) return null
+    return JSON.parse(r.stdout || 'null')
+  } catch { return null }
+}
+
+/**
+ * Go and LOOK at what he was promised — the half of #257 that cannot be delegated
+ * to anyone's assertion. Bounded by the tool itself (a handful of landings per run,
+ * each re-checked at most twice an hour), so a promise list that grows can never
+ * hold the five-minute cadence open on the network.
+ *
+ * Its output is not rendered: `list --json` is read afterwards and carries the
+ * observations this wrote. Failure is silent here on purpose — an unfetched landing
+ * shows up as `unchecked` in the record, which is the honest answer, rather than as
+ * a broken section about a check nobody asked to see.
+ */
+const safeLandingCheck = () => {
+  try { landingTool(['check'], 45000) } catch { /* the record says `unchecked`, which is true */ }
+}
+
+const safeLandingRender = () => {
+  try {
+    const r = landingTool(['render'])
+    if (r.error || r.status !== 0) return null
+    return (r.stdout || '').trim() || null
+  } catch { return null }
 }
 
 async function main() {
@@ -859,8 +958,14 @@ async function main() {
     // The wake runs even here. It reads local job records and the delivery journal,
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
-    const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend() }))
+    // The landing record runs even here. It is local, it needs no policy file, and a
+    // completion he has not been told about is exactly as undelivered when the RC
+    // sweep is broken. GitHub was NOT read on this path, so `read: false` — the
+    // verdict says so rather than claiming every closed requirement is covered.
+    const failState = safeLandingState()
+    const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso,
+      completions: failState ? completionDetections(failState.closures ?? [], { now: new Date() }) : [] })
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }) }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -932,11 +1037,18 @@ async function main() {
   let checks = null
   let backlog = 0
   let backlogCapped = true // until a run proves otherwise, the queue is a floor
+  // The closed issues this pass read, kept for the closure detector below. `null`
+  // rather than `[]` because "no issue closed" and "no repo was read" are different
+  // facts and only one of them is a clean pass (jwildfire/obot.roadmap#223).
+  let closedItems = null
+  let hubRead = false
   try {
     const c = runChecks(repos, jobs)
     checks = c.section
     backlog = c.backlog
     backlogCapped = c.backlogCapped
+    closedItems = c.items
+    hubRead = c.read
   } catch (e) { errors.push(`checks: ${String(e.message).slice(0, 120)}`) }
   // The gap check rides along with the record itself: a finding is prepended to
   // the section so it cannot be read as a quiet day.
@@ -962,9 +1074,34 @@ async function main() {
     metricsNote = `broken: ${String(e.message).slice(0, 80)}`
   }
 
+  // What he was promised and what reached him (jwildfire/obot.roadmap#257). The
+  // ORDER here is the whole safety property, and it mirrors the wake's own:
+  //
+  //   1  GO AND LOOK at every landing that is due one. This is the step nobody can
+  //      assert their way past — the org chart was "being drafted" for a day while
+  //      the page returned 404, and no report from anyone would have caught that.
+  //   2  read the record back, once, and give the same reading to the detector, the
+  //      wake and the file. Two readers is how the detector and the channel would
+  //      come to disagree about what completed.
+  //   3  compare GitHub's closed requirements against it, so a closure with no
+  //      sentence is a finding rather than a silence.
+  //
+  // Delivery is last and cannot change what any of it says.
+  safeLandingCheck()
+  const landingState = safeLandingState()
+  const now = new Date()
+  const missing = (closedItems && landingState)
+    ? unsummarised(closedRequirements(closedItems, { repo: HUB_REPO, now }),
+                   landingState.closures ?? [])
+    : []
+  const landingsVerdict = landingsNote({ missing, state: landingState, read: hubRead, now })
+  const completions = landingState
+    ? completionDetections(landingState.closures ?? [], { now })
+    : []
+
   // The wake, last of the readings and first in the file. It writes to the log the
   // Navigator's Monitor tails; everything it found is in the section either way.
-  const wake = safeWake(jobs, { backlog, backlogCapped, prevSweptIso: prevWrap.sweptIso })
+  const wake = safeWake(jobs, { backlog, backlogCapped, prevSweptIso: prevWrap.sweptIso, completions })
 
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
@@ -980,7 +1117,7 @@ async function main() {
   const currency = await safeCurrency()
   const rankhead = safeRankhead()
   const spend = safeSpend()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

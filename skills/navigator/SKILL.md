@@ -134,7 +134,7 @@ A wake arrives as a notification in this session. It is one line, it names one
 worker, and it is a summons to go and look — never a verdict. Act on it in the turn
 it arrives; that is the whole point of the mechanism.
 
-The four things a wake can say, and what each one asks for:
+The five things a wake can say, and what each one asks for:
 
 - `STOPPED` — a closeout with no verdict. Judge it against GitHub and record it.
 - `WAITING` — a worker sitting on a question or a permission prompt that nobody has
@@ -146,10 +146,22 @@ The four things a wake can say, and what each one asks for:
   branch, a commit or a pull request before writing it off.
 - `IDLE` — no worker is running and there is ready work. Dispatch, or record in one
   line why not.
+- `DELIVERED` — something completed, and the line carries the sentence saying what he
+  can now do. It is the one wake that is not a problem, and the only one that arrives
+  already finished: it is delivered exactly once, it is already on his dashboard by
+  the time you read it, and nothing has to be carried anywhere. What it asks of you is
+  a judgement, not a relay — if the sentence does not actually say what changed for
+  him, rewrite it with `landing-log closure` rather than letting a weak one stand.
 
-The wake reaches this session and never @jwildfire. If a wake is telling him
-something rather than telling you to do something, it is filed wrong — say so rather
-than forwarding it.
+The wake reaches this session and never @jwildfire — including `DELIVERED`, which
+reaches him by his own dashboard rather than through anything this session does. If a
+wake is telling him something rather than telling you to do something, it is filed
+wrong — say so rather than forwarding it.
+
+**The wake never fires on success on its own.** Until jwildfire/obot.roadmap#257 every
+detection here was a positive PROBLEM condition, which is why five requirements closing
+inside twenty-five minutes on 2026-08-20 produced `wake: clear` and told nobody. A loop
+that only carries failure is a loop that closes inside the machine.
 
 Learn that a worker finished from the harness's own job records — the per-job state
 file and event timeline under `~/.claude/jobs/`. Three details are load-bearing and
@@ -173,6 +185,20 @@ pull request advances a requirement, and that is right rather than a gap.
 
 When the roadmap did not move, fix the roadmap and never the work. Attach the issue to
 the requirement it belonged to, amend the requirement, or file the missing one.
+
+**And when the roadmap DID move, say what moved, in his language.** A verdict is the
+Navigator judging a worker; it is not something he can read and act on. If the worker
+closed a requirement and left no sentence, write it — the sweep is already reporting
+that gap as `**CLOSURE SUMMARY GAP**`, and you are the reader of that finding:
+
+```bash
+obot.agent/tools/landing-log closure --issue hub#264 --worker W0076 \
+  --summary '<what he can now do that he could not before>'
+```
+
+One sentence, the citation trailing it, never a list of issue numbers. It goes out on
+this session's own wake channel and onto his dashboard without anyone carrying it
+(jwildfire/obot.roadmap#257).
 
 ### 4. Report delivery
 

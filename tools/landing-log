@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""landing-log - what he was promised, and what reached him.
+
+jwildfire/obot.roadmap#257. Two incidents, one missing lane: an org chart he asked
+for that returned 404 for over a day, and five requirements closed inside
+twenty-five minutes with nothing telling him. Neither made a false statement, so
+nothing in the house fired.
+
+    landing-log closure --issue hub#264 --summary 'One sentence: what he can now
+                        do that he could not before.' [--worker W0080] [--title '...']
+    landing-log promise --asked 'his words' --landing <url|path|repo#n> [--date YYYY-MM-DD]
+    landing-log check   [--max 5] [--stale-min 30]   fetch each landing; record what it found
+    landing-log render                               the ## Landings section the sweep folds in
+    landing-log list --json                          the record, for the wake and the dashboard
+    landing-log --audit                              read-only; exit 1 on a finding
+
+`closure` and `promise` print the bare id and nothing else, because they are
+consumed as `LID=$(landing-log closure ...)`. Everything conversational goes to stderr.
+
+THE SUMMARY IS REFUSED IF IT IS NOT ONE. "#251, #256 and #264 closed" exits 1 with
+every reason it failed. That is the whole point: "write a plain-English summary" is
+an instruction, and an instruction is what four workers already had.
+
+CHECK FETCHES. It does not ask anyone whether a thing landed; it goes and looks -
+`curl` for a URL, `gh` for an issue or pull request, the filesystem for a path - and
+records `landed`, `not-landed` or `unchecked`. The third never collapses into the
+second: a fetch that could not run is not evidence of absence (obot.agent#215).
+
+THE AUDIT'S EXIT CODE IS THE VERDICT - 0 when the record is clean, 1 on a finding -
+and the verdict is the FIRST line, because callers summarise by first line
+(obot.agent#129).
+"""
+
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+
+from landing_ledger import (QUIET_HOURS, audit, findings, read_state,  # noqa: E402
+                            render, report, summary_findings, write_closure,
+                            write_observation, write_promise)
+
+WS = pathlib.Path(os.environ.get("OBOT_WORKSPACE") or (pathlib.Path.home() / "Documents/obot2"))
+
+# How long a landing may go unre-checked before this tool looks again, and how many
+# it will look at in one run. Both bounded because `check` runs inside the
+# five-minute sweep and a promise list that grows must never be able to hold the
+# sweep open on the network.
+STALE_MIN = int(os.environ.get("OBOT_LANDING_STALE_MIN", "30"))
+MAX_CHECKS = int(os.environ.get("OBOT_LANDING_MAX_CHECKS", "5"))
+FETCH_TIMEOUT = int(os.environ.get("OBOT_LANDING_TIMEOUT", "8"))
+
+ISSUE_LANDING = re.compile(r"^(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)|hub|oa)#(\d+)$")
+
+HUB_REPO = os.environ.get("OBOT_HUB_REPO", "jwildfire/obot.roadmap")
+OA_REPO = os.environ.get("OBOT_OA_REPO", "jwildfire/obot.agent")
+
+
+def usage(code=0):
+    print(__doc__.strip(), file=sys.stderr if code else sys.stdout)
+    sys.exit(code)
+
+
+def flags(argv, allowed, bare=()):
+    out = {}
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if not a.startswith("--"):
+            print("landing-log: unexpected argument: %s" % a, file=sys.stderr)
+            sys.exit(1)
+        key = a[2:]
+        if key in bare:
+            out[key] = True
+            i += 1
+            continue
+        if key not in allowed:
+            print("landing-log: unknown argument: %s" % a, file=sys.stderr)
+            sys.exit(1)
+        if i + 1 >= len(argv):
+            print("landing-log: %s needs a value" % a, file=sys.stderr)
+            sys.exit(1)
+        out[key] = argv[i + 1]
+        i += 2
+    return out
+
+
+# ---- the fetch ----------------------------------------------------------------
+
+def _run(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=FETCH_TIMEOUT + 4)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None if not isinstance(e, subprocess.TimeoutExpired) else None
+
+
+def fetch_url(url):
+    """Ask the network what is actually at that address."""
+    r = _run(["curl", "-sSL", "-o", "/dev/null", "-w", "%{http_code}",
+              "--max-time", str(FETCH_TIMEOUT), url])
+    if r is None:
+        return ("unchecked", "curl did not run or timed out after %ds - this is not "
+                             "evidence the page is absent" % FETCH_TIMEOUT)
+    code = (r.stdout or "").strip()
+    if not code.isdigit():
+        return ("unchecked", "curl returned no status code (%s)"
+                % (r.stderr or "no output").strip()[:80])
+    n = int(code)
+    if n == 200:
+        return ("landed", "fetched, HTTP 200")
+    if n == 404:
+        return ("not-landed", "fetched, HTTP 404 - the address he was given is empty")
+    if 200 <= n < 400:
+        return ("landed", "fetched, HTTP %d" % n)
+    return ("unchecked", "HTTP %d - the server answered but not about the page; a "
+                         "fetch that did not resolve is not an absence" % n)
+
+
+def fetch_issue(repo, number):
+    r = _run(["gh", "issue", "view", str(number), "-R", repo, "--json", "state,url"])
+    if r is None or r.returncode != 0:
+        why = (r.stderr if r else "gh did not run").strip()[:90]
+        return ("unchecked", "gh could not read %s#%s (%s)" % (repo, number, why))
+    try:
+        state = json.loads(r.stdout).get("state", "")
+    except (ValueError, AttributeError):
+        return ("unchecked", "gh returned something that is not JSON")
+    if str(state).upper() == "CLOSED":
+        return ("landed", "%s#%s is closed" % (repo, number))
+    return ("not-landed", "%s#%s is still open" % (repo, number))
+
+
+def fetch_path(p):
+    path = pathlib.Path(p).expanduser()
+    if not path.is_absolute():
+        path = WS / p
+    try:
+        if path.exists():
+            return ("landed", "%s exists" % path)
+        return ("not-landed", "%s does not exist" % path)
+    except OSError as e:
+        # The one honesty rule this file will not bend: only ENOENT reads as
+        # absence, and `exists()` already collapsed that. Anything that raised here
+        # is a failure to look (obot.agent#215).
+        return ("unchecked", "could not look at %s (%s)" % (path, e.strerror))
+
+
+def observe(landing):
+    """What is actually at the landing place right now, as one of three states."""
+    s = str(landing or "").strip()
+    if not s:
+        return ("unchecked", "no landing place recorded")
+    if s.startswith("http://") or s.startswith("https://"):
+        return fetch_url(s)
+    # A scheme this tool cannot fetch is UNCHECKED, and the reason it is checked here
+    # rather than left to fall through is a real defect this test caught:
+    # `gopher://nowhere/x` contains a slash, reached the filesystem branch, and was
+    # reported as `not-landed` - an absence asserted by a look that never happened,
+    # which is the exact honesty rule this file is built around (obot.agent#215).
+    scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*)://", s)
+    if scheme:
+        return ("unchecked", "%s:// is not a scheme this can fetch, so nothing has "
+                             "looked at %s" % (scheme.group(1), s))
+    m = ISSUE_LANDING.match(s)
+    if m:
+        repo = m.group(1) or (HUB_REPO if s.startswith("hub#") else OA_REPO)
+        return fetch_issue(repo, m.group(2))
+    if "/" in s or s.startswith("."):
+        return fetch_path(s)
+    return ("unchecked", "%r is not a URL, an issue reference or a path, so nothing "
+                         "can go and look at it" % s)
+
+
+def stale_promises(state, stale_min, limit):
+    """Which open promises are due a look, oldest reading first."""
+    import datetime
+    now = datetime.datetime.now().astimezone()
+    due = []
+    for p in state["promises"]:
+        if p["state"] == "landed":
+            continue
+        if not p["checkedAt"]:
+            due.append((0.0, p))
+            continue
+        try:
+            t = datetime.datetime.fromisoformat(p["checkedAt"])
+            if t.tzinfo is None:
+                t = t.astimezone()
+            mins = (now - t).total_seconds() / 60.0
+        except ValueError:
+            mins = 1e9
+        if mins >= stale_min:
+            due.append((-mins, p))
+    due.sort(key=lambda x: x[0])
+    return [p for _, p in due[:limit]]
+
+
+# ---- commands -----------------------------------------------------------------
+
+def cmd_closure(argv):
+    f = flags(argv, {"issue", "summary", "worker", "landing", "title"})
+    for need in ("issue", "summary"):
+        if not f.get(need):
+            print("landing-log: closure needs --%s" % need, file=sys.stderr)
+            return 1
+    try:
+        lid, line = write_closure(WS, f["issue"], f["summary"], f.get("worker"),
+                                  f.get("landing"), f.get("title"))
+    except ValueError as e:
+        print("landing-log: %s" % e, file=sys.stderr)
+        print("landing-log: nothing was written. Say what he can now do that he could "
+              "not before, in one sentence, and put the issue number at the end.",
+              file=sys.stderr)
+        return 1
+    print(lid)
+    print("landing-log: %s recorded — %s" % (lid, line[2:]), file=sys.stderr)
+    return 0
+
+
+def cmd_promise(argv):
+    f = flags(argv, {"asked", "landing", "date", "issue"})
+    try:
+        lid, line = write_promise(WS, f.get("asked"), f.get("landing"),
+                                  f.get("date"), f.get("issue"))
+    except ValueError as e:
+        print("landing-log: %s" % e, file=sys.stderr)
+        return 1
+    print(lid)
+    print("landing-log: %s recorded — %s" % (lid, line[2:]), file=sys.stderr)
+    return 0
+
+
+def cmd_check(argv):
+    f = flags(argv, {"max", "stale-min"})
+    limit = int(f.get("max", MAX_CHECKS))
+    stale = int(f.get("stale-min", STALE_MIN))
+    st = read_state(WS)
+    if not st["armed"]:
+        print("landing-log: not armed - nothing has been promised on this machine, so "
+              "there is nothing to go and look for.")
+        return 0
+    due = stale_promises(st, stale, limit)
+    if not due:
+        open_n = len([p for p in st["promises"] if p["state"] != "landed"])
+        print("landing-log: nothing due - %d open promise(s), all checked within the "
+              "last %dm" % (open_n, stale))
+        return 0
+    out = []
+    for p in due:
+        state, detail = observe(p["landing"])
+        write_observation(WS, p["id"], state, detail)
+        out.append("  %s %s — %s (%s)" % (p["id"], p["landing"], state, detail))
+    print("landing-log: fetched %d landing(s)" % len(due))
+    for line in out:
+        print(line)
+    return 0
+
+
+def cmd_list(argv):
+    f = flags(argv, {"json"}, bare={"json"})
+    st = read_state(WS)
+    if f.get("json"):
+        json.dump(st, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    sys.stdout.write(render(WS))
+    return 0
+
+
+def cmd_bar(argv):
+    """Would this sentence be accepted? For an agent that wants to check first."""
+    f = flags(argv, {"summary", "title"})
+    fs = summary_findings(f.get("summary"), f.get("title"))
+    if not fs:
+        print("landing-log: that clears the bar.")
+        return 0
+    print("landing-log: that is not a plain-English summary")
+    for x in fs:
+        print("  - %s" % x)
+    return 1
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        usage(0 if argv else 1)
+    cmd, argv = argv[0], argv[1:]
+    if cmd == "closure":
+        return cmd_closure(argv)
+    if cmd == "promise":
+        return cmd_promise(argv)
+    if cmd == "check":
+        return cmd_check(argv)
+    if cmd == "render":
+        sys.stdout.write(render(WS))
+        return 0
+    if cmd == "list":
+        return cmd_list(argv)
+    if cmd == "bar":
+        return cmd_bar(argv)
+    if cmd == "--audit":
+        a = audit(WS)
+        for line in report(a):
+            print(line)
+        return 1 if findings(a) else 0
+    print("landing-log: unknown command: %s (closure, promise, check, render, list, "
+          "bar, --audit)" % cmd, file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
