@@ -266,6 +266,14 @@ export function unroutedSection(items = [], { now = new Date(), lane = null, rea
       lines.push(`voice: **VOICE LANE BROKEN** — the Reminders list could not be read this sweep`
         + `${lane.why ? ` (${lane.why})` : ''}. Nothing he dictated has been routed, and this is not a quiet lane — `
         + 'it is a lane nobody can hear.');
+    } else if (lane.queueRead === false) {
+      // The snapshot is what the vocabulary and every ordinal are resolved against. A
+      // file that exists and cannot be parsed is a different fault from one that was
+      // never written, and reporting the second for the first sends whoever reads it
+      // to produce an episode that already exists.
+      lines.push(`voice: **VOICE QUEUE READING BROKEN** — the queue snapshot he was last read could not be parsed`
+        + `${lane.queueWhy ? ` (${lane.queueWhy})` : ''}. Nothing dictated can be matched to a position, and the `
+        + 'vocabulary this lane matches against is unknown.');
     } else {
       lines.push(`voice: armed and read${lane.routed ? `, ${lane.routed} answer(s) routed this sweep` : ', nothing new dictated'}.`);
     }

@@ -103,3 +103,16 @@ test('BOTH sweep call sites pass the voice section — the wiring, not just the 
     assert.match(call.split('\n')[0], /voice:\s*safeVoice\(\)/, `call site ${i + 1} must pass the voice section`)
   }
 })
+
+test('a queue snapshot that is corrupt is not reported to him as one never read', () => {
+  // safeVoice took `readQueue(WS).queue` and dropped the read flag beside it, so a
+  // snapshot file that exists and cannot be parsed produced the same words as a machine
+  // that has never read him a queue — two different problems with two different fixes.
+  const md = unroutedSection([], {
+    now: NOW,
+    lane: { armed: true, read: true, routed: 0, queueRead: false, queueWhy: 'queue.json is not readable JSON' },
+  })
+  const headline = md.split('\n').find((l) => ALARM_RE.test(l))
+  assert.ok(headline, 'an unreadable snapshot is a fault, not a quiet lane')
+  assert.match(md, /not readable JSON/)
+})

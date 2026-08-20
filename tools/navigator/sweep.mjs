@@ -922,8 +922,9 @@ const safeRankhead = () => {
 const safeVoice = () => {
   try {
     const armed = voiceArmed(WS)
+    const snapshot = voiceQueue(WS)
     const poll = armed
-      ? pollReminders({ workspace: WS, hub: HUB, queue: voiceQueue(WS).queue })
+      ? pollReminders({ workspace: WS, hub: HUB, queue: snapshot.queue })
       : { read: true, why: '', routed: [], unrouted: [], stale: [], unstamped: [] }
     // The read flag is carried, not dropped: an unreadable store rendered as a clean
     // lane, which is a positive claim about his sentences made from a failed read.
@@ -938,6 +939,8 @@ const safeVoice = () => {
         routed: poll.routed.length,
         stale: (poll.stale ?? []).length,
         unstamped: (poll.unstamped ?? []).length,
+        queueRead: snapshot.read,
+        queueWhy: snapshot.why,
       },
     })
   } catch (e) {

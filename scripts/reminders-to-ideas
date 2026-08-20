@@ -74,18 +74,38 @@ mark_done() {
 # decision answer posts nothing, and should not be reaching for a GitHub token at all.
 # And checked non-empty before it is used: an empty GH_TOKEN is not "no token", it is
 # `gh` falling back to @jwildfire's own keyring and posting as him (obot.agent#207).
+#
+# AND IT IS MINTED IN THIS SHELL, NEVER INSIDE `$(...)`. The guard used to live in a
+# function called as `GH_TOKEN="$(token)"`, so its `exit 1` killed the SUBSHELL, left
+# GH_TOKEN empty, and `gh` read an empty token as absent and fell back to @jwildfire's
+# own keyring — recording the post as his, permanently (obot.agent#207, third time).
 TOKEN=""
-token() {
-  if [ -z "$TOKEN" ]; then
-    TOKEN="$("$APP_TOKEN_CMD" || true)"
-    [ -n "$TOKEN" ] || fail 'could not mint an app token — not posting as anyone else'
-  fi
-  printf '%s' "$TOKEN"
+ensure_token() {
+  [ -n "$TOKEN" ] && return 0
+  TOKEN="$("$APP_TOKEN_CMD" || true)"
+  [ -n "$TOKEN" ] || fail 'could not mint an app token — not posting as anyone else'
+  return 0
 }
 NOW="$(TZ=America/New_York date '+%Y-%m-%d %H:%M %Z')"
 posted=0 kept=0 answered=0 held=0 skipped=0
 
-while IFS=$'\x1f' read -r rid rname rbody; do
+# READ BY RECORD, NOT BY LINE. This used to translate \x1e to newlines and let
+# `IFS=$'\x1f' read -r` split the fields — but `read` stops at a newline, so a reminder
+# whose body ran to a second line was truncated at its first. That truncation was both
+# what the router was shown and what was published, so a note whose decision answer sat
+# below the fold was posted to a public board with the answer cut off. Reading to the
+# record separator keeps a multi-line note whole; the field split is parameter expansion,
+# which has no opinion about newlines either.
+# `|| [ -n "$rec" ]` catches a final record with no trailing separator. The AppleScript
+# always appends one, so this is the belt: without it, a payload that ends without the
+# separator drops its LAST record silently, which is the one item a one-item list has.
+while IFS= read -r -d $'\x1e' rec || [ -n "$rec" ]; do
+  [ -z "${rec//[[:space:]]/}" ] && continue
+  rid=${rec%%$'\x1f'*}
+  rest=${rec#*$'\x1f'}
+  rname=${rest%%$'\x1f'*}
+  rbody=${rest#*$'\x1f'}
+  [ "$rbody" = "$rest" ] && rbody=""
   [ -z "$rid" ] && continue
   text="$rname"
   [ -n "$rbody" ] && text="$rname"$'\n\n'"$rbody"
@@ -122,7 +142,8 @@ while IFS=$'\x1f' read -r rid rname rbody; do
   [ "${#title}" -gt 80 ] && title="${title:0:77}..."
   body="$text"$'\n\n'"— captured via Siri/Reminders, $NOW"
 
-  url=$(GH_TOKEN="$(token)" gh api graphql \
+  ensure_token
+  url=$(GH_TOKEN="$TOKEN" gh api graphql \
     -f query='mutation($t:String!,$b:String!,$r:ID!,$c:ID!){createDiscussion(input:{repositoryId:$r,categoryId:$c,title:$t,body:$b}){discussion{url}}}' \
     -f t="$title" -f b="$body" -f r="$REPO_ID" -f c="$CATEGORY_ID" \
     --jq '.data.createDiscussion.discussion.url') || { printf 'post failed, leaving reminder pending: %s\n' "$rname" >&2; continue; }
@@ -130,7 +151,12 @@ while IFS=$'\x1f' read -r rid rname rbody; do
   mark_done "$rid"
   posted=$((posted+1))
   printf 'filed: %s -> %s\n' "$rname" "$url"
-done <<< "${RAW//$'\x1e'/$'\n'}"
+done < <(printf '%s' "$RAW")
 
 printf 'done: %d filed, %d kept private, %d answered a decision, %d unrouted, %d left pending\n' \
   "$posted" "$kept" "$answered" "$held" "$skipped"
+# Exit non-zero when anything was left pending because the router could not be run. A
+# run that failed closed on every item looks identical to a quiet one by exit status,
+# and something scheduled reads only the exit status.
+[ "$skipped" -eq 0 ] || exit 3
+exit 0
