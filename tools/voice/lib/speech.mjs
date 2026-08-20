@@ -29,10 +29,32 @@
 import { readArtifact } from './artifact.mjs';
 import { normalizeSpoken, similarity } from './match.mjs';
 
-/** Kokoro at default speed, measured on the episodes already published. */
-export const WORDS_PER_MINUTE = 150;
+/**
+ * Kokoro at default speed (`af_heart`, speed 1.0), MEASURED — script word count against
+ * the rendered duration of the episodes actually published on 2026-08-18:
+ *
+ *   1043 words / 351.7 s = 178 wpm      "Decision: scheduled sessions"
+ *    759 words / 246.5 s = 185 wpm      "Decision: the autonomy goal"
+ *   1018 words / 351.9 s = 174 wpm      "Decision: SafetyCensus, stays or goes"
+ *   1543 words / 9.1 min = 170 wpm      "The project so far"
+ *   1498 words / 8.4 min = 178 wpm      "The weekend, since prime went live"
+ *
+ * This constant read 150 until 2026-08-20, with a comment claiming it had been measured
+ * on those same episodes. It had not been: 150 is the rate a script is DRAFTED against,
+ * not the rate Kokoro reads it at. The gap is about 18%, and it ran the wrong way — the
+ * five-minute guideline he set was being enforced at roughly four minutes of audio, so
+ * writers cut material out of episodes that were already inside the bound (#280).
+ */
+export const SPOKEN_WPM = 176;
+/** Kept as the old name so nothing that imported it breaks; it is the same number. */
+export const WORDS_PER_MINUTE = SPOKEN_WPM;
 /** The length he set, in the same sentence that granted the exception (#280). */
 export const TARGET_MINUTES = 5;
+
+/** How long a script of this many words will actually run, in minutes. */
+export const minutesFor = (words) => Math.round((Number(words || 0) / SPOKEN_WPM) * 10) / 10;
+/** How many words fit in a target length — about 880 at the five-minute guideline. */
+export const wordsForTarget = (minutes = TARGET_MINUTES) => Math.round(minutes * SPOKEN_WPM);
 
 /** Plain speech: no markdown, no links, no identifiers, nothing to read as a symbol. */
 export function sanitize(s) {
@@ -121,6 +143,69 @@ export function decisionScript(decision, { hub, position = null, total = null } 
 }
 
 /**
+ * ONE decision as its own episode, ending with exactly what to say (#280).
+ *
+ * `queueScript` reads the whole queue out in one sitting, which is a queue read-out; an
+ * episode is per artifact, which is what #280 asks for and what the three published on
+ * 2026-08-18 were. The two share this module deliberately, because #265's vocabulary rule
+ * is that whatever the scripts tell him to say IS the vocabulary — a second generator with
+ * its own idea of the words is the two-sources-of-truth defect that cost ten decisions
+ * their state.
+ *
+ * TAKE THE WHOLE QUEUE, RENDER ONE OF IT. The handle, the ordinal and the collision
+ * warning are only meaningful against the full open set, and the caller must not persist a
+ * snapshot that says the queue is one item long — an ordinal spoken in an earlier episode
+ * would then resolve against a list that never existed.
+ *
+ * `selector` matches a decision id, its slug, its handle, or its position.
+ */
+export function soloScript(queue, selector, { hub } = {}) {
+  if (!queue?.read) {
+    const text = sanitize('The list of open decisions could not be read on the machine that made this, '
+      + 'so this episode cannot tell you what is waiting. That is a failure to read, not an empty queue.');
+    return { text, close: '', item: null, words: countWords(text), minutes: 0, overRuns: false, read: false, why: queue?.why ?? '' };
+  }
+  const want = String(selector ?? '').trim().toLowerCase();
+  const d = (queue.decisions ?? []).find((x) => [String(x.id).toLowerCase(), String(x.slug).toLowerCase(),
+    String(x.handle).toLowerCase(), String(x.ordinal)].includes(want));
+  if (!d) {
+    return {
+      text: '', close: '', item: null, words: 0, minutes: 0, overRuns: false, read: true,
+      why: `no open decision answers to "${selector}" — the open ones are: `
+        + `${(queue.decisions ?? []).map((x) => `${x.ordinal}. ${x.handle} (${x.id})`).join(', ') || 'none'}`,
+    };
+  }
+
+  const s = decisionScript(d, { hub });
+  const closeLines = ['To answer, say the name and then your choice.'];
+  const example = `${d.handle}, ${s.exampleChoice}`;
+  closeLines.push(`For example: ${example}.`);
+  if ((d.collidesWith ?? []).length) {
+    closeLines.push(`Another decision waiting on you sounds like this one, so say number ${d.ordinal} `
+      + 'instead of the name.');
+  }
+  closeLines.push('Once more, slowly.');
+  closeLines.push(`${sentence(d.handle)} Then your choice.`);
+  closeLines.push('Say it once. If nothing here matched what you said, it is kept exactly as you said it '
+    + 'and it stays on the list, so you will see it did not land.');
+  const close = sanitize(closeLines.join(' '));
+
+  const text = sanitize([s.text, close].join('\n\n'));
+  const words = countWords(text);
+  const minutes = minutesFor(words);
+  return {
+    text,
+    close,
+    item: { id: d.id, handle: d.handle, ordinal: d.ordinal, shape: s.shape, example, collidesWith: d.collidesWith ?? [] },
+    words,
+    minutes,
+    overRuns: minutes > TARGET_MINUTES,
+    read: s.read,
+    why: s.why,
+  };
+}
+
+/**
  * The whole open queue as one narration, ending with exactly what to say.
  *
  * The close is the part that matters most and is the last thing he hears, because it
@@ -140,7 +225,7 @@ export function queueScript(queue, { hub } = {}) {
 
   if (!decisions.length) {
     const text = sanitize('There are no open decisions. Nothing is waiting on you.');
-    return { text, items: [], close: '', words: countWords(text), minutes: countWords(text) / WORDS_PER_MINUTE, overRuns: false, read: true };
+    return { text, items: [], close: '', words: countWords(text), minutes: minutesFor(countWords(text)), overRuns: false, read: true };
   }
 
   parts.push(sanitize(`${decisions.length === 1 ? 'One decision is' : `${decisions.length} decisions are`} `
@@ -180,6 +265,6 @@ export function queueScript(queue, { hub } = {}) {
 
   const text = sanitize(parts.join('\n\n'));
   const words = countWords(text);
-  const minutes = Math.round((words / WORDS_PER_MINUTE) * 10) / 10;
+  const minutes = minutesFor(words);
   return { text, items, close, words, minutes, overRuns: minutes > TARGET_MINUTES, read: true };
 }

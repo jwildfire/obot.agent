@@ -285,8 +285,14 @@ export function unroutedSection(items = [], { now = new Date(), lane = null, rea
     }
     // And the one that must shout: the stamp is the mechanism that stops an item being
     // read again, so a failed one repeats every sweep with nothing saying why.
+    // UNINDENTED, and it took a second pass to notice why. The two-space indent this
+    // line carried until 2026-08-20 made `parseNavigatorState` file it as a DETAIL of the
+    // line above, and a detail carries no `alarm` key at all — so a headline spelled
+    // exactly for `ALARM_RE` rendered grey on his page for as long as it existed. The
+    // test asserted the string matched the regex, which it did, and never asserted the
+    // line was one the parser alarm-tests (hub#241).
     if (lane.unstamped) {
-      lines.push(`  **VOICE RECEIPT FAILED** — ${lane.unstamped} receipt(s) could not be written back to the reminder. `
+      lines.push(`**VOICE RECEIPT FAILED** — ${lane.unstamped} receipt(s) could not be written back to the reminder. `
         + 'The answer is recorded, but the item was not stamped, so he has no confirmation and the sweep will read it again.');
     }
     lines.push('');

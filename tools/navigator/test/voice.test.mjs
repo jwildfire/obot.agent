@@ -86,7 +86,13 @@ test('sentences left alone for being older than the queue are counted, not hidde
 
 test('a receipt that failed to write is an alarm — the stamp is what stops a re-read', () => {
   const md = unroutedSection([], { now: NOW, lane: { armed: true, read: true, routed: 1, unstamped: 1 } })
-  assert.ok(md.split('\n').find((l) => ALARM_RE.test(l)))
+  const line = md.split('\n').find((l) => ALARM_RE.test(l))
+  assert.ok(line)
+  // Matching the regex is NOT enough. `parseNavigatorState` alarm-tests preamble notes
+  // and UNINDENTED plain lines and nothing else; this line was indented, so it parsed as
+  // a detail of the line above and rendered grey while this assertion stayed green.
+  assert.match(line, /^\S/, 'unindented, or it can never go red however it is worded (hub#241)')
+  assert.doesNotMatch(line, /^- /, 'and not a bullet, for the same reason')
 })
 
 test('BOTH sweep call sites pass the voice section — the wiring, not just the contract', async () => {
@@ -101,6 +107,11 @@ test('BOTH sweep call sites pass the voice section — the wiring, not just the 
     // Each call is written on one line, so the line is the argument list. Slicing at
     // the first `})` would stop inside a nested call instead.
     assert.match(call.split('\n')[0], /voice:\s*safeVoice\(\)/, `call site ${i + 1} must pass the voice section`)
+    // Same reasoning for the other half of the lane (hub#280): a section wired into
+    // renderState's contract and into neither call site renders the fallback forever,
+    // which reads as "no reading ran" every five minutes and gets tuned out.
+    assert.match(call.split('\n')[0], /decisionEpisodes:\s*safeEpisodes\(\)/,
+      `call site ${i + 1} must pass the decision-episode section`)
   }
 })
 
