@@ -14,7 +14,7 @@ The requirement is explicit about which failure matters: *"An answer whose subje
 ## Evidence
 
 <ul>
-<li><b>1,652 tests pass</b> — 91 under <code>tools/voice/test/</code>. Every fix has a test that was seen to fail first, named after the sentence that broke it.</li>
+<li><b>1,659 tests pass</b> — 91 under <code>tools/voice/test/</code>. Every fix has a test that was seen to fail first, named after the sentence that broke it.</li>
 <li><b>Verified on the live queue, not a fixture</b>: "No, two weeks is plenty." → idea, not decision two. "No one has asked for that." → idea. "Number one priority: leave branch protections alone." → UNROUTED (ambiguous), naming both. "branch protections, option A" → still D0022 at 100%. "number two, option A" → still D0022 by ordinal.</li>
 <li><b>The coverage claim is checked the same way the review checked it</b> — <code>verdictFrom</code>'s body was emptied and 64 tests still passed; with the new tests, gutting it fails two. That check was run, not assumed.</li>
 <li><code>obot-policy validate</code> and <code>policy-sweep</code> clean.</li>
@@ -38,13 +38,15 @@ The requirement is explicit about which failure matters: *"An answer whose subje
 
 **Receipts and readings.** Rename and completion results were discarded, and those two writes are the whole mechanism that stops an item being re-read; a failed one is now an alarm. The unrouted store's read flag was dropped before rendering, so an unreadable directory produced the clean line — a positive claim about his sentences from a failed read. And `private:` was enforced by two rules that disagreed about case and whitespace, so "Private: …" was counted as kept while nothing was kept anywhere; one rule now, beside the routing, refusing to write into a git checkout.
 
+**And the lane could post as him.** The token guard lived in a shell function called as `GH_TOKEN="$(token)"`, so its refusal killed the *subshell*, left the variable empty, and `gh` read an empty token as no token and fell back to his own keyring — recording the post as his, permanently, for the third time this month (obot.agent#207). Minted in the posting shell now, checked there, and a run that could not mint exits non-zero. The same run split the list by line, and `read` stops at a newline, so a note whose second line held the answer was truncated in what the guard saw and in what was published; it reads by record now, and a one-item list — which has no trailing separator — is no longer dropped whole.
+
 **Coverage.** `verdictFrom` could be emptied with the suite green; the default `osascript` runner was a seam every test routed around; the sweep wiring was untested at both call sites. All three now have assertions that fail when the behaviour is removed.
 
 ## Next steps
 
 <ul>
 <li>Still one command for him: <code>obot.agent/tools/voice-decisions arm</code>.</li>
-<li>Findings the verifiers refuted are not fixed here and are listed in the session notes rather than silently dropped — including the printing of his sentence to stdout, which is the house convention for a local tool.</li>
+<li><b>All 17 findings the review confirmed are closed.</b> 21 were refuted by an independent pass and are not fixed here; they are listed in the session notes rather than silently dropped — including the printing of his sentence to stdout, which is the house convention for a local tool.</li>
 <li>Two low findings are left standing and named: <code>spawnSync</code>'s timeout does not escalate past SIGTERM, and the unrouted store is read-then-written without a lock. Neither is reachable from one five-minute sweep.</li>
 </ul>
 
