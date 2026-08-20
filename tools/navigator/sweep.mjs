@@ -788,8 +788,9 @@ const safeSpend = () => {
     const r = readSpend({ workspace: WS, hub: HUB, repoRoot: REPO_ROOT })
     const halt = applyHalt(WS, r.verdict, { log })
     writeVerdict(WS, r.verdict)
-    if (halt.wrote) scratchpad(`🧭🤖 nav — spend cap: dispatch parked, .claude/autonomy-halt written — ${r.verdict.why}`)
-    if (halt.cleared) scratchpad('🧭🤖 nav — spend cap: reading cleared, .claude/autonomy-halt lifted')
+    // `scratchpad` supplies the 🧭🤖 nav tag itself — passing one here prints it twice.
+    if (halt.wrote) scratchpad(`spend cap: dispatch parked, .claude/autonomy-halt written — ${r.verdict.why}`)
+    if (halt.cleared) scratchpad('spend cap: reading cleared, .claude/autonomy-halt lifted')
     return r
   } catch (e) {
     return { note: spendBrokenNote(String(e.message)), section: spendBroken(String(e.message)) }
