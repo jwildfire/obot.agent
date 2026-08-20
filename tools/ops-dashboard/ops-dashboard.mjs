@@ -52,6 +52,7 @@ import { buildMetricsModel, buildFeedModel, parseFilters } from './lib/metrics-v
 import { buildSessionFeed } from './lib/feed.mjs';
 import { parseDeliveryJournal } from './lib/log-view.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
+import { rankPanel } from './lib/rankhead.mjs';
 import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
@@ -277,6 +278,11 @@ async function page(args, lastLook = null) {
     // Asked after the collectors have run, which is the only moment it can catch
     // anything: a patch installed by a request-time import is invisible at start-up.
     integrity: reportIntegrity(),
+    // What comes next, below his three buckets and asking nothing of him
+    // (jwildfire/obot.roadmap#278). The declared order is read inline and costs a
+    // readFileSync; the state beside it comes from a cache refreshed behind the page,
+    // so an unauthenticated `gh` costs the derivation and never the order.
+    rankHead: rankPanel(args.workspace),
     workspace: args.workspace,
     hub: args.hub,
   });
