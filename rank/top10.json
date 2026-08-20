@@ -6,6 +6,11 @@
   "boundary": "The ten carrying `top10` are ranked and are what gets picked up next; the bench carrying `on-deck` is what a slot is filled from, unranked until one is promoted; everything else is open work with no claim on either.",
   "rank": [
     {
+      "issue": 279,
+      "why": "gates the session that gates scheduling, and a planning session with him will finalise it, which removes the write-from-memory risk",
+      "review": "promise honoured - this row said it went to rank 1 the moment he put a date on the machine move, and on 2026-08-20 he said the migration is this weekend"
+    },
+    {
       "issue": 272,
       "why": "his word, critical, and obot.agent/main is where the merge policy lives",
       "review": "now one choice away — D0022 is live and the tooling is merged; it needs him to pick A, B or C and nothing else"
@@ -19,21 +24,16 @@
       "why": "two workers have now collided on the same fix in one week - the Navigator's and mine, four hours apart on the deploy incident - and each collision spends fleet capacity twice on work that was already done"
     },
     {
+      "issue": 289,
+      "why": "he asked for it tonight and it compounds - every new surface starts by copying whichever one was nearest, and the number of surfaces he reads has roughly doubled this week"
+    },
+    {
       "issue": 252,
       "why": "nobody can write the board, so every requirement's stage is wrong and every surface built on it inherits that"
     },
     {
-      "issue": 279,
-      "why": "gates the session that gates scheduling, and a planning session with him will finalise it, which removes the write-from-memory risk",
-      "review": "may need to be earlier — goes to rank 1 the moment he puts a date on the machine move, because the draft has to exist before that session rather than after"
-    },
-    {
       "issue": 263,
       "why": "one bullet left and it is his: he has never read a config card and said whether it is better"
-    },
-    {
-      "issue": 260,
-      "why": "agent commits still go out under his name, and no token fixes that lane"
     },
     {
       "issue": 266,
