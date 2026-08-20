@@ -190,6 +190,50 @@ grouped none of them: no `v1.6.0` milestone existed, three of the issues still c
 `v1.2.0` from the wave that scoped them, and the RC PR body carried no `Closes` lines. The
 release's own record had to be reconstructed from the diff the same night.
 
+## A closure carries a sentence
+
+**Nothing is finished until a person can read what changed for them.** When a requirement
+closes, record one sentence saying what @jwildfire can now do that he could not before —
+at the moment it closes, by whoever closed it:
+
+```bash
+obot.agent/tools/landing-log closure --issue hub#257 \
+  --summary 'When the system says it stopped a runaway agent, it now has to prove the process died.' \
+  --worker W0080
+```
+
+- **The sentence is the deliverable; the issue number is a trailing citation.** `#251,
+  #256 and #264 closed` is the failure this exists to stop, and the tool refuses it —
+  along with anything under forty characters, anything opening with a number, and the
+  issue title verbatim. `landing-log bar --summary '…'` asks the same question without
+  writing anything.
+- **It is not optional, and it is not enforced by this paragraph.** The five-minute sweep
+  compares GitHub's closed requirements against the record; one closed with no sentence
+  is a `**CLOSURE SUMMARY GAP**` finding in `navigator-state.md`, exactly the way an
+  unstamped worker is. An instruction is what four workers already had.
+- **Where it goes from there is automatic.** The recorded sentence rides the Navigator's
+  existing wake channel — once, never repeated — and appears on the Operations Dashboard
+  under *Delivered*. No agent has to remember to mention it.
+- **Anything you tell him is coming gets a promise line**, so the gap between "being
+  drafted" and "on his screen" is measured rather than assumed:
+
+```bash
+obot.agent/tools/landing-log promise --asked 'an org chart of who does what' \
+  --landing https://jwildfire.github.io/obot.roadmap/reports/org-chart/
+```
+
+  The sweep then FETCHES that landing on a bounded schedule and records `landed`,
+  `not-landed` or `unchecked` — never collapsing the third into the second. A promise
+  that has not been found after a day surfaces on its own as `**PROMISE DELIVERY GAP**`.
+
+**Why this exists.** On 2026-08-18 @jwildfire asked for an org chart, was told it was
+being drafted, and the page returned 404 for over a day across a dozen exchanges. On
+2026-08-20 four workers finished inside twenty-five minutes and closed five requirements;
+nothing told him, he noticed the agent count had dropped, asked what had happened, and got
+a list of issue numbers back. Neither made a false statement, so none of the alarms built
+for false statements fired. Requirement:
+[jwildfire/obot.roadmap#257](https://github.com/jwildfire/obot.roadmap/issues/257).
+
 ## Merging: the standard lane is the default
 
 **Merge your own passing work. That is the default, not an escalation.** Every repo in
@@ -293,6 +337,36 @@ flip, and obot.roadmap#217 was refused and then allowed on the byte-identical st
 minutes later. Guarded by
 [`scripts/test/merge-invocation.test.mjs`](scripts/test/merge-invocation.test.mjs) and
 [`scripts/test/merge-default.test.mjs`](scripts/test/merge-default.test.mjs).
+
+## Branch protections
+
+`obot-merge` enforces the merge policy on merges. It sees nothing else — a `git push`
+straight to `main` never reaches it. Branch protection is the layer under that, and
+[`scripts/protections.json`](scripts/protections.json) is its spec: one entry per roled
+branch in `policy.json`, with the exact rule that branch should carry and what it costs the
+standard lane.
+
+```bash
+obot.agent/scripts/obot-protect read      # what GitHub enforces right now
+obot.agent/scripts/obot-protect plan      # spec vs live; writes nothing
+obot.agent/scripts/obot-protect verify    # the same, exit 1 on any disagreement
+```
+
+Three things about it that are load-bearing:
+
+- **Applying is @jwildfire's.** `apply` refuses without `--approved '<where and when he
+  chose it>'`, and reads every branch back afterwards rather than trusting the PUT.
+- **The credential is his too.** Branch protection needs repository admin, and the obotclaw
+  App has none — `gh api .../protection` as the App returns 403. Keep it that way: an agent
+  that can remove its own guardrail does not have one.
+- **A rule that stops the agents is a bug in the spec, not a stricter version of it.** No
+  tier requires an approving review, linear history, up-to-date branches, resolved
+  conversations or signed commits; every one of those blocks `obot-merge` merging as
+  obotclaw[bot]. `verify` reports a branch that has *more* than the spec asks for as a
+  disagreement, for exactly that reason. Guarded by
+  [`scripts/test/protections.test.mjs`](scripts/test/protections.test.mjs).
+
+Requirement: [obot.roadmap#272](https://github.com/jwildfire/obot.roadmap/issues/272).
 
 ## Running a GitHub write
 

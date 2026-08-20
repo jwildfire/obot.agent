@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# obot-protect — read, plan, apply and verify branch protection for every roled
+# branch in scripts/policy.json, against the spec in scripts/protections.json.
+#
+#   obot-protect read     what GitHub enforces right now, one row per branch
+#   obot-protect plan     spec vs live; writes nothing
+#   obot-protect verify   the same comparison, exit 1 on any disagreement
+#   obot-protect apply --approved '<where and when he chose it>'
+#
+# A thin shim so the entry point is a stable path (and one allowlist prefix);
+# everything it does is in scripts/lib/protect-cli.mjs. See that file's header
+# for why the credential is @jwildfire's and not the obotclaw App's.
+set -euo pipefail
+DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec node "$DIR/lib/protect-cli.mjs" "$@"

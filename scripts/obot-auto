@@ -65,24 +65,54 @@ while [ $# -gt 0 ]; do
 done
 
 # ---- pre-flight (fail-fast, in dependency order) ----------------------------
+# 0. Spend cap (jwildfire/obot.roadmap#275). @jwildfire, 2026-08-18: "no more than
+#    fifty percent of my weekly usage in any given night." Enforced here rather than
+#    remembered: an autonomous session is the single largest thing this machine can
+#    start, and until now nothing between the launch and the bill could say what the
+#    week had already cost. The guard's exit code is the verdict — 2 refused, 4 no
+#    reading. Both stop a launch, and they are reported differently because a breach
+#    and a broken measurement are different failures.
+#
+#    A refusal here is not the only lane: the Navigator sweep writes the halt file
+#    above when the same reading trips, so a fleet already past the cap is parked
+#    even for a launch that never reaches this check.
+#
+#    It LEADS the pre-flight, above even the `claude` binary check, because
+#    "should anything launch tonight" is prior to "can it" and does not depend on
+#    the environment. Ordering caught its own bug: the check sat fourth, CI has no
+#    `claude` on PATH, and the test proving a breached cap stops the launcher was
+#    passing locally while never reaching the check at all on the runner.
+SPEND="$SCRIPT_DIR/../tools/spend-guard"
+if [ -x "$SPEND" ]; then
+  SPEND_OUT=$("$SPEND" check 2>&1) || SPEND_CODE=$?
+  case "${SPEND_CODE:-0}" in
+    0) echo "obot-auto: $(printf '%s' "$SPEND_OUT" | head -1)" ;;
+    2) fail "spend cap breached — $(printf '%s' "$SPEND_OUT" | head -1). Wait for the weekly reset, or change config/spend.json in a pull request." ;;
+    4) fail "spend reading unavailable — $(printf '%s' "$SPEND_OUT" | head -1). An unmeasured budget is not permission to spend; fix the reading or run tools/spend-guard check --allow-unknown to see it." ;;
+    *) fail "spend guard failed (exit ${SPEND_CODE:-0}) — $(printf '%s' "$SPEND_OUT" | head -1)" ;;
+  esac
+else
+  fail "tools/spend-guard missing or not executable ($SPEND) — the nightly cap cannot be checked, so this launch is refused rather than run blind"
+fi
+
 
 command -v claude >/dev/null 2>&1 || fail "claude CLI not on PATH"
 [ -f "$POLICY" ] || fail "policy file missing: $POLICY"
 
-# 0. The policy file is the guardrail; refuse to launch an unattended session
+# 1. The policy file is the guardrail; refuse to launch an unattended session
 #    against one that does not validate.
 "$SCRIPT_DIR/obot-policy" validate >/dev/null || fail "policy.json failed validation — run scripts/obot-policy validate"
 
-# 1. Halt file — the one-command kill switch. Absence is a launch condition.
+# 2. Halt file — the one-command kill switch. Absence is a launch condition.
 HALT="$WORKSPACE/.claude/autonomy-halt"
 [ ! -e "$HALT" ] || fail "halt file present ($HALT) — remove it (with @jwildfire's say-so) to launch"
 
-# 2. Autonomy level — A0 means draft-only observation runs; refuse to launch
+# 3. Autonomy level — A0 means draft-only observation runs; refuse to launch
 #    a merging session if the level was demoted.
 LEVEL=$(python3 -c "import json; print(json.load(open('$POLICY'))['autonomy']['level'])")
 [ "$LEVEL" != "A0" ] || echo "obot-auto: NOTE level=A0 (draft-PR-only) — session will not merge" >&2
 
-# 3. Goal is registered and active. The registry (goals/registry.json, policy
+# 4. Goal is registered and active. The registry (goals/registry.json, policy
 #    carve-out) is the selectable set; direction/membership live in the hub
 #    goal issue it points to (#53/#71, supersedes #18 O2).
 REGISTRY="$REPO_DIR/goals/registry.json"
@@ -95,11 +125,11 @@ PY
 )
 [ -n "$GOAL_ISSUE" ] || fail "goal '$GOAL' is not in the registry with status: active ($REGISTRY)"
 
-# 4. obotclaw token mints — unattended pushes/merges die without it, and the
+# 5. obotclaw token mints — unattended pushes/merges die without it, and the
 #    07-12 login-expiry stall showed a session can't always report the failure.
 TOKEN=$("$SCRIPT_DIR/obot-app-token" 2>/dev/null) && [ -n "$TOKEN" ] || fail "obot-app-token failed — refresh App credentials before launching"
 
-# 5. No concurrent autonomous session — one 🦾🤖 at a time.
+# 6. No concurrent autonomous session — one 🦾🤖 at a time.
 RUNNING=$(python3 - "$HOME/.claude/jobs" <<'PY'
 import json, pathlib, sys
 jobs = pathlib.Path(sys.argv[1])

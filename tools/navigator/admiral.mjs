@@ -304,11 +304,22 @@ export function operationalRepos(policy = {}) {
  *     his, and an RC by the sweep's own classifier.
  *   a review requested from him — same: it is in his queue, and only release
  *     candidates reach his queue.
+ *   ALREADY ROUTED TO THE CONFIG BUCKET — an open config item names this pull
+ *     request, so it is already in the one of @jwildfire's three buckets that fits
+ *     it, and there is nothing for an admiral to do about it (obot.agent#264, under
+ *     jwildfire/obot.roadmap#220). This is the exclusion that ends a recurring
+ *     escalation nobody could act on: obot.agent#198 touches carve-out paths, so no
+ *     agent may merge it, and it was reported as a stuck candidate every cycle for
+ *     as long as it stayed open. An escalation that repeats and cannot be acted on
+ *     is how an escalation channel gets ignored, which costs more than the one pull
+ *     request. It is excluded here and NAMED in the section — by id and number, never
+ *     by any of the item's text — so the silence is explained rather than merely quiet.
  *
  * The idle clock is `updatedAt`, which moves on a push, a comment or a review. A
  * pull request somebody is still working on is therefore never idle.
  */
-export function stuckPRs(prs = [], { now = new Date(), idleMin = PR_IDLE_MIN } = {}) {
+export function stuckPRs(prs = [], { now = new Date(), idleMin = PR_IDLE_MIN,
+                                     covered = new Map(), coverageRead = true } = {}) {
   const out = []
   for (const pr of prs) {
     const mins = minsSince(pr.updatedAt, now)
@@ -317,6 +328,11 @@ export function stuckPRs(prs = [], { now = new Date(), idleMin = PR_IDLE_MIN } =
     if (pr.baseRefName !== pr.integration) continue
     if (pr.reviewDecision) continue
     if ((pr.reviewRequests ?? []).length) continue
+    // Suppression requires a READING. An unreadable config list produces the same
+    // empty map as one covering nothing, and the two decide opposite things — so a
+    // failed read excludes nothing and says so, the same discipline `judgedReadable`
+    // already follows one condition below.
+    if (coverageRead && covered.has(`${pr.repo}#${pr.number}`)) continue
     out.push({
       repo: pr.repo,
       number: pr.number,
@@ -329,6 +345,37 @@ export function stuckPRs(prs = [], { now = new Date(), idleMin = PR_IDLE_MIN } =
     })
   }
   return out.sort((a, b) => b.mins - a.mins)
+}
+
+/**
+ * Pull requests the config bucket already holds.
+ *
+ * The other half of the exclusion above, and it exists so the suppression is VISIBLE.
+ * A condition that simply vanishes from the section is indistinguishable from a
+ * detector that stopped working — the failure this file's own foreign-session
+ * reporting was added for — so what was excluded is named here and rendered.
+ *
+ * IDS AND NUMBERS ONLY. The rows carry a pull request reference and the config ids
+ * covering it, and nothing else can be added to them: the config list is local-only
+ * and this section renders on a page, so the containment is enforced by what this
+ * function is able to return rather than by remembering not to.
+ */
+export function routedPRs(prs = [], { covered = new Map(), coverageRead = true } = {}) {
+  if (!coverageRead) return []
+  const out = []
+  for (const pr of prs) {
+    if (pr.isDraft) continue
+    if (pr.baseRefName !== pr.integration) continue
+    const key = `${pr.repo}#${pr.number}`
+    if (!covered.has(key)) continue
+    out.push({
+      repo: pr.repo,
+      number: pr.number,
+      ref: `${String(pr.repo).replace(/^jwildfire\//, '')}#${pr.number}`,
+      ids: covered.get(key),
+    })
+  }
+  return out.sort((a, b) => a.ref.localeCompare(b.ref))
 }
 
 // ---- condition 3: closeouts the delivery record never heard about ------------
@@ -411,9 +458,11 @@ export function closeoutGaps(jobs = [], { now = new Date(), judged = new Set(),
  */
 export function triggers({ jobs = [], prs = [], policy = {}, judged = new Set(),
                            judgedReadable = true, now = new Date(),
-                           hostWasAway: away = false, workspace = null } = {}) {
+                           hostWasAway: away = false, workspace = null,
+                           covered = new Map(), coverageRead = true } = {}) {
   const sessions = stalledSessions(jobs, { now, hostWasAway: away, workspace })
-  const pulls = stuckPRs(prs, { now })
+  const pulls = stuckPRs(prs, { now, covered, coverageRead })
+  const routed = routedPRs(prs, { covered, coverageRead })
   const gaps = closeoutGaps(jobs, { now, judged, judgedReadable })
   const conditions = [
     ...sessions.map((s) => ({ type: 'session', ...s })),
@@ -424,9 +473,13 @@ export function triggers({ jobs = [], prs = [], policy = {}, judged = new Set(),
     conditions,
     sessions,
     pulls,
+    // Not a condition: a routed pull request fires nothing. It is carried alongside
+    // so the section can say what it stopped escalating and why.
+    routed,
     gaps,
     fired: conditions.length > 0,
     judgedReadable,
+    coverageRead,
     signature: signatureOf(conditions),
     operational: operationalRepos(policy).map((r) => r.repo),
   }
@@ -574,6 +627,14 @@ export const UNJUDGED_NOTE =
   'delivery journal unreadable — closeout-gap detection SUPPRESSED this run; an unreadable ' +
   'journal is not an empty one, and treating it as empty would make every recent closeout a gap'
 
+/** The same sentence one condition over. Said on every run where the config list
+ *  could not be read, because the exclusion it feeds is a SUPPRESSION: a pull request
+ *  already routed to his config bucket is silently missing from the section, and a
+ *  reader has to be able to tell "nothing was routed" from "we could not look". */
+export const UNROUTED_NOTE =
+  'config list unreadable — routed-PR recognition SUPPRESSED this run; nothing was excluded on ' +
+  'it, so a pull request he has already been given may be reported below as if nothing covered it'
+
 
 /**
  * Verdict first, then what held the launch, then the conditions.
@@ -640,18 +701,32 @@ export function admiralSection({ trigger = null, decision = null, overruns = [],
                (foreign.length > 3 ? ` · …and ${foreign.length - 3} more` : ''))
   }
 
+  // Named on both branches, fired or quiet. This is the line that explains why a
+  // pull request the admiral used to escalate every cycle is no longer here — count
+  // and id only, never a word of the item's text, because this section reaches a page
+  // and the config list is local-only.
+  const routedLine = (trigger.routed ?? []).length
+    ? `already his: ${trigger.routed.length} pull request(s) routed to the config bucket, not escalated — ` +
+      trigger.routed.slice(0, SHOW).map((r) => `${r.ref} · ${r.ids.join(', ')}`).join(' · ') +
+      (trigger.routed.length > SHOW ? ` · …and ${trigger.routed.length - SHOW} more` : '')
+    : null
+
   if (!trigger.fired) {
     lines.push('admiral: nothing to act on — no session past the bar, no idle operational PR, no unrecorded closeout')
     lines.push('  the trigger is a positive condition: an empty fleet never launches an admiral')
+    if (routedLine) lines.push(`  ${routedLine}`)
     if (trigger.judgedReadable === false) lines.push(`  ${UNJUDGED_NOTE}`)
+    if (trigger.coverageRead === false) lines.push(`  ${UNROUTED_NOTE}`)
     return lines.join('\n') + '\n'
   }
   if (trigger.judgedReadable === false) lines.push(`  ${UNJUDGED_NOTE}`)
+  if (trigger.coverageRead === false) lines.push(`  ${UNROUTED_NOTE}`)
 
   lines.push(`admiral: **${trigger.conditions.length} condition(s)** — ${trigger.sessions.length} session(s) past the bar, ` +
              `${trigger.pulls.length} idle operational PR(s), ${trigger.gaps.length} closeout gap(s)`)
   if (launched) lines.push(`  launched admiral ${launched} — it acts and exits inside ${ADMIRAL_TTL_MIN}m`)
   else if (decision) lines.push(`  held: ${decision.why}`)
+  if (routedLine) lines.push(`  ${routedLine}`)
 
   const group = (title, rows) => {
     if (!rows.length) return
@@ -684,6 +759,10 @@ export function brief({ trigger, now = new Date(), ttlMin = ADMIRAL_TTL_MIN }) {
     signature: trigger.signature,
     sessions: trigger.sessions,
     pulls: trigger.pulls,
+    // References and ids, so the admiral does not rediscover from its own listing
+    // what has already been routed to @jwildfire and escalate it a second time. It
+    // carries no config item text and never can — see `routedPRs`.
+    routed: trigger.routed ?? [],
     closeoutGaps: trigger.gaps,
   }
 }

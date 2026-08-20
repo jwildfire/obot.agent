@@ -66,9 +66,26 @@ One queue, three sources:
   read is decided per request — see [What the page is made of](#what-the-page-is-made-of).
 - **Config** — the workspace list at `<workspace>/.claude/blockers.md` and nowhere
   else. **Headlines only**: an item's body describes exactly which control stopped an
-  agent, and there is no reason to render that on a queue row.
+  agent, and there is no reason to render that on a queue row. Most items are captured
+  by hand with `tools/blocker-log`; one class raises itself. A pull request touching a
+  guardrail path is unmergeable by every agent, so `tools/carveout-route` reads
+  `obot-merge --check` on the five-minute sweep and files the item — once per pull
+  request, matched on the pull request rather than the headline (obot.agent#264).
 
 In that order, his (2026-08-15): "RCs first. then decisions, then config items."
+
+Below all three, and asking nothing of him, sit the two read-only panels:
+
+- **Next ten** — what gets picked up next, rank declared and everything else derived
+  (jwildfire/obot.roadmap#278).
+- **Delivered** — what reached him. One completion per row, and the row is the SENTENCE
+  saying what he can now do that he could not before, with the issue number as small
+  print under it. Written by whoever closed the requirement, through
+  `tools/landing-log`, which refuses a summary that is a list of issue numbers. Under it,
+  only the things he asked for that have *not* been found where they were meant to land,
+  each with its age and what the fetch actually returned — `unchecked` is rendered
+  differently from `not-landed`, because a landing nobody could look at is not a landing
+  that failed (jwildfire/obot.roadmap#257).
 
 
 Clicking a decision opens the artifact in the main area and the answer controls in
@@ -111,6 +128,47 @@ cache is shared with any ops-dashboard process already running, and that process
 long-lived because nothing restarts it on a merge — writing a new shape into the old
 file hands a running older server something it cannot parse. That is not hypothetical:
 it turned the live queue page into a 500 on 2026-08-16. The file name is the schema.
+
+### The ranked head — what comes next, below all three
+
+Under the three buckets, at the bottom of the queue, sits the next ten requirements in
+order (jwildfire/obot.roadmap#278). @jwildfire, 2026-08-18: *"Next 10 requirements show
+up at the bottom of the queue maybe. you're responsible for strategy, so you get the
+decision and then i can steer when i want to."*
+
+**It is a preview, never a fourth bucket.** Read-only, no control of any kind, every
+link leaving for GitHub. His queue holds exactly three things that need him and that
+rule is jwildfire/obot.roadmap#220; the moment this asks him for something it becomes a
+fourth obligation. `test/rank-head.test.mjs` asserts the absence of the ask rather than
+trusting anyone to remember it.
+
+**Rank is declared; everything else is derived.** Two things come from a file — the
+position and the one-line why, in `obot.agent/rank/top10.json`. Title, state, milestone,
+blocked-ness and sub-issue progress come from GitHub, keyed off the `top10` label
+@jwildfire asked for so the list is one API call away. A label carries membership and
+the file carries order; the two can disagree, and every disagreement is reported on the
+panel rather than silently resolved.
+
+**Two clocks, never merged.** "Ranked 2026-08-19, 3d old" is the order; "state refreshed
+4m ago" is everything beside it. The declaration is read inline on every render, so the
+order and the reasons survive an unauthenticated `gh`; only the derived half is cached
+and refreshed behind the page. A refresh that failed says so in its own sentence, with
+the age of what is actually on screen — never a silent substitution of old for current.
+An age nobody could measure prints as "not known", never as a zero. The order's age
+comes from `git log -1 -- rank/top10.json`, never the file's mtime, which a fresh clone
+stamps with the moment it was written.
+
+**A slot open is stated and left alone.** A `top10` label on a closed issue is a
+computed condition, so the sweep raises it as a finding
+(`tools/navigator/rankhead.mjs`) and this panel shows it. Neither chooses the
+replacement — that is 🎩🤖 obot-prime's — and the bench reaches both surfaces as a
+*count* so nothing either prints can be read as a recommendation. Nothing about it ever
+reaches his config list.
+
+Both surfaces read GitHub through the same module, spawned out of process by the
+dashboard, so the page and the sweep cannot disagree about what the ten are. The cache
+is `rank-head.json`, its failures `rank-head-failed.json`, under the same
+name-is-the-schema rule as `rcs-lane.json`. Full contract: [`rank/README.md`](../../rank/README.md).
 
 ## What the page is made of
 
@@ -176,7 +234,27 @@ flight, and how long since the last one finished. The probe is excluded from its
 accounting, which is the whole mechanism rather than a nicety — a health check that
 counted itself as traffic would reset the idle clock every five minutes and the restart
 would never fire. A build too old to have the endpoint falls back to the last-look
-record; when neither can answer, the restart is refused and says so.
+record; when neither can answer, the restart waits and says so.
+
+**Only in-flight counts, and the wait has an end.** Those two numbers are not
+interchangeable. A restart kills a request that is *in flight* — the marker's exit hook
+calls `process.exit` without draining — and nothing else: the pages here fetch nothing
+from this origin, so a closed response is complete on the wire. Time since the last
+response is a guess about the future, and it was a twenty-second bar until
+[#258](https://github.com/jwildfire/obot.agent/issues/258): anything that watched the
+page starved the restart for as long as it kept watching, and on 18 August the checkout
+stood at `7482007` while this server served `0832443`. Two seconds of it survive, for
+the one thing it knows — a click is two requests. And every deferral is counted on the
+record: after `DEFERRAL_LIMIT` (3, a fifteen-minute ceiling at this cadence) the restart
+goes ahead regardless. A dropped request announces itself and a refresh repairs it; a
+stale page is not visible as a fault at all.
+
+**Restarted means this process is serving, not that the port answers.** The port
+answering is a question the process being replaced answers perfectly well, so the check
+compares the pid and the commit from `/healthz` against the replacement just spawned. A
+replacement that never took the port is stopped rather than left running. And the check
+only ever asks `/healthz` — asking for the page is traffic, and would seed the next
+deferral.
 
 A crashed dashboard is started again on the next sweep, and one he stopped on purpose is
 not: `pkill` sends SIGTERM, the marker's release hook runs, and a released marker reads
@@ -298,7 +376,8 @@ the bar is mechanical (`lib/rank.mjs`):
   thing asking for attention: a `Blocks:` reference that GitHub confirmed **open** at capture
   time (`blocker-log` asks; no `gh`, or a closed or missing reference, means no stamp and no
   tag), or a computed condition on the item (`item.computed`) such as the answer pipeline's
-  OVERDUE. Self-declared urgency has nowhere to go.
+  OVERDUE — an answer of his recorded and unapplied past the hour, which is that seam's
+  first and so far only producer. Self-declared urgency has nowhere to go.
 - **The claim is displayed** — the row reads `critical · blocks obot.roadmap#182`, so a weak
   claim is obvious at a glance. That is the check no rule can perform for him.
 - **Budgeted at three.** Sparingly is enforced. A fourth claim is neither shown as critical nor
@@ -360,6 +439,135 @@ obot.agent/tools/config-count             # write it
 obot.agent/tools/config-count --dry-run   # print it, write nothing
 obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
 ```
+
+## A config item as a card
+
+`/config/<id>` renders one item as a short page: an executive summary, then why it exists,
+then step by step. His order, and his ask — [obot.roadmap#263](https://github.com/jwildfire/obot.roadmap/issues/263),
+2026-08-18: *"The config format isn't working for me. Let's make local-only (relatively
+short) html artifacts for each item."*
+
+That is the third format in three days, so the reason is written down rather than fixed a
+fourth time. He reads on a phone to decide whether it is worth going to a keyboard, then
+works at the keyboard with the item open — two documents, and we kept shipping one. The
+summary is built as the phone document: it answers what this is, whether to do it now, how
+long it takes and what it buys, and it holds no forward reference to a step, because the
+steps may be off-screen when it is read. Everything below it is the keyboard document.
+
+The five field names are gone. The two properties that made them worth having are not: every
+step carries what he should see, and the page closes with a check that answers pass or fail.
+A card that drops either to look cleaner has re-made the mistake of the 16th in the other
+direction.
+
+```bash
+obot.agent/tools/config-card                 # every open item
+obot.agent/tools/config-card c0016 c0017     # named items
+obot.agent/tools/config-card c0016 --stdout  # print the page, write nothing
+obot.agent/tools/config-card c0016 --summary # the phone document, as plain text
+obot.agent/tools/config-card --list          # ids, titles, and which have prose
+```
+
+**Two sources.** The spine — title, dates, criticality, what it blocks, the verify command —
+is read from `.claude/blockers.md` on every render and never copied, so a card cannot drift
+from the list about anything measurable. The prose is `<store>/config-cards/cNNNN.md`. An
+item with no prose still renders: it shows the list entry and says plainly that nobody has
+written a card for it, which keeps every open item reachable at the same address.
+
+`--summary` exists because loopback is not reachable from a phone. The dashboard is the
+keyboard lane; the fold and the push relay are the phone lane, and they can now carry the
+summary verbatim instead of paraphrasing a page nobody on that end can open.
+
+**Why this cannot leak.** Config item text has never reached a public surface — that is why
+the list lives outside git, and it predates this format. Here it is structural: `writeCard`
+is the only writer in the program, it computes its destination from a four-digit id rather
+than accepting a path, it refuses a destination outside the store, it refuses a store with a
+`.git` anywhere above it, and it refuses content that is not sentinel-stamped — the stamp the
+hub deploy greps for and fails on. The server has no card writer at all; it renders on the
+request and writes nothing. Each refusal has a test in `test/config-card.test.mjs`.
+
+## The currency of a claim — one mechanism, two artifact classes
+
+Requirements [obot.roadmap#264](https://github.com/jwildfire/obot.roadmap/issues/264) and
+[#266](https://github.com/jwildfire/obot.roadmap/issues/266), built as one under
+[obot.agent#262](https://github.com/jwildfire/obot.agent/issues/262). Core in
+`tools/lib/claims.mjs`; the two readers and the section in `tools/navigator/currency.mjs`.
+
+Two artifact classes state claims and neither re-checked them. Config items carry a verify
+command, the dashboard runs one on a click, and nothing ran them on their own — three of
+the last six items left the list for being stale or mis-specified rather than for being
+done. Decision artifacts state a premise in prose, and D0021 said a release was held
+pending the decision when it had published sixteen minutes earlier. Same defect, one
+artifact class apart, which is why #266 asked for one mechanism by name.
+
+A **claim** is a sentence and a proof:
+
+```
+<what is claimed> | <read-only command> → <what its output should say>
+```
+
+The right-hand half is the config list's own `Verify:` grammar, unchanged. A decision
+artifact declares one per line in its head, beside the description the contract already
+requires — the form is one line because a premise that costs a section or a schema does not
+get written:
+
+```html
+<meta name="premise" content="v1.1.0 is published, not a draft | gh release view v1.1.0 -R jwildfire/gsm.safety --json isDraft --jq .isDraft → prints false">
+```
+
+**Three states, never two.** `holds` / `does not hold` / `unknown`. The classes read them
+differently — a config claim that holds is done and leaves his queue; a premise that holds
+still frames its question correctly — but `unknown` means the same thing in both, and it is
+the state the whole capability turns on:
+
+- A command the allowlist will not run is unknown with a reason, never a fail.
+- A command that never produced an exit status — not installed, killed by the timeout — is
+  unknown. This was live in the old `runVerify`, which coerced a spawn failure to
+  `exitCode: 1` and judged it, so an item nothing could check read as an item waiting on him.
+- A `prints X` claim whose command exited non-zero and either printed nothing or reported an
+  error is unknown: there was no answer to compare. Found by 👯🤖 W0071's missing-file
+  control. Deliberately narrow — `grep -c x file` prints `0` and exits 1 when the answer is
+  "none, which is what we wanted", and two live items depend on that reading as a pass.
+- A reading of a *different* command is not this claim's reading. A reworded verify starts
+  again rather than inheriting its predecessor's verdict.
+
+**Read-only, and a shell is never involved.** The allowlist is the same fail-closed one the
+click-to-run button used. A shell metacharacter *outside quotes* means the author wrote for
+a shell and the claim is refused rather than reinterpreted — `grep -q x f > /dev/null` run
+through `execFile` passes `>` and `/dev/null` to grep and answers a different question,
+silently. Inside quotes it is a character in an argument and passes through untouched, which
+is what lets a proof do its own work: `gh api … --jq '.content | @base64d | test("x")'` is
+one command with three jq pipes and no shell at all.
+
+**On the sweep, and at publish time.** They fail differently and neither substitutes.
+
+```bash
+tools/navigator/currency.mjs                        # the pass, as the sweep runs it
+tools/navigator/currency.mjs --artifact <slug>     # one artifact, exits 1 if a premise does not hold
+```
+
+Cadence catches the world moving under a page that was right when written — and the config
+half, where nothing else ever will. Publish-time catches a page born wrong, which cadence
+can only report forever with no path to green: the first draft of D0021's premise was the
+corrected-away claim, and a five-minute check on it would have been a permanent alarm. What
+actually closes the window is not the evaluation, though — the premise that expired was
+never in a field to evaluate. It is that **declaring** a premise forces the author to state
+it as a command, so a belief becomes a measurement at the moment of writing. The gate is
+worth having; the declaration is the part doing the work.
+
+**A premise is asserted in five places.** Measured by W0071 on D0021: the page, the
+artifact's README, the published index row, `registry.json`, and the discussion title — all
+five stated it and none of them were true. So a broken premise's finding names every one of
+them, and reads when each of the three that are files was last modified, flagging any older
+than the moment the premise broke. The discussion title is named without a reading, and says
+so: refusing to claim a check nobody ran is what makes the other three believable. A
+declaration that cannot be parsed at all is counted and reported rather than vanishing,
+because a premise nobody can read looks exactly like a page with nothing wrong.
+
+**What it never does.** It never writes to `.claude/blockers.md` — an item its own check
+proves done leaves the queue as a view, and the line naming it is there so nothing can
+vanish silently. It never closes anything on GitHub. And it never prints config item text:
+ids and counts reach the sweep file and the page, as everywhere else. Premise sentences do
+reach it, because they are already published on the artifact's own public page.
 
 ## The hub's code runs in its own process
 
@@ -620,6 +828,45 @@ obot.agent/tools/ops-answers apply <id> --evidence <url> --by "a sibling"
 An answer unapplied for more than an hour is marked `OVERDUE` in the Navigator's
 section, on the page, and in the CLI. `pending --exit-code` exits 1 when anything is
 pending and 2 when anything is overdue, so a wrapper can act on it.
+
+### When one goes unapplied (jwildfire/obot.roadmap#241)
+
+On 2026-08-16 he answered three decisions, all three were announced inside six minutes,
+and none reached an artifact for nine hours. The detection was never what failed: the
+sweep recomputed `3 answers pending` 105 consecutive times and wrote it to a file that
+nothing was obliged to read. Four things were silent, and all four were mechanisms that
+already existed:
+
+- the wake channel had no answer detection and read job records only;
+- `**OVERDUE**` is not in `ALARM_RE`'s vocabulary — and a `- ` bullet is never
+  alarm-tested by `lib/navigator.mjs` anyway, so the row could not have gone red even
+  with the right word in it;
+- `item.computed`, the critical pin's own documented route for exactly this case, had
+  no producer;
+- and the panel alarm counted `captured` only, so an answer picked up and then dropped
+  — which is precisely what happened — could never reach it.
+
+Past the bar the same finding now takes four routes at once. `unappliedDetections` in
+`lib/answers.mjs` is the one producer:
+
+- **the wake channel**, on its own per-run budget and on a 60-minute floor rather than
+  once-only — a completion is an event, an unapplied answer is a condition that stays
+  true until somebody acts. Navigator-only: applying an answer is an agent's job and
+  this channel has no path to him.
+- **the sweep's answers section**, as an unindented verdict line reading
+  `**ANSWER DELIVERY GAP**` — unindented because that is the branch the Navigator tab
+  actually alarm-tests, and that vocabulary because it is what `ALARM_RE` matches.
+- **the critical pin**, so the decision moves to the top of his queue reading
+  `critical · answered, not applied — you decided this 8h50 ago…`.
+- **the answers panel**, which now alarms on recorded-and-unapplied rather than on
+  never-picked-up, and whose row stops promising `the artifact updates next` once that
+  promise is an hour old.
+
+Two conditions, because they have different remedies and the old clock could not tell
+them apart: `unclaimed` measures from his click and means the sweep never announced it,
+`dropped` measures from the announcement and means an agent was told and did nothing.
+None of these lines ever carries his prose — they reach the scratchpad, and a scratchpad
+can end up published.
 
 **Not automated on purpose:** nothing launches an agent by itself. The sweep announces;
 a session applies. Closing that last gap unattended means letting a scheduled job start

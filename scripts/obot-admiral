@@ -75,6 +75,7 @@ import { ADMIRAL_NAME, ADMIRAL_TTL_MIN, brief, admiralSection, foreignRoleSessio
          holdLine, hostWasAway, isAdmiral, judgedWorkers, killLine, launchLine,
          operationalRepos, overrun, parseAdmiralLog, priorStopAttempts, readJobs,
          shouldLaunch, stubLine, triggers } from '../tools/navigator/admiral.mjs'
+import { readCoverage } from '../tools/navigator/carveout.mjs'
 import { confirmedStop } from '../tools/lib/killconfirm.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -217,11 +218,21 @@ function main() {
   const journal = safeRead(DELIVERY_JOURNAL)
   const judgedReadable = existsSync(DELIVERY_JOURNAL) && journal.trim().length > 0
   const judged = judgedWorkers(journal)
-  const trigger = triggers({ jobs, prs, policy, judged, judgedReadable, now, hostWasAway: away, workspace: WS })
+  // Which pull requests are already in @jwildfire's config bucket (obot.agent#264).
+  // A carve-out pull request is unmergeable by every agent, so escalating it once a
+  // cycle reaches an audience that can do nothing — and an escalation that repeats
+  // and cannot be acted on is how an escalation channel gets ignored. `read` is
+  // carried separately from the map for the same reason `judgedReadable` is: an
+  // unreadable list and a list covering nothing are the same empty map and opposite
+  // facts, and nothing may be suppressed on a reading that did not happen.
+  const coverage = readCoverage(WS)
+  const trigger = triggers({ jobs, prs, policy, judged, judgedReadable, now, hostWasAway: away,
+                             workspace: WS, covered: coverage.covered, coverageRead: coverage.read })
   // Sessions carrying a role's name that ran somewhere other than this workspace.
   // Named in the section rather than silently skipped by everything below.
   const foreign = foreignRoleSessions(jobs, { workspace: WS })
   if (!judgedReadable) errors.push(`delivery journal not readable at ${DELIVERY_JOURNAL}`)
+  if (!coverage.read) errors.push(`config list not readable — ${coverage.why}`)
   // A repo that failed to list contributes no candidates, and saying the queue is
   // empty when it could not be read is the wrong direction to fail in. Named, so the
   // section is never read as complete.

@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""spend-cap-hook - deny an agent-typed spawn once the nightly spend cap is breached.
+
+jwildfire/obot.roadmap#275. Worker W0078.
+
+The other two lanes are mechanical already: `obot-auto` checks the cap in its
+pre-flight, and the Navigator sweep writes `.claude/autonomy-halt`, which obot-auto
+and the morning fold honour. Neither reaches the highest-volume lane - a lead agent
+typing `claude --bg ...` into a Bash call, which is how every background sibling is
+created. Only a `PreToolUse` hook sees that, so this is the piece that makes the cap
+independent of an agent remembering to check.
+
+NOT INSTALLED BY THIS PULL REQUEST. Registering a hook means editing `hooks/`, which
+is a policy carve-out path, so it is @jwildfire's to approve. When he does, it is one
+row in `hooks/install.sh`:
+
+    "spend-cap-hook:PreToolUse:Bash"
+
+(the file will need to move to hooks/ at that point; it lives here so this change
+stays on the standard lane).
+
+Contract, matching the merge gate and the attribution guard:
+  - stdout: one JSON object with hookSpecificOutput.permissionDecision = "deny",
+    then exit 0. Exit 0 with NO output defers to normal permission evaluation.
+  - Anything unexpected - unreadable input, missing verdict, a parse failure - defers.
+    A guard that fires on prose gets switched off within a day, and then it protects
+    nothing. It also never blocks reads: only spawn-shaped segments are judged.
+
+The reading is the verdict the sweep already cached, not a fresh computation: a hook
+runs in front of every Bash call and must not pay three seconds for the generator.
+A verdict older than the staleness limit is treated as no verdict, and defers - the
+sweep going dark is the sweep's own alarm to raise, not this one's.
+"""
+import json
+import os
+import pathlib
+import shlex
+import sys
+import time
+
+WS = pathlib.Path(os.environ.get("OBOT_WORKSPACE") or (pathlib.Path.home() / "Documents/obot2"))
+VERDICT = pathlib.Path(os.environ.get("OBOT_SPEND_VERDICT")
+                       or (WS / ".claude/session-hub/cache/spend.json"))
+# How old the cached verdict may be and still be believed. The sweep refreshes it
+# every five minutes; an hour means the observer has been dead for eleven cycles.
+MAX_AGE_S = int(os.environ.get("OBOT_SPEND_VERDICT_MAX_AGE") or 3600)
+
+# A segment is a spawn if its first real word is one of these. Matched on the
+# basename, so an absolute path counts and a mention inside a quoted string does not
+# (shlex has already collapsed that into one token).
+SPAWNERS = {"claude", "obot-auto"}
+
+
+def defer():
+    sys.exit(0)
+
+
+def deny(reason):
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }}))
+    sys.exit(0)
+
+
+def segments(command):
+    """Split a shell command into segments, the way the other guards do."""
+    try:
+        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return []
+    out, cur = [], []
+    for t in tokens:
+        if t in (";", "&&", "||", "|", "&", "\n"):
+            out.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    out.append(cur)
+    return [c for c in out if c]
+
+
+def spawns(command):
+    """True when some segment of `command` actually starts an agent."""
+    for seg in segments(command):
+        words = list(seg)
+        while words and "=" in words[0] and not words[0].startswith("-") and "/" not in words[0].split("=")[0]:
+            words.pop(0)          # leading FOO=bar env assignments
+        if not words:
+            continue
+        head = os.path.basename(words[0])
+        if head not in SPAWNERS:
+            continue
+        if head == "obot-auto":
+            return True
+        # `claude` alone is an interactive start and not a fleet dispatch; the spawn
+        # forms are the background and headless ones.
+        if any(a in ("--bg", "-p", "--print") for a in words[1:]):
+            return True
+    return False
+
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        defer()
+    if payload.get("tool_name") != "Bash":
+        defer()
+    command = (payload.get("tool_input") or {}).get("command") or ""
+    if not command or not spawns(command):
+        defer()
+
+    try:
+        raw = VERDICT.read_text()
+        age = time.time() - VERDICT.stat().st_mtime
+    except OSError:
+        defer()
+    if age > MAX_AGE_S:
+        defer()
+    try:
+        v = json.loads(raw)
+    except ValueError:
+        defer()
+
+    if v.get("state") == "stop":
+        deny("Nightly spend cap breached - %s\n\n%s\n\nThis is the cap @jwildfire set on "
+             "2026-08-18 ('no more than fifty percent of my weekly usage in any given night'), "
+             "enforced from obot.agent/config/spend.json and measured by tools/spend-guard. "
+             "Do not route around it: report the refusal and stop dispatching. The allowance "
+             "week resets on its own." % (v.get("why") or "over the cap",
+                                          (v.get("headline") or "").replace("**", "")))
+    defer()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+// spend-guard — the mechanism that refuses a dispatch past the nightly cap.
+//
+// jwildfire/obot.roadmap#275. Worker W0078.
+//
+//     spend-guard check                  the verdict, on the first line
+//     spend-guard check --json           the whole ladder, for a caller that must not parse prose
+//     spend-guard check --allow-unknown  proceed past a reading that did not happen (never past a breach)
+//     spend-guard check --halt           also write/lift .claude/autonomy-halt (the sweep's mode)
+//     spend-guard rehearse --as-of DAY   what this would have said on that UTC night
+//
+// THE EXIT CODE IS THE VERDICT, and a refusal and a failure are different things —
+// #275 asks for that distinction by name:
+//
+//     0   under the cap, or warning (a warning is a signal, not a gate)
+//     2   REFUSED — over the cap. Exit 2 is this repo's refusal code (obot-merge,
+//         obot-policy), so `spend-guard check || exit` reads the same everywhere.
+//     4   the reading did not happen. Refused, but for a different reason, and it
+//         must never be collapsed into 0. A broken measurement is not permission
+//         to spend — that collapse is the recurring defect this program keeps
+//         finding, and it would make the whole cap decorative.
+//     1   usage error.
+//
+// The verdict is the FIRST line of output because callers summarise by first line;
+// when the config ledger printed its notes first the verdict vanished from nearly
+// every sweep while looking perfectly healthy (obot.agent#129).
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { readSpend, applyHalt, writeVerdict } from './navigator/spend.mjs'
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const WS = process.env.OBOT_WORKSPACE || path.join(process.env.HOME || '', 'Documents/obot2')
+const HUB = process.env.OBOT_HUB || path.join(WS, 'obot.roadmap')
+
+const argv = process.argv.slice(2)
+const cmd = argv.find((a) => !a.startsWith('-')) || 'check'
+const has = (f) => argv.includes(f)
+const valueOf = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null }
+
+if (has('-h') || has('--help')) {
+  console.log(`spend-guard — refuse a dispatch past the nightly spend cap (obot.roadmap#275)
+
+  spend-guard check [--json] [--allow-unknown] [--halt]
+  spend-guard rehearse --as-of YYYY-MM-DD
+
+exit 0 under the cap or warning · 2 REFUSED, over the cap · 4 no reading · 1 usage`)
+  process.exit(0)
+}
+if (!['check', 'rehearse'].includes(cmd)) {
+  console.error(`spend-guard: unknown command '${cmd}' — try check or rehearse`)
+  process.exit(1)
+}
+
+// `--as-of` and OBOT_SPEND_NOW move the clock. Both are rehearsal lanes and both say
+// so on the output, because a rehearsal that reads like a live verdict is worse than
+// no rehearsal at all.
+const asOf = cmd === 'rehearse' ? valueOf('--as-of') : null
+if (cmd === 'rehearse' && !asOf) { console.error('spend-guard: rehearse needs --as-of YYYY-MM-DD'); process.exit(1) }
+const nowIso = asOf ? `${asOf}T23:59:00Z` : process.env.OBOT_SPEND_NOW
+const now = nowIso ? new Date(nowIso) : new Date()
+if (Number.isNaN(now.getTime())) { console.error(`spend-guard: unparseable instant '${nowIso}'`); process.exit(1) }
+
+const { verdict, note } = readSpend({ workspace: WS, hub: HUB, repoRoot: REPO_ROOT, now })
+
+if (has('--json')) {
+  console.log(JSON.stringify(verdict, null, 1))
+} else {
+  // First line: the verdict, nothing before it.
+  console.log(verdict.headline)
+  if (asOf) console.log(`(rehearsal for the UTC night of ${asOf} — not a live reading)`)
+  for (const line of note.split('\n').slice(1)) console.log(line)
+}
+
+if (cmd === 'check' && has('--halt')) {
+  const r = applyHalt(WS, verdict)
+  if (r.wrote) console.error('spend-guard: wrote .claude/autonomy-halt — obot-auto and the morning fold are parked')
+  if (r.cleared) console.error('spend-guard: lifted .claude/autonomy-halt — the reading has cleared')
+  writeVerdict(WS, verdict)
+}
+
+if (cmd === 'rehearse') process.exit(0)
+if (verdict.state === 'stop') {
+  console.error(`spend-guard: REFUSED - ${verdict.why}`)
+  console.error('spend-guard: this is the cap @jwildfire set on 2026-08-18, enforced from config/spend.json. Wait for the weekly reset, or change the policy in a pull request.')
+  process.exit(2)
+}
+if (verdict.state === 'unknown') {
+  if (has('--allow-unknown')) {
+    console.error('spend-guard: proceeding past an UNKNOWN reading because --allow-unknown was passed. Nothing here says the fleet is under the cap.')
+    process.exit(0)
+  }
+  console.error(`spend-guard: REFUSED - ${verdict.why}`)
+  console.error('spend-guard: fix the reading, or pass --allow-unknown to proceed knowing nothing was measured.')
+  process.exit(4)
+}
+process.exit(0)

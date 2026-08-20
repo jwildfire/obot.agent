@@ -2,15 +2,73 @@
 
 `node obot.agent/tools/fold/fold.mjs --dry-run`
 
-Decides, every morning, whether there is anything to say. That is the whole of
-this tool today: it writes no diary entry, renders no page and sends no push.
-Those are [obot.agent#202](https://github.com/jwildfire/obot.agent/issues/202),
-[obot.roadmap#247](https://github.com/jwildfire/obot.roadmap/issues/247) and
-[obot.agent#205](https://github.com/jwildfire/obot.agent/issues/205), and each
-acts on the verdict this produces.
+Decides, every morning, whether there is anything to say — and, when there is,
+writes it: the daily brief, the day's diary entry, the day boundary, the ideas
+backstop sweep and the push payloads. The briefing page is the hub's
+([obot.roadmap#247](https://github.com/jwildfire/obot.roadmap/issues/247)) and is
+generated at deploy time from the same queue.
 
 Requirement: [obot.roadmap#238](https://github.com/jwildfire/obot.roadmap/issues/238),
 from @jwildfire's adoption of the session-model decision (M2/M3) on 2026-08-16.
+
+## The brief
+
+`node obot.agent/tools/fold/fold.mjs --brief`
+
+One paragraph about progress, then his todo list, one line per bullet. That is
+the whole specification, and it is @jwildfire's own, from 2026-08-18:
+
+> "I want the text version SHORT one paragraph about progress and a bulleted
+> overview of my todo list (1 line per bulleted)."
+
+It is written to `.claude/fold/brief.md` on the **briefing** gate — it is that
+page's text version, so it is rewritten when the queue changes and left alone
+when nothing has. `--brief` renders exactly what the next fold would write and
+writes nothing, so the shape can be checked by looking at it.
+
+The bounds are countable, which is the point: one paragraph and one line per item
+are things a test can hold and a preference cannot. `violations()` in
+`lib/brief.mjs` is the checker, the fold refuses to write a brief that fails it,
+and `test/brief.test.mjs` runs it against injected malformations as well as
+against the real output — a checker nobody has seen fail is indistinguishable
+from one that passes everything.
+
+| Rule | Bound |
+|---|---|
+| Paragraph | exactly one, no newline in it, ≤ 60 visible words |
+| Bullets | `- ` at column zero, ≤ 20 visible words, no sub-bullet, no continuation |
+| Total | 10 bullets, except that release candidates and decisions are never cut |
+| Config | earned-critical items by **id** (at most three), the rest a count — never item text |
+| Nothing else | no headings, no meta line, no report links, no footer, no coda, no inline bold |
+
+Words, never characters: a line that wraps on his phone is still one line, and a
+markdown link's URL is not prose.
+
+The config line names the items that have **earned** the critical tag, by id —
+`3 critical config items (c0016, c0017, c0019) and 10 others`. Criticality comes
+from the Operations Dashboard's own `criticalClaim`, so the brief cannot disagree
+with the page he answers these on: earned by a blocking reference something
+resolved to an open issue, never asserted, and budgeted at three. An id carries no
+item text, and anything that is not exactly `cNNNN` is dropped rather than
+repaired — item text has no route into the brief even when passed in the wrong
+parameter. The ids matter because c0017 is the item gating the fold's own
+schedule: a brief that could not name it could not say why it is being written by
+hand.
+
+Those ids are read **before** the hub's decision collector, and the order is
+load-bearing: importing hub code installs its local-only guard on `node:fs` for
+the whole process (obot.agent#206), after which a dynamic import of anything
+outside the hub is refused. It fails closed and says so on the run report.
+
+Nothing is composed out of failed queries, in either half. A git scan that could
+not run says so instead of becoming "nothing landed overnight", a partial one
+states its number as a floor, and `--brief` on an unknown queue prints nothing at
+all — stderr does not save a brief that is short, tidy and wrong once it has been
+piped to a file.
+
+What it deliberately leaves alone: the diary entry, which is the archive and the
+keynote's raw material and is written for someone who was not present; and the
+push lane, which carries two event classes and one morning line by charter.
 
 ## Three gates, not one
 
@@ -62,6 +120,9 @@ Navigator's sweep declares itself sole writer of `.claude/session-hub/`.
 
 - `state.json` — the watermark, the last published queue hash, and the session-log
   sizes at the last fold.
+- `brief.md` — the daily brief, rewritten whenever the queue changes. Local: it
+  carries config **ids and a count**, never item text — the list itself never
+  leaves the machine.
 - `runs.jsonl` — one line per run, **including quiet ones**. A quiet night and a
   dead scheduler produce identical output, which is nothing; this file is what
   tells them apart.

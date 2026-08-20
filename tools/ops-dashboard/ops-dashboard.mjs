@@ -52,9 +52,19 @@ import { buildMetricsModel, buildFeedModel, parseFilters } from './lib/metrics-v
 import { buildSessionFeed } from './lib/feed.mjs';
 import { parseDeliveryJournal } from './lib/log-view.mjs';
 import { currentAnswers, recordAnswer } from './lib/answers.mjs';
+import { rankPanel } from './lib/rankhead.mjs';
+import { collectDelivered } from './lib/delivered.mjs';
 import { ensureStore, opsDir } from './lib/store.mjs';
 import { seenAndNote, lastSeen } from './lib/last-seen.mjs';
 import { runVerify, readChecks } from './lib/iq.mjs';
+// How current each config item's claim is (obot.agent#262, under
+// jwildfire/obot.roadmap#264). The reading is shared with the Navigator sweep and with
+// decision-artifact premises, so the page, the card and the sweep cannot describe the
+// same check in three different ways.
+import { configCurrency } from '../navigator/currency.mjs';
+import { buildCard, readCardSource, renderCard, CARD_ID_RE } from './lib/config-card.mjs';
+import { collectConfig } from './lib/collect.mjs';
+import { criticalClaim } from './lib/rank.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
 import { labelIsPinned, readPins, writePin } from './lib/pins.mjs';
@@ -132,6 +142,27 @@ export function artifactPath(hub, url) {
   if (!/^[A-Za-z0-9._-]+$/.test(slug) || slug.startsWith('.')) return null;
   const file = path.join(hub, 'reports', 'decisions', slug, 'index.html');
   return fs.existsSync(file) ? file : null;
+}
+
+/**
+ * `/config/<id>` — one config item as the short page he asked for (hub#263).
+ *
+ * Built on the request rather than read back from the file the generator wrote.
+ * The two go through the same renderer, so they cannot disagree about wording; what
+ * differs is freshness, and a page assembled from the list as it stands now can
+ * never be the stale copy of an item he retired an hour ago. Nothing is written
+ * here: the server has no writer for cards at all, which is one fewer place the
+ * containment has to hold.
+ *
+ * The id is matched against the four-digit shape before it is used for anything —
+ * it reaches a filename by way of `readCardSource`, and a request path is not a
+ * filename until something says it is.
+ */
+export function configCardId(url) {
+  const m = /^\/config\/([^/?#]+)\/?$/.exec(url.split('?')[0]);
+  if (!m) return null;
+  const id = decodeURIComponent(m[1]).toLowerCase();
+  return CARD_ID_RE.test(id) ? id : null;
 }
 
 /** The session hub's rendered live view, or null when no watch loop has run yet. */
@@ -212,12 +243,31 @@ async function page(args, lastLook = null) {
   // showing whether it has ever been proved rather than starting blank.
   const checks = readChecks(args.workspace);
   const check = (i) => checks[i.id ?? i.key];
-  const withChecks = (g) => ({ ...g, items: (g.items ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)) });
+  // The check's verdict AND how old it is, on every config row. A pass/fail with no
+  // age is the same assertion-without-a-date the config list was making before any of
+  // this: it says what was true at some moment nobody names.
+  const stamp = (i) => (i.kind === 'config'
+    ? { ...i, check: check(i) ?? null, currency: configCurrency(i, checks) }
+    : (check(i) ? { ...i, check: check(i) } : i));
+  // An item its own check proves done leaves the queue. Nothing is written to the
+  // config list to make that happen — the list keeps the record and this is a view
+  // over it — and nothing is closed on GitHub either. It is named below the group so
+  // an item cannot vanish silently, which would be its own kind of lie.
+  const cleared = new Map();
+  const open = (items) => (items ?? []).map(stamp).filter((i) => {
+    if (i.kind !== 'config' || !i.currency?.done) return true;
+    cleared.set(i.id ?? i.key, { id: i.id ?? i.key, ago: i.currency.ago });
+    return false;
+  });
+  // Both lists are drained before either is handed over, because a critical item is
+  // one that was lifted out of the config group and it clears the same way.
+  const criticalItems = open(queue.critical);
+  const configItems = open(queue.config.items);
   return render({
     queue: {
       ...queue,
-      config: withChecks(queue.config),
-      critical: (queue.critical ?? []).map((i) => (check(i) ? { ...i, check: check(i) } : i)),
+      config: { ...queue.config, items: configItems, cleared: [...cleared.values()] },
+      critical: criticalItems,
     },
     answers: currentAnswers(args.workspace, { hub: hub.root }),
     deliverer: delivererState(args.workspace),
@@ -229,6 +279,16 @@ async function page(args, lastLook = null) {
     // Asked after the collectors have run, which is the only moment it can catch
     // anything: a patch installed by a request-time import is invisible at start-up.
     integrity: reportIntegrity(),
+    // What comes next, below his three buckets and asking nothing of him
+    // (jwildfire/obot.roadmap#278). The declared order is read inline and costs a
+    // readFileSync; the state beside it comes from a cache refreshed behind the page,
+    // so an unauthenticated `gh` costs the derivation and never the order.
+    rankHead: rankPanel(args.workspace),
+    // What reached him (jwildfire/obot.roadmap#257). Read inline like the declared
+    // order above it and for the same reason: it is a local file through the tool
+    // that owns it, and putting the delivery lane behind a refresh interval would be
+    // the failure being fixed wearing a different hat.
+    delivered: collectDelivered(args.workspace),
     workspace: args.workspace,
     hub: args.hub,
   });
@@ -341,9 +401,19 @@ export function serve(args) {
           status: record.status,
           duplicate,
           supersedes: record.supersedes,
-          // What happens next, in one sentence, because the page's job is to
-          // answer "what did clicking that do?" before he has to ask.
-          next: 'Recorded on this machine. The Navigator picks it up within five minutes, then an agent updates the artifact — nothing else for you to do.',
+          // What happens next AND how he will know — jwildfire/obot.roadmap#241.
+          //
+          // The first half of this sentence has been here since 2026-08-15 and it was
+          // on screen the evening of the 16th. It was not too little to say; it was a
+          // definite promise with nothing watching it. The Navigator did pick all
+          // three up inside six minutes, no agent changed any artifact for nine
+          // hours, and "nothing else for you to do" stayed on the page throughout.
+          //
+          // So the fix is the second clause, not the first: a promise he can check.
+          // The row below now flags itself past the hour instead of repeating the
+          // promise for ever, and the same condition wakes an agent, so the sentence
+          // names a surface that changes rather than an outcome that might not.
+          next: 'Recorded on this machine. The Navigator picks it up within five minutes and an agent updates the artifact. Watch the row below: it turns to applied with a link when the artifact changes, and says so here if it is still unapplied an hour from now.',
           warning: listening === false ? NOT_LISTENING : null,
         }));
       }
@@ -394,6 +464,23 @@ export function serve(args) {
       // over — a 404 is not a surface, a poll is not a look, and the read has to
       // happen before the write or the page would only ever say "just now" (oa#143).
       const look = () => seenAndNote(args.workspace, req, { aliases: SURFACE_ALIASES });
+
+      // One config item as a page (jwildfire/obot.roadmap#263). Read from the list
+      // on every request and rendered on the spot — see `configCardId`.
+      const cardId = configCardId(req.url);
+      if (cardId) {
+        look();
+        const list = collectConfig(args.workspace);
+        // A list that could not be opened is not a list without this item on it.
+        // Saying "no such item" over a read failure is the same lie the queue
+        // stopped telling in jwildfire/obot.agent#206.
+        if (list.error && !list.absent) return send(500, 'text/plain', `the config list could not be read: ${list.error}`);
+        const item = list.items.find((it) => String(it.id ?? '').toLowerCase() === cardId);
+        if (!item) return send(404, 'text/plain', `${cardId} is not an open item on the config list`);
+        const card = buildCard({ ...item, criticalClaim: criticalClaim(item) }, readCardSource(args.workspace, cardId),
+          { currency: configCurrency(item, readChecks(args.workspace)) });
+        return send(200, 'text/html; charset=utf-8', renderCard(card));
+      }
 
       // Artifacts are served from the tree the queue was built from, so the page he
       // opens is the page the row promised — never a staler copy of it.

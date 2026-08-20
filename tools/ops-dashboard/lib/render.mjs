@@ -21,10 +21,11 @@ import { metricsHtml, feedHtml, METRICS_CSS } from './metrics-view.mjs';
 import { wireHtml, WIRE_CSS } from './wire-view.mjs';
 import { phrase } from './last-seen.mjs';
 import { esc } from './esc.mjs';
+import { RANK_REL } from '../../navigator/rank.mjs';
 import { rosterHtml, ROSTER_CSS, emptyRoster } from './roster-view.mjs';
 import { agentsTableHtml, TABLE_CSS } from './roster-table.mjs';
 import { UNMEASURED, nothingYet } from './absent.mjs';
-import { STORELESS } from './answers.mjs';
+import { STORELESS, unappliedDetections } from './answers.mjs';
 import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
 
 /**
@@ -34,6 +35,8 @@ import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
  * stops: "first look" is not "nothing changed", and "unknown" gives the reason
  * rather than a plausible-looking window (jwildfire/obot.roadmap#205).
  */
+export { deliveredPanel };
+
 export function lastLookTitle(v) {
   if (!v || v.state === 'unknown') {
     return `When you last opened this page is unknown${v?.why ? ` — ${v.why}` : ''}. Nothing is being guessed in its place.`;
@@ -126,7 +129,12 @@ const item = (it) => {
   // An RC title carries no summary any more (@jwildfire, 2026-08-15), so the
   // sentence sits under it - the same second-line shape as a critical claim.
   const sub = it.sub ? `<span class="q-sub">${esc(it.sub)}</span>` : '';
-  return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${sub}${claim}</li>`;
+  // When the claim was last checked, on the row itself (obot.agent#262). A config item
+  // used to carry a filing date and nothing else, so the row said when somebody wrote
+  // it down rather than when anybody last established that it was still true.
+  const cur = it.currency
+    ? `<span class="q-cur ${esc(it.currency.state)}">${esc(it.currency.phrase)}</span>` : '';
+  return `<li class="q ${KIND[it.kind]?.tone ?? ''}${it.critical ? ' crit' : ''}" data-kind="${esc(it.kind)}" data-key="${esc(it.key)}"${it.fingerprint ? ` data-fp="${esc(it.fingerprint)}"` : ''}${it.artifact ? ` data-artifact="${esc(it.artifact)}"` : ''}${it.url ? ` data-url="${esc(it.url)}"` : ''}${it.detail ? ` title="${esc(it.detail)}"` : ''}><span class="q-line">${c ? `<span class="q-id mono">${esc(c)}</span>` : ''}<span class="q-title">${esc(it.title)}</span></span>${sub}${claim}${cur}</li>`;
 };
 
 // `read: false` means the source behind this group could not be opened, so the
@@ -138,6 +146,19 @@ const item = (it) => {
 const group = (title, items, empty, moved = 0, read = true) => `<h2 class="q-h">${esc(title)} <span class="q-n">${read ? items.length : UNMEASURED}</span>${
   moved ? `<span class="q-moved">${moved} pinned above</span>` : ''}</h2>
 ${items.length ? `<ul class="q-list">${items.map(item).join('')}</ul>` : `<p class="${read ? 'q-empty' : 'q-unread'}">${esc(empty)}</p>`}`;
+
+/**
+ * The config items their own check took off the list (obot.agent#262).
+ *
+ * Named rather than simply gone. An item that disappears because a machine decided it
+ * was done is indistinguishable from an item that was dropped, and this whole
+ * capability exists because things left the list for reasons nobody could see. Ids and
+ * a time — never the item's text, which does not leave the machine.
+ */
+const clearedLine = (cleared = []) => (cleared.length
+  ? `<p class="q-cleared">${cleared.length} cleared by ${cleared.length === 1 ? 'its' : 'their'} own check &mdash; ${esc(cleared.map((c) => c.id).join(', '))}${
+      cleared[0]?.ago ? ` (${esc(cleared[0].ago)})` : ''}. Done, and off your list without you touching it; the list still records ${cleared.length === 1 ? 'it' : 'them'}.</p>`
+  : '');
 
 /** "The GitHub sweep, the hub clone and the config list" — for the one-line why. */
 const unreadNames = (read) => {
@@ -223,7 +244,15 @@ export const provenanceLine = ({ code = null, hub = null, update = null } = {}) 
     bits.push(update.restartedAt
       ? `updates: checked ${when}; this page was restarted onto <code>${esc(update.head ?? '')}</code> automatically`
       : update.deferred
-        ? `updates: checked ${when}; a restart onto <code>${esc(update.head ?? '')}</code> is waiting for the page to be idle`
+        // The count, not just the fact. This line used to promise a restart "waiting
+        // for the page to be idle", which was an unbounded wait dressed as an
+        // imminent one: whoever was reading it was the reason it was waiting
+        // (jwildfire/obot.agent#258). Now it says which deferral this is and that
+        // there is a last one.
+        ? `updates: checked ${when}; a restart onto <code>${esc(update.head ?? '')}</code> is waiting for the page to settle${
+            update.deferrals && update.deferralLimit
+              ? ` (deferral ${update.deferrals} of ${update.deferralLimit} — after that it restarts regardless)`
+              : ''}`
         : `updates: checked ${when}; the checkout is current with its remote`);
   } else if (update?.state === 'absent') {
     bits.push(`updates: ${esc(update.why)}`);
@@ -242,7 +271,7 @@ export const provenanceLine = ({ code = null, hub = null, update = null } = {}) 
   // bug with an extra process.
   return `<p class="prov ${tone}">${bits.join(' &middot; ')}${
     code?.behind && !armed ? ` <span class="prov-fix"><code>${esc(RESTART_CMD)}</code>, then <code>/session-dashboard</code></span>` : ''}${
-    code?.behind && armed ? ' <span class="prov-fix">no action needed — the sweep restarts this page within five minutes, once nobody is reading it</span>' : ''}</p>`;
+    code?.behind && armed ? ' <span class="prov-fix">no action needed — the sweep restarts this page within five minutes of it going quiet, and within fifteen whether it does or not</span>' : ''}</p>`;
 };
 
 export const RESTART_CMD = "pkill -f 'ops-dashboard.mjs --serve'";
@@ -281,6 +310,201 @@ const collapsed = (title, rows, describe) => (rows.length ? `<details class="q-f
 
 // Palette, header and tab strip — shared by both tabs so the header is genuinely
 // persistent: the same markup and the same styles whichever view is on screen.
+/**
+ * The ranked head — what comes next, below his three buckets (jwildfire/obot.roadmap#278).
+ *
+ * @jwildfire, 2026-08-18: "Next 10 requirements show up at the bottom of the queue
+ * maybe. you're responsible for strategy, so you get the decision and then i can steer
+ * when i want to."
+ *
+ * IT IS A PREVIEW, NEVER A FOURTH BUCKET. His queue holds three things that need him —
+ * release candidates, decisions, config — and that rule is jwildfire/obot.roadmap#220.
+ * This sits under all of them, it is read-only, it has no control of any kind, and its
+ * every link leaves for GitHub. The moment it asks him for something it is a fourth
+ * obligation and the three-bucket rule dies quietly, so a test asserts the absence of
+ * an ask rather than trusting anyone to remember.
+ *
+ * RANK IS DECLARED, EVERYTHING ELSE IS DERIVED. The only two things here that come out
+ * of a file are the position and the one-line why — the reason is what makes the rank
+ * interrogable, and a rank he cannot interrogate is one he cannot steer. Title, state,
+ * milestone, blocked-ness and sub-issue progress all come from GitHub at read time,
+ * keyed off the `top10` label he asked for.
+ *
+ * IT AGES IN TWO PLACES BECAUSE IT HAS TWO SOURCES. "Ranked <date>, 3d old" is about
+ * the order; "state refreshed 4m ago" is about everything beside it. A list untouched
+ * for three days says so, and a reading that could not refresh says that in its own
+ * sentence with the age of what is actually on screen — never a silent substitution of
+ * old for current.
+ */
+/**
+ * What reached him — the delivered half of his page (jwildfire/obot.roadmap#257).
+ *
+ * @jwildfire, 2026-08-20, after five requirements closed inside twenty-five minutes
+ * and nothing told him: "I like the summary of the closed items in the top 10, but
+ * make them a plain language executive summary instead of a bunch of issue numbers.
+ * Make sure that those are passed to you properly (and passed to me) whenever they
+ * are created."
+ *
+ * THE SENTENCE IS THE DELIVERABLE AND THE NUMBER IS A CITATION. That ordering is the
+ * requirement, not a rendering preference: "#251, #256 and #264 closed" is the exact
+ * failure being named, and "When the system says it stopped a runaway agent, it now
+ * has to prove the process died" is what it should have said. So the summary is the
+ * row and the reference is small print under it, never the other way round.
+ *
+ * IT IS NOT A FOURTH BUCKET. Like the ranked head it sits under, this is read-only,
+ * it has no control of any kind, and it asks him for nothing — his queue holds three
+ * things that need him and that rule is jwildfire/obot.roadmap#220. What it adds is
+ * the one thing the three buckets never carried: what he GOT.
+ *
+ * TWO HALVES, BECAUSE A PROMISE AND A FINISH FAIL DIFFERENTLY. Above, what completed
+ * and the sentence for each. Below, only what he asked for that has NOT been found
+ * where he was told to look, with its age — a list of promises everything is fine
+ * with is a list nobody reads, and the org chart went missing for a day precisely
+ * because nothing measured the distance between "being drafted" and "on his screen".
+ */
+const deliveredPanel = (d, now = new Date()) => {
+  if (!d) return '';
+  const head = (n) => `<h2 class="q-h">Delivered <span class="q-n">${n}</span></h2>`;
+  const wrap = (body, n) => `<section class="dlv" aria-label="What reached you, read only">
+${head(n)}
+${body}
+</section>`;
+
+  if (!d.read) {
+    return wrap(`<p class="q-unread">${esc(nothingYet('What reached you could not be read',
+      `${d.why || 'the landing record did not answer'}; this is not an empty day, it is an unread one`))}</p>`, UNMEASURED);
+  }
+  if (!d.armed) {
+    return wrap(`<p class="q-empty">${esc(nothingYet('Nothing has been written on this machine yet',
+      'a completion is recorded the moment a requirement closes, with one sentence saying what you can now do that you could not before; nothing has recorded one here'))}</p>`, UNMEASURED);
+  }
+
+  const shipped = (d.closures ?? []).filter((c) => String(c.summary ?? '').trim());
+  const owed = (d.promises ?? []).filter((p) => p.state !== 'landed');
+  const rows = shipped.length
+    ? `<ul class="dlv-list">${shipped.map(deliveredRow).join('')}</ul>`
+    : '<p class="q-empty">Nothing has completed yet today.</p>';
+  const asks = owed.length
+    ? `<p class="q-aside">Asked for and not yet found where it was meant to land</p>
+<ul class="dlv-list">${owed.map((p) => promiseRow(p, now)).join('')}</ul>`
+    : '';
+  return wrap(`${rows}
+${asks}
+<p class="q-aside">Read-only. Every line was written by whoever finished the work, at the moment it closed.</p>`, shipped.length);
+};
+
+/** One completion. The sentence, then the citation — in that order, always. */
+const deliveredRow = (c) => `<li class="dlv-row"><span class="dlv-line">${esc(c.summary)}</span>`
+  + `<span class="dlv-cite">${esc(c.issue ?? '')}${c.worker ? ` &middot; ${esc(c.worker)}` : ''}</span></li>`;
+
+/**
+ * One outstanding ask, in his words, with what the fetch actually found.
+ *
+ * `unchecked` gets its own sentence and its own colour. A landing nobody could look
+ * at is not a landing that failed, and rendering the two the same way is the collapse
+ * this workspace has already paid for twice (obot.agent#215).
+ */
+const promiseRow = (p, now) => {
+  const age = ageWords(Math.round((p.ageHours ?? 0) * 60));
+  const found = p.state === 'unchecked'
+    ? `has not been checked &mdash; ${esc(p.detail || 'nothing has looked')}`
+    : `not there &mdash; ${esc(p.detail || 'the fetch found nothing')}`;
+  return `<li class="dlv-row dlv-owed"><span class="dlv-ask">${esc(p.asked ?? '')}</span>`
+    + `<span class="dlv-why ${p.state === 'unchecked' ? 'unknown' : 'gone'}">${found}</span>`
+    + `<span class="dlv-cite">${esc(p.landing ?? '')}${age ? ` &middot; asked ${esc(age)} ago` : ''}</span></li>`;
+};
+
+const rankHeadPanel = (m) => {
+  if (!m) return '';
+  const head = `<h2 class="q-h">Next ten <span class="q-n">${m.declaredRead ? m.items.length : UNMEASURED}</span></h2>`;
+  if (!m.declaredRead) {
+    return `<section class="rank" aria-label="Ranked head, read only">
+${head}
+<p class="q-unread">${esc(nothingYet('The ranked head could not be read', `${m.declaredWhy}; the order lives in obot.agent/${RANK_REL} and is read from the checkout beside this workspace`))}</p>
+</section>`;
+  }
+  return `<section class="rank" aria-label="Ranked head, read only">
+${head}
+<p class="rank-clocks">${rankClocks(m)}</p>
+${rankState(m)}
+<ol class="rank-list">${m.items.map(rankRow).join('')}</ol>
+${m.boundary ? `<p class="q-aside">${esc(m.boundary)}</p>` : ''}
+${m.findings.map((f) => `<p class="rank-note">${rankFinding(f, m)}</p>`).join('')}
+<p class="q-aside">Read-only. Rank is 🎩🤖 obot-prime's; steering it overrides the order without discussion.</p>
+</section>`;
+};
+
+/** The order's own clock. Never a zero for an age nobody could measure. */
+const rankClocks = (m) => (m.touched?.read
+  ? `Ranked ${esc(m.touched.iso.slice(0, 10))}, ${esc(ageWords(m.touched.ageMin) ?? 'age unknown')}${
+    m.touched.dirty ? ', edited since and not committed' : ''}`
+  : `Rank age not known &mdash; ${esc(m.touched?.why ?? `${RANK_REL} could not be dated`)}`);
+
+/** The derived half's clock, and the one place stale is allowed to be shown at all. */
+const rankState = (m) => {
+  if (!m.read) {
+    return `<p class="rank-stale">${esc(m.error || 'No GitHub reading has completed on this machine yet')}. The order above is declared locally and is current; the state beside each row is not derived.</p>`;
+  }
+  if (m.error) {
+    return `<p class="rank-stale">Showing a reading ${esc(ageWords(m.ageMin) ?? 'of unknown age')}; the refresh since failed &mdash; ${esc(m.error)}. Nothing beside a row is current.</p>`;
+  }
+  const when = agoWords(m.ageMin);
+  return `<p class="rank-clocks">State refreshed ${esc(when ?? 'at an unknown time')}${
+    m.refreshing ? ', refreshing now' : ''} from <code>${esc(m.label ?? 'the membership label')}</code> on ${esc(m.repo ?? 'the hub')}</p>`;
+};
+
+/** One ranked requirement. Position and reason declared; the rest derived, or withheld. */
+const rankRow = (it) => {
+  const label = it.title ? it.title.replace(/^Requirement:\s*/, '') : `#${it.issue}`;
+  const name = it.url
+    ? `<a class="rank-title" href="${esc(it.url)}" target="_blank" rel="noopener">${esc(label)}</a>`
+    : `<span class="rank-title">${esc(label)}</span>`;
+  return `<li class="rank-row"><span class="rank-line"><span class="rank-n">${it.rank}</span>${name}</span>`
+    + `<span class="rank-why">${esc(it.why ?? 'no reason recorded')}</span>`
+    + (it.present
+      ? `<span class="rank-state">${esc(rankFacts(it))}</span>`
+      : `<span class="rank-state rank-unknown">not returned by GitHub in the last reading</span>`)
+    + (it.review ? `<span class="rank-note">under review: ${esc(it.review)}</span>` : '')
+    + '</li>';
+};
+
+/** Everything on a row that GitHub knows and the store must never claim. */
+const rankFacts = (it) => [
+  it.state ?? 'state unknown',
+  it.milestone,
+  it.blocked ? 'blocked' : null,
+  it.sub ? `${it.sub.completed}/${it.sub.total} sub-issues` : null,
+].filter(Boolean).join(' · ');
+
+/**
+ * A computed condition, stated and left alone.
+ *
+ * The slot line is the one this panel exists for and the one that must stop where it
+ * does: it says a slot is open and whose call the replacement is, and the bench appears
+ * as a COUNT so no reading of it can be mistaken for a recommendation.
+ */
+const rankFinding = (f, m) => {
+  const bench = m.bench?.read
+    ? `the <code>${esc(m.bench.label ?? 'on-deck')}</code> bench holds ${m.bench.open} open issue${m.bench.open === 1 ? '' : 's'}`
+    : 'the bench could not be counted in the last reading';
+  switch (f.kind) {
+    case 'slot-open':
+      return `Rank ${f.rank} is a slot: <a href="${esc(issueHref(m, f.issue))}" target="_blank" rel="noopener">#${f.issue}</a> is closed. Choosing what fills it is 🎩🤖 obot-prime's, and nothing here picks one &mdash; ${bench}.`;
+    case 'unlabelled-rank':
+      return `#${f.issue} is ranked ${f.rank} in the order and no longer carries <code>${esc(m.label ?? 'top10')}</code> on GitHub. The label carries membership and the file carries order; while they disagree, the one API call returns a different ten than this list shows.`;
+    case 'unranked-member':
+      return `#${f.issue} carries <code>${esc(m.label ?? 'top10')}</code> and has no rank. It is in the ten and the order does not say where.`;
+    case 'missing':
+      return `#${f.issue} is ranked ${f.rank} and GitHub did not return it. Its row is held open rather than dropped.`;
+    case 'count':
+      return `The order holds ${f.n}, not ten.`;
+    default:
+      return esc(`unrecognised finding: ${f.kind}`);
+  }
+};
+
+const issueHref = (m, n) => (m.repo ? `https://github.com/${m.repo}/issues/${n}` : `https://github.com/jwildfire/obot.roadmap/issues/${n}`);
+
 const SHELL_CSS = `
   :root {
     --paper:#F4F1EC; --card:#FDFCFA; --ink:#26211B; --muted:#6F6558; --faint:#9C917F;
@@ -378,6 +602,30 @@ const DASHBOARD_CSS = `
   .main .placeholder h2 { font-size:1rem; margin:0 0 0.4rem; color:var(--ink); }
   .main .placeholder p { margin:0 0 0.5rem; font-size:0.85rem; }
 
+  /* The ranked head — below the three buckets, read-only, and the only panel on this
+     page that shows something nobody has to act on. Everything here is sized to the
+     390px phone he reads the queue on: no fixed widths, nothing that refuses to wrap,
+     and every class that can carry a requirement title or a URL breaking inside a
+     word — the rail sets no min-width:0, so one unbreakable token widens the column. */
+  .rank { display:block; margin-top:1rem; padding-top:0.5rem; border-top:1px solid var(--line); }
+  .rank-list { list-style:none; margin:0.2rem 0 0; padding:0; display:flex; flex-direction:column; gap:0.3rem; }
+  .rank-row { display:flex; flex-direction:column; gap:0.05rem; border-left:3px solid var(--line); border-radius:0 5px 5px 0; padding:0.1rem 0.4rem; }
+  .rank-line { display:flex; align-items:baseline; gap:0.4rem; min-width:0; }
+  .rank-n { font-family:var(--mono); font-size:0.7rem; color:var(--faint); flex:none; min-width:1.1em; text-align:right; }
+  /* Two lines, hard — the same budget the queue rows take, and for the same reason: a
+     requirement title is a sentence, and ten unbounded ones would own his phone. The
+     reason under it is NOT clamped; it is the thing he steers from. */
+  .rank-title { font-size:0.8rem; color:var(--ink); text-decoration:none; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .rank-title:hover { text-decoration:underline; }
+  .rank-why { font-size:0.7rem; color:var(--muted); line-height:1.35; overflow-wrap:anywhere; padding-left:1.5em; }
+  .rank-state { font-size:0.64rem; font-family:var(--mono); color:var(--faint); padding-left:1.5em; overflow-wrap:anywhere; }
+  .rank-unknown { color:var(--warn); }
+  .rank-clocks { font-size:0.66rem; color:var(--faint); margin:0.1rem 0 0.3rem; line-height:1.35; overflow-wrap:anywhere; }
+  .rank-stale { font-size:0.68rem; color:var(--warn); margin:0.1rem 0 0.35rem; line-height:1.35; overflow-wrap:anywhere; }
+  .rank-note { font-size:0.66rem; color:var(--muted); margin:0.25rem 0 0; line-height:1.35; overflow-wrap:anywhere; }
+  .rank-row .rank-note { padding-left:1.5em; }
+  .rank code { font-family:var(--mono); font-size:0.94em; overflow-wrap:anywhere; }
+  .rank a { color:var(--muted); }
   /* The sweep's age, printed only when a newer attempt has failed behind it. */
   .q-stale { font-size:0.7rem; color:var(--warn); margin:0.15rem 0 0.4rem; }
   /* The first morning on a new machine: what is absent, and what fills it. */
@@ -439,6 +687,13 @@ const DASHBOARD_CSS = `
   .q.crit { border-left-color:var(--crit); }
   .q-claim { font-size:0.66rem; color:var(--muted); font-family:var(--mono); }
   .q.crit .q-claim { color:var(--crit); }
+  /* How current the row's claim is. Three states get three colours, because two of
+     them being the same colour is exactly the collapse this exists to prevent: a
+     check that could not run must not look like a check that came back outstanding. */
+  .q-cur { display:block; font-size:0.64rem; font-family:var(--mono); color:var(--muted); }
+  .q-cur.holds { color:var(--good); }
+  .q-cur.unknown { color:var(--warn); }
+  .q-cleared { font-size:0.68rem; color:var(--good); margin:0.2rem 0 0.6rem; }
   .q-fold { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.4rem; }
   .q-fold summary { font-size:0.66rem; letter-spacing:0.11em; text-transform:uppercase;
                     color:var(--faint); cursor:pointer; }
@@ -448,6 +703,28 @@ const DASHBOARD_CSS = `
                background:var(--paper); color:var(--accent); cursor:pointer; font-family:var(--mono); }
   .overbudget { font-size:0.7rem; color:var(--warn); border:1px solid var(--warn); border-radius:6px;
                 padding:0.2rem 0.4rem; margin:0 0 0.5rem; }
+
+  /* What reached him (jwildfire/obot.roadmap#257). Every rule here wraps: the rail
+     has no min-width:0, so one unbreakable token in an agent-written sentence widens
+     the whole 220px track and pushes the page sideways at 390px. white-space:nowrap
+     is banned in this block for the same reason and a test asserts its absence. */
+  .dlv { margin-top:0.9rem; border-top:1px solid var(--line); padding-top:0.5rem; }
+  .dlv-list { list-style:none; margin:0 0 0.4rem; padding:0; }
+  .dlv-row { display:flex; flex-direction:column; gap:0.05rem; min-width:0;
+             padding:0.3rem 0 0.35rem 0.45rem; border-left:3px solid var(--good); margin-bottom:0.3rem; }
+  .dlv-row.dlv-owed { border-left-color:var(--warn); }
+  /* The sentence. It is the deliverable, so it gets the row's weight and it is never
+     clamped: a summary cut at two lines is a summary that stops before the point. */
+  .dlv-line { font-size:0.8rem; line-height:1.35; color:var(--ink); overflow-wrap:anywhere; }
+  .dlv-ask { font-size:0.8rem; line-height:1.35; color:var(--ink); overflow-wrap:anywhere; }
+  /* The citation, and it is small print under the sentence by design — "#251, #256
+     and #264 closed" is the failure this panel was built against. */
+  .dlv-cite { font-size:0.64rem; font-family:var(--mono); color:var(--faint); overflow-wrap:anywhere; }
+  /* Two states, two colours, because a landing nobody could check must not look like
+     a landing that failed (obot.agent#215). */
+  .dlv-why { font-size:0.66rem; color:var(--muted); overflow-wrap:anywhere; }
+  .dlv-why.gone { color:var(--crit); }
+  .dlv-why.unknown { color:var(--warn); }
 
   /* The installation qualification, in the main pane. */
   .iq { padding:0.9rem 1rem; overflow-y:auto; max-width:60rem; }
@@ -471,10 +748,12 @@ const DASHBOARD_CSS = `
   .iq-check button[disabled] { opacity:0.5; cursor:not-allowed; border-color:var(--line); color:var(--muted);
                                background:var(--paper); }
   .iq-res { font-size:0.76rem; font-family:var(--mono); }
-  .iq-res.pass { color:var(--good); }
-  .iq-res.fail { color:var(--crit); }
-  .iq-res.refused { color:var(--warn); }
+  .iq-res.pass, .iq-res.holds { color:var(--good); }
+  .iq-res.fail, .iq-res.fails { color:var(--crit); }
+  .iq-res.refused, .iq-res.unknown { color:var(--warn); }
   .iq-warn { font-size:0.72rem; color:var(--warn); margin:0.5rem 0 0; }
+  .iq-card { margin:0 0 0.9rem; font-size:0.8rem; }
+  .iq-card a { text-decoration:none; border-bottom:1px solid var(--accent-soft); }
 
   /* Triage: one bar, in the sidebar, for whatever is selected. */
   .triage { border-top:1px solid var(--line); margin-top:0.7rem; padding-top:0.5rem; }
@@ -855,12 +1134,20 @@ const VERDICT = {
  * questions: did the machine take it (captured), did anything see it (delivered),
  * did the artifact change (applied — and here is the link, go look).
  */
-const answerRow = (a, now) => {
-  const state = {
-    captured: 'the Navigator picks it up within five minutes',
-    delivered: 'an agent has it; the artifact updates next',
-    applied: 'the artifact was updated',
-  }[a.status] ?? a.status;
+const answerRow = (a, now, late = null) => {
+  // A promise with no expiry is how 2026-08-16 lasted nine hours. `delivered` said
+  // "an agent has it; the artifact updates next" for the whole of it, at every
+  // refresh, with no bar it could ever fail — so past the bar the row stops
+  // promising and starts reporting (jwildfire/obot.roadmap#241).
+  const state = late
+    ? (late.condition === 'dropped'
+      ? `past the hour — announced to the fleet ${AGO(late.at, now)} and the artifact still has not changed`
+      : `past the hour — nothing has picked it up, so the Navigator sweep is the suspect rather than an agent`)
+    : {
+      captured: 'the Navigator picks it up within five minutes',
+      delivered: 'an agent has it; the artifact updates next',
+      applied: 'the artifact was updated',
+    }[a.status] ?? a.status;
   const when = a.status === 'applied' ? (a.appliedAt ?? a.at) : a.at;
   const evidence = a.status === 'applied' && a.evidence
     ? ` — <a href="${esc(a.evidence)}" target="_blank" rel="noopener">see it</a>`
@@ -877,6 +1164,20 @@ const answerRow = (a, now) => {
 
 const answersPanel = (answers, deliverer, now) => {
   const waiting = answers.filter((a) => a.status === 'captured');
+  // The other failure entirely, and the one that actually happened
+  // (jwildfire/obot.roadmap#241). The alarm below counts `captured` — answers nothing
+  // ever picked up — so an answer that WAS picked up and then dropped could never
+  // reach it. All three of the 2026-08-16 answers were `delivered` inside six
+  // minutes, which made that alarm structurally unreachable for the exact incident it
+  // would have been useful for.
+  const late = unappliedDetections(answers, { now });
+  const lateById = new Map(late.map((d) => [d.id, d]));
+  const stuck = late.length
+    ? `<p class="alarm"><strong>${late.length} answer${late.length === 1 ? '' : 's'} of yours ${late.length === 1 ? 'is' : 'are'} past the hour and the artifact has not changed.</strong>
+      ${late.map((d) => `${esc(d.name)} (${esc(AGO(d.at, now))})`).join(' &middot; ')}.
+      Each one is on the Navigator's wake channel, which reaches an agent rather than sitting in a file — that is what was missing on 16 August.
+      If a row here still says this at your next look, what is missing is an agent to apply it, not your answer.</p>`
+    : '';
   // `alive === false` is a fact and earns the alarm. `alive === null` is this process
   // not knowing, and an accusation made out of not knowing is worse than silence — it
   // sends him to restart a service that is fine (jwildfire/obot.agent#215).
@@ -889,9 +1190,10 @@ const answersPanel = (answers, deliverer, now) => {
       : '');
   return `<div class="answers">
       <h2>Your answers <span class="q-n">${answers[STORELESS] ? UNMEASURED : answers.length}</span></h2>
+      ${stuck}
       ${alarm}
       <ul class="ans-list">${answers.length
-    ? answers.map((a) => answerRow(a, now)).join('')
+    ? answers.map((a) => answerRow(a, now, lateById.get(a.id))).join('')
     : `<li class="q-empty">${answers[STORELESS]
       ? 'No answer store on this machine yet — it appears the first time you answer a decision here.'
       : 'Nothing recorded yet. Answer a decision and it appears here with its state.'}</li>`}</ul>
@@ -914,7 +1216,7 @@ const integrityBanner = (integrity) => (!integrity || integrity.intact ? '' : `<
   Restart the dashboard and, if it comes back, treat it as a repeat of
   <a href="https://github.com/jwildfire/obot.agent/issues/206">#206</a>.</p>`);
 
-export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, integrity = null, workspace, hub, generated = new Date() }) {
+export function render({ queue, answers = [], deliverer = null, provenance = null, lastLook = null, integrity = null, rankHead = null, delivered = null, workspace, hub, generated = new Date() }) {
   const critical = queue.critical ?? [];
   const snoozed = queue.snoozed ?? [];
   const cleared = queue.cleared ?? [];
@@ -1000,6 +1302,9 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
         .filter(Boolean),
       verify: { command: it.iq.verify?.command ?? null, expect: it.iq.verify?.expect ?? null, manual: Boolean(it.iq.verify?.manual) },
       check: it.check ?? null,
+      // The same sentence the row shows, computed once on the server. Two surfaces
+      // phrasing one reading differently is how "unknown" turns back into "failed".
+      currency: it.currency ?? null,
     }]));
 
   return `<!doctype html>
@@ -1041,8 +1346,11 @@ ${integrityBanner(integrity)}
     ${group('Decisions', queue.decisions.items, decisionEmpty, queue.decisions.moved, read.decision)}
     ${foldedLane(queue.decisions.folded)}
     ${group('Config', queue.config.items, configEmpty, queue.config.moved, read.config)}
+    ${clearedLine(queue.config.cleared)}
     ${collapsed('Snoozed', snoozed, (it) => wakeText(it.triage))}
     ${collapsed('Cleared', cleared, (it) => (it.triage?.action === 'done' ? 'marked done' : 'dismissed'))}
+    ${rankHeadPanel(rankHead)}
+    ${deliveredPanel(delivered, generated)}
   </nav>
 
   <main class="main" id="main">
@@ -1143,6 +1451,20 @@ ${integrityBanner(integrity)}
     const meta = el('p', 'iq-meta', [iq.id, iq.filed ? 'filed ' + iq.filed : null, iq.verified ? 'verified ' + iq.verified : null].filter(Boolean).join(' · '));
     box.appendChild(meta);
     if (iq.claim) { const c = el('p', 'iq-res fail', 'critical · ' + iq.claim); box.appendChild(c); }
+    // The same item written as a page he can read rather than a form he has to
+    // decode (jwildfire/obot.roadmap#263). It opens beside this panel rather than
+    // replacing it: the fields stay until he has read one of these and said which
+    // he wants, which is a decision the requirement leaves to him.
+    if (iq.id) {
+      const p = el('p', 'iq-card');
+      const a = document.createElement('a');
+      a.href = '/config/' + encodeURIComponent(iq.id);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'Read this as a page \u2192';
+      p.appendChild(a);
+      box.appendChild(p);
+    }
 
     for (const f of iq.fields) {
       const wrap = el('div', 'iq-f');
@@ -1180,7 +1502,8 @@ ${integrityBanner(integrity)}
     if (iq.verify.command) row.appendChild(copyBtn(iq.verify.command));
     const btn = el('button', null, 'Check');
     const out = el('span', 'iq-res');
-    if (iq.check) { out.textContent = iq.check.result + ' · ' + (iq.check.at || '').slice(11, 16); out.classList.add(iq.check.result); }
+    if (iq.currency) { out.textContent = iq.currency.phrase; out.classList.add(iq.currency.state); }
+    else if (iq.check) { out.textContent = iq.check.result + ' · ' + (iq.check.at || '').slice(11, 16); out.classList.add(iq.check.result); }
     btn.addEventListener('click', async () => {
       btn.disabled = true; out.className = 'iq-res'; out.textContent = 'running…';
       const r = await fetch('/check', { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1190,11 +1513,14 @@ ${integrityBanner(integrity)}
       out.classList.add(j.result || 'refused');
       // A failure has to say what was expected. "exit 1" tells him nothing he
       // can act on; "printed 0, expected 2" tells him the edit did not land.
+      // Three outcomes, never two. An unknown is a command that never produced an exit
+      // status — not installed, or killed by the timeout — and reporting it as FAIL
+      // would be a measurement nobody took (obot.agent#262).
       out.textContent = j.result === 'pass' ? 'PASS — ' + (j.stdout || 'exit 0')
         : j.result === 'fail'
           ? 'FAIL — ' + (j.stdout ? 'printed ' + j.stdout : 'exit ' + j.exitCode)
             + (iq.verify.expect ? ', expected ' + iq.verify.expect.replace(/^prints /, '') : '')
-          : (j.why || 'could not run');
+          : 'NOT CHECKED — ' + (j.why || 'could not run');
       if (j.result === 'pass') $('tri-done').hidden = false;
     });
     if (iq.verify.manual || !iq.verify.command) {

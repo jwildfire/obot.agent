@@ -1,0 +1,109 @@
+#!/usr/bin/env node
+// config-card — render config items as short local pages, and nowhere else.
+//
+// Requirement: jwildfire/obot.roadmap#263. @jwildfire, 2026-08-18: "Let's make
+// local-only (relatively short) html artifacts for each item. start with an exec
+// summary, then background and then step by step."
+//
+//   obot.agent/tools/config-card                 # every open item
+//   obot.agent/tools/config-card c0016 c0017     # named items
+//   obot.agent/tools/config-card c0016 --stdout  # print the page, write nothing
+//   obot.agent/tools/config-card c0016 --summary # the phone document, as plain text
+//   obot.agent/tools/config-card --list          # ids, titles, and which have prose
+//
+// ## Where the writing lives
+//
+// Two files per item, both inside `<workspace>/.claude/ops/config-cards/`:
+// `cNNNN.md` is the prose someone wrote, `cNNNN.html` is the rendered page. The
+// measurable half of a card — title, dates, criticality, what it blocks, the
+// verify command — is never copied into either. It is read from
+// `.claude/blockers.md` at render time, so a card cannot drift from the list about
+// anything a machine could check.
+//
+// An item with no prose still renders. It says so and shows the list entry, which
+// keeps every open item reachable at the same address and makes an unwritten card
+// look like exactly what it is.
+//
+// ## Why this cannot leak
+//
+// Not because the author remembers. `writeCard` is the only writer in the program;
+// it computes its destination from a four-digit id rather than accepting a path, it
+// refuses a destination outside the store, it refuses a store with a `.git`
+// anywhere above it, and it refuses content that is not sentinel-stamped — which
+// the hub's deploy greps for and fails on. Each of those four is a test in
+// tools/ops-dashboard/test/config-card.test.mjs.
+import path from 'node:path';
+
+import { collectConfig } from './ops-dashboard/lib/collect.mjs';
+import { criticalClaim } from './ops-dashboard/lib/rank.mjs';
+import { buildCard, readCardSource, renderCard, summaryText, writeCard, cardsDir } from './ops-dashboard/lib/config-card.mjs';
+
+const argv = process.argv.slice(2);
+const flag = (n) => argv.includes(`--${n}`);
+const value = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
+const ids = argv.filter((a) => /^c\d{4}$/i.test(a)).map((a) => a.toLowerCase());
+
+if (flag('help') || flag('h')) {
+  console.log('config-card — render config items as short local pages. See the header of this file.');
+  process.exit(0);
+}
+
+const workspace = path.resolve(value('workspace', process.env.OBOT_WORKSPACE ?? process.cwd()));
+
+const { items, error } = collectConfig(workspace);
+if (error) {
+  // A list that could not be read is not an empty list. Rendering zero cards over a
+  // file this process failed to open would quietly retire every item on the page.
+  console.error(`config-card: refusing to render — ${error}`);
+  process.exit(1);
+}
+
+const withClaim = items.map((it) => ({ ...it, criticalClaim: criticalClaim(it) }));
+const chosen = ids.length ? withClaim.filter((it) => ids.includes(String(it.id ?? '').toLowerCase())) : withClaim;
+
+const missingIds = ids.filter((id) => !withClaim.some((it) => String(it.id ?? '').toLowerCase() === id));
+for (const id of missingIds) console.error(`config-card: ${id} is not an open item on the list`);
+
+if (flag('list')) {
+  for (const it of withClaim) {
+    const src = readCardSource(workspace, it.id ?? '');
+    console.log(`${it.id ?? '????'}  ${src.missing ? 'no prose ' : 'written  '}${it.criticalClaim ? 'CRITICAL ' : '         '}${it.title}`);
+  }
+  process.exit(missingIds.length ? 1 : 0);
+}
+
+if (!chosen.length) {
+  console.error('config-card: nothing to render');
+  process.exit(1);
+}
+
+const cards = chosen.map((it) => {
+  const src = it.id ? readCardSource(workspace, it.id) : { missing: true };
+  // A key nobody renders is a sentence he wrote that never reaches him. Said out
+  // loud rather than dropped, because a silently ignored input is how prose goes
+  // missing and everyone assumes it was never written.
+  for (const k of src.unknown ?? []) console.error(`config-card: ${it.id} — "${k}:" is not a card field and was not rendered`);
+  for (const h of src.unknownSections ?? []) console.error(`config-card: ${it.id} — the section "## ${h}" is not one this page renders and was dropped`);
+  if (src.why) console.error(`config-card: ${it.id} — its prose could not be read: ${src.why}`);
+  return buildCard(it, src);
+});
+
+if (flag('summary')) {
+  for (const card of cards) process.stdout.write(summaryText(card));
+  process.exit(missingIds.length ? 1 : 0);
+}
+
+if (flag('stdout')) {
+  for (const card of cards) process.stdout.write(renderCard(card));
+  process.exit(missingIds.length ? 1 : 0);
+}
+
+let wrote = 0;
+for (const card of cards) {
+  if (!card.id) { console.error(`config-card: skipping "${card.title}" — it has no id yet`); continue; }
+  const file = writeCard(workspace, card.id, renderCard(card));
+  wrote += 1;
+  console.log(`${card.id}  ${card.unwritten ? 'raw entry' : 'card     '}  ${path.relative(workspace, file)}`);
+}
+console.log(`config-card: wrote ${wrote} page(s) to ${path.relative(workspace, cardsDir(workspace))} — local only, served at /config/<id>`);
+process.exit(missingIds.length ? 1 : 0);

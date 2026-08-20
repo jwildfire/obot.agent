@@ -29,13 +29,14 @@ import { fileURLToPath } from 'node:url'
 
 import { decide, queueHash } from './lib/decide.mjs'
 import { readState, writeState, recordRun } from './lib/state.mjs'
-import { sweptEvents, openBlockerCount, sessionLogSizes, scratchpadTodos, grownSince } from './lib/collect.mjs'
+import { sweptEvents, openBlockerCount, sessionLogSizes, scratchpadTodos, grownSince, criticalConfigIds } from './lib/collect.mjs'
 import { policyRepos, commitsSince } from './lib/repos.mjs'
 import { openDecisions } from './lib/decisions.mjs'
 import { stampBookend } from './lib/ledger.mjs'
 import { writeDayBoundary } from './lib/marker.mjs'
 import { landedSince } from './lib/repos.mjs'
 import { parseLanded, composeEntry } from './lib/diary.mjs'
+import { composeBrief, writeBrief, BRIEF_REL } from './lib/brief.mjs'
 import { writeEntry, publishEntry } from './lib/publish.mjs'
 import { sweepIdeas } from './lib/ideas.mjs'
 import { rcReadyWithDemo, allGoalsBlocked, composeMorning, writePush, listenerAlive, ghLabels } from './lib/push.mjs'
@@ -72,6 +73,7 @@ function parseArgs(argv) {
     else if (a === '--force') o.force = true
     else if (a === '--status') o.status = true
     else if (a === '--no-publish') o.noPublish = true
+    else if (a === '--brief') o.brief = true
     else if (a === '--since') o.since = argv[++i]
     else if (a === '--help' || a === '-h') o.help = true
     else return { error: `unknown argument: ${a}` }
@@ -143,6 +145,16 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
   }
 
   // --- the queue, as it stands now -----------------------------------------
+
+  // The critical config ids are read BEFORE the hub collector, and that ordering
+  // is load-bearing rather than tidy. Importing hub code installs its local-only
+  // guard on node:fs for the WHOLE process (obot.agent#206), after which a
+  // dynamic import of anything outside the hub is refused — measured here: the
+  // brief's first live run reported "could not read config criticality: ...
+  // outside this repository". It fails closed and says so, which is why this is
+  // an ordering comment rather than an incident.
+  const critical = await criticalConfigIds(workspace)
+
   const decisions = await openDecisions(hub)
   const blockers = openBlockerCount(workspace)
   const todos = scratchpadTodos(workspace)
@@ -193,6 +205,41 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
   report.ideas = { count: ideas.items.length, unknown: ideas.unknown, why: ideas.why, truncated: ideas.truncated }
   if (ideas.unknown) report.unknowns.push(`ideas: ${ideas.why}`)
 
+  // The brief — one paragraph about progress and one line per item, which is the
+  // whole of what @jwildfire asked for on 2026-08-18. It is a different artifact
+  // from the diary and for a different reader: the diary is the archive and is
+  // written for someone who was not present, the brief is the twenty seconds he
+  // spends on a phone. Composed from the same collection pass, so the two cannot
+  // disagree about what is waiting.
+  const wantBrief = opts.brief || verdict.diary || verdict.briefing
+  const landedRes = wantBrief ? gatherLanded(workspace, repos, since) : { items: [], unknown: false }
+  const landed = landedRes.items
+  if (wantBrief && critical.unknown) report.unknowns.push(`config ids: ${critical.why}`)
+  const briefText = wantBrief
+    ? composeBrief({
+        landed,
+        landedUnknown: landedRes.unknown || git.unknown,
+        rcs,
+        decisions: decisions.items,
+        todos: todos.items,
+        configOpen: blockers.count,
+        configCritical: critical.ids,
+      })
+    : null
+
+  // --brief reads and writes nothing: it renders exactly what the next fold will
+  // write, so the shape can be checked by looking at it rather than by trusting
+  // the tool's report of itself.
+  //
+  // On an UNKNOWN queue it prints nothing at all. A brief built from failed
+  // queries is short, tidy and wrong, and stderr does not save it — piped to a
+  // file or read past on a phone, a queue that could not be read renders
+  // identically to a morning with nothing waiting.
+  if (opts.brief) {
+    const known = verdict.verdict !== 'unknown'
+    return { exit: known ? 0 : 3, briefRequested: true, brief: known ? briefText : null, report }
+  }
+
   if (!opts.dryRun) {
     recordRun(workspace, report)
     stampBookend(workspace, { step: `gate-${verdict.verdict}`, ms: Date.now() - started })
@@ -211,6 +258,17 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
       }
     }
 
+    // The brief, on the briefing's own gate — it IS the briefing's text version,
+    // so it is rewritten when the queue changes and left untouched when nothing
+    // has. A brief that fails its own shape check is refused rather than written,
+    // and says which rule it broke: writing it anyway would put the growth back
+    // exactly where the check exists to stop it.
+    if (verdict.briefing && briefText) {
+      const w = writeBrief(workspace, briefText)
+      report.brief = { written: w.written, file: BRIEF_REL, violations: w.violations }
+      for (const v of w.violations) report.unknowns.push(`brief: ${v}`)
+    }
+
     // The only two things allowed to interrupt him, plus the morning line.
     // Everything here WRITES a payload; delivery belongs to a bridged standing
     // session running tools/fold/push-listen, and the fold never claims a
@@ -224,7 +282,7 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
     // filler" is the diary's own contract and the openclaw lesson.
     if (verdict.diary) {
       try {
-        report.diaryEntry = writeTheDay({ workspace, hub, now, since, repos, queue, opts })
+        report.diaryEntry = writeTheDay({ workspace, hub, now, since, landed, queue, opts })
       } catch (e) {
         report.unknowns.push(`diary: ${String(e.message).split('\n')[0]}`)
       }
@@ -281,10 +339,22 @@ function deliver({ workspace, verdict, queue, swept, now }) {
   return out
 }
 
-function writeTheDay({ workspace, hub, now, since, repos, queue, opts }) {
+// What landed in the window, once. Both the diary and the brief describe the
+// same night, and reading git twice is how two records of one night start
+// disagreeing about it.
+function gatherLanded(workspace, repos, since) {
+  try {
+    const res = landedSince(workspace, repos, since)
+    return { items: res.rows.flatMap((r) => parseLanded(r.repo, r.log)), unknown: res.unknown }
+  } catch (e) {
+    // Unknown, never empty. An empty list and a scan that could not run read
+    // identically downstream, and only one of them means the night was quiet.
+    return { items: [], unknown: true, why: String(e.message).split('\n')[0] }
+  }
+}
+
+function writeTheDay({ workspace, hub, now, since, landed, queue, opts }) {
   const date = localDate(now)
-  const landedRes = landedSince(workspace, repos, since)
-  const landed = landedRes.rows.flatMap((r) => parseLanded(r.repo, r.log))
 
   const markdown = composeEntry({
     date,
@@ -347,6 +417,9 @@ function render(r) {
              : 'nothing met the bar'))
     for (const w of p.why) L.push(`           ${w}`)
   }
+  if (r.brief) {
+    L.push(`  brief    ${r.brief.written ? 'WROTE ' : 'REFUSED'}  ${r.brief.written ? r.brief.file : r.brief.violations.join('; ')}`)
+  }
   if (r.ideas) {
     L.push(`  ideas    ${r.ideas.unknown ? 'UNKNOWN' : r.ideas.count ? `${r.ideas.count} new` : 'none   '}  ${r.ideas.why}`)
   }
@@ -374,10 +447,11 @@ const USAGE = `obot fold — decide whether there is anything to say this mornin
   --force      fold regardless of the gate, for a rehearsal
   --status     when did the fold last run, and is the clock still ticking
   --no-publish compose and write the entry, but do not commit or push it
+  --brief      print the daily brief the next fold would write, and write nothing
 `
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const { exit, error, help, report } = await run(process.argv.slice(2))
+  const { exit, error, help, report, brief, briefRequested } = await run(process.argv.slice(2))
   // The verdict is the FIRST line, because callers summarise by first line and a
   // check whose headline is swallowed reports nothing while looking healthy
   // (obot.agent#129).
@@ -394,6 +468,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     console.log(line)
     console.error(line)
     process.exit(4)
+  }
+  // --brief prints the brief and nothing else. A notice about a source that could
+  // not answer goes to stderr rather than into the brief: a short, tidy brief
+  // composed from failed queries is this programme's canonical defect, and the one
+  // place it must not appear is the surface he trusts to be complete.
+  if (briefRequested) {
+    if (brief) console.log(brief.trimEnd())
+    else console.error('fold: UNKNOWN — refusing to print a brief composed from failed queries. Nothing was written to stdout.')
+    for (const u of report.unknowns) console.error(`fold: ${u}`)
+    process.exit(exit)
   }
   console.log(process.argv.includes('--json') ? JSON.stringify(report, null, 2) : render(report))
   // An unattended run has no reader. launchd keeps stderr (StandardErrorPath) and

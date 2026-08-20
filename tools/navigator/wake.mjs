@@ -141,8 +141,30 @@ export const TRIGGERED_QUIET_MIN = 30
  * An unjudged closeout keeps nagging, because that is the backlog the whole role
  * exists to clear — it stops when a verdict is recorded, which is the correct
  * silencer. The floors keep that from being a wake every five minutes.
+ *
+ * `unapplied` is the same argument about one of his own decisions
+ * (jwildfire/obot.roadmap#241) and is deliberately NOT a once-only kind. A finish is
+ * an event and repeating it teaches him to ignore the channel; an answer he clicked
+ * that nothing has applied is a condition that stays true until an agent acts, and
+ * the nine hours of 2026-08-16 are exactly what one silent delivery buys. Its
+ * silencer is `ops-answers apply`, and nothing else.
  */
-export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, wedged: 60, idle: 45 }
+export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, wedged: 60, idle: 45, delivered: 1440, unapplied: 60 }
+
+/**
+ * Kinds where the event is the whole condition, so one wake is the whole delivery.
+ *
+ * Every other kind repeats on a floor because the condition persists until somebody
+ * acts: a closeout that is unjudged now is still unjudged in an hour, and the nagging
+ * is the point. A COMPLETION is done. Repeating it would turn the one channel that
+ * reaches a person into the thing he learns to ignore, which is how the delivery path
+ * this kind was added for (jwildfire/obot.roadmap#257) would fail a second time.
+ *
+ * The floor above stays anyway rather than being dropped: a kind with no REWAKE_MIN
+ * entry silently inherits `?? 60` below, and if the once-only rule were ever narrowed
+ * the fallback should be a day rather than an hour.
+ */
+export const ONCE_KINDS = new Set(['delivered'])
 
 /** Wakes delivered per run. The overflow is reported, never hidden. */
 export const MAX_WAKES_PER_RUN = 3
@@ -528,6 +550,13 @@ export function deliverable(detections = [], log = [], now = new Date(), { max =
   const deliver = []
   const held = []
   for (const d of detections) {
+    // Once-only first, and on the KEY rather than on the clock: the log is
+    // append-only and holds days, so a key that appears in it at all has already
+    // reached a person and never goes out again however long ago that was.
+    if (ONCE_KINDS.has(d.kind) && last.has(d.key)) {
+      held.push({ ...d, why: 'already delivered — a finish is an event, not a nag' })
+      continue
+    }
     const floor = REWAKE_MIN[d.kind] ?? 60
     const since = last.has(d.key) ? (now.getTime() - last.get(d.key)) / 60000 : Infinity
     if (since < floor) {
@@ -696,8 +725,8 @@ export function hostWasAway(prevSweptIso, now = new Date()) {
  * the third time (verdict swallowed, detail kept), and the one alarm here that must
  * never be quiet is the one saying the alarms are not being delivered.
  */
-export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true, misread = [] } = {}) {
-  const lines = ['## Wake — workers that stopped', '']
+export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true, misread = [], completions = [], completionsHeld = [], answers = [], answersHeld = [] } = {}) {
+  const lines = ['## Wake — workers that stopped, and what completed', '']
   // Every detector here reads `~/.claude/jobs`. With no ledger on the machine the
   // pending list is empty because nothing was looked at, and "clear — every worker
   // that stopped has been judged" is the strongest possible claim built on the
@@ -708,6 +737,31 @@ export function wakeSection({ pending = [], delivered = [], held = [], listener 
       ? `wake: **${pending.length} unresolved stop-state${pending.length === 1 ? '' : 's'}** — ${delivered.length} delivered this sweep`
       : 'wake: clear — every worker that stopped has been judged, and no worker is stalled or waiting')
   if (listener) lines.push(listener.summary)
+  // What the channel carried TO A PERSON this sweep (jwildfire/obot.roadmap#257).
+  // Unindented like every verdict line here, and stated even when it is none: the
+  // whole finding of 2026-08-20 was that the loop ran and closed inside the machine,
+  // and a channel that never says how many of its lines ended at somebody is a
+  // channel in which that can happen again unnoticed.
+  if (completions.length) {
+    lines.push(`completed: ${completions.length} finish${completions.length === 1 ? '' : 'es'} sent to the Navigator this sweep, each as the sentence rather than the number`)
+    for (const c of completions) lines.push(`  ${c.line}`)
+  }
+  if (completionsHeld.length) {
+    const fresh = completionsHeld.filter((c) => !/already delivered/.test(c.why ?? ''))
+    if (fresh.length) lines.push(`held: ${fresh.length} completion(s) over this run's budget — they go out on the next sweep, nothing is dropped`)
+  }
+  // And what the channel carried about HIS OWN decisions (jwildfire/obot.roadmap#241).
+  // The count only: the rows themselves are in the answers section, and printing them
+  // twice would make one finding look like two. Stated here because a channel that
+  // never says how many of its lines ended at somebody is a channel in which
+  // 2026-08-16 happens again unnoticed.
+  if (answers.length) {
+    lines.push(`answers: ${answers.length} unapplied answer(s) of his woken to the Navigator this sweep — the rows are in the answers section below`)
+  }
+  if (answersHeld.length) {
+    const fresh = answersHeld.filter((a) => !/floor/.test(a.why ?? ''))
+    if (fresh.length) lines.push(`held: ${fresh.length} unapplied answer(s) over this run's budget — they go out on the next sweep, nothing is dropped`)
+  }
   if (awayNote) lines.push(awayNote)
   if (outside) lines.push(`bounded: ${outside} unjudged closeout(s) older than ${WAKE_WINDOW_HOURS}h are not woken for — judge them from the delivery record, not from here`)
   // Unindented, like every line above the list: the dashboard's reader treats an

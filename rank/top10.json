@@ -1,0 +1,51 @@
+{
+  "$note": "The ranked head of the requirement queue — jwildfire/obot.roadmap#278. THE ORDER AND THE ONE-LINE REASON, AND NOTHING ELSE. Title, state, milestone, blocked-ness, sub-issue progress and whether an item is still open are all DERIVED from GitHub at render time, keyed off the `top10` label. Anything you are tempted to add here that GitHub already knows will drift; that is the defect this file exists to avoid. Written by 🎩🤖 obot-prime, who owns strategy. See rank/README.md.",
+  "repo": "jwildfire/obot.roadmap",
+  "label": "top10",
+  "bench": "on-deck",
+  "boundary": "The ten carrying `top10` are ranked and are what gets picked up next; the bench carrying `on-deck` is what a slot is filled from, unranked until one is promoted; everything else is open work with no claim on either.",
+  "rank": [
+    {
+      "issue": 279,
+      "why": "gates the session that gates scheduling, and a planning session with him will finalise it, which removes the write-from-memory risk",
+      "review": "promise honoured - this row said it went to rank 1 the moment he put a date on the machine move, and on 2026-08-20 he said the migration is this weekend"
+    },
+    {
+      "issue": 272,
+      "why": "his word, critical, and obot.agent/main is where the merge policy lives",
+      "review": "now one choice away — D0022 is live and the tooling is merged; it needs him to pick A, B or C and nothing else"
+    },
+    {
+      "issue": 261,
+      "why": "the file with the most authority over every agent has no owner and no way to change it safely - and it currently names an active plan that does not exist on this machine"
+    },
+    {
+      "issue": 267,
+      "why": "two workers have now collided on the same fix in one week - the Navigator's and mine, four hours apart on the deploy incident - and each collision spends fleet capacity twice on work that was already done"
+    },
+    {
+      "issue": 289,
+      "why": "he asked for it tonight and it compounds - every new surface starts by copying whichever one was nearest, and the number of surfaces he reads has roughly doubled this week"
+    },
+    {
+      "issue": 252,
+      "why": "nobody can write the board, so every requirement's stage is wrong and every surface built on it inherits that"
+    },
+    {
+      "issue": 263,
+      "why": "one bullet left and it is his: he has never read a config card and said whether it is better"
+    },
+    {
+      "issue": 266,
+      "why": "D0021's premise had already expired by the time he read it; a decision argued from a fact that stopped being true wastes the one thing only he can spend"
+    },
+    {
+      "issue": 281,
+      "why": "he asked for CRAN restoration by name and has already decided the approach; the only user-facing product work on the head"
+    },
+    {
+      "issue": 274,
+      "why": "SafetyCensus rebuilt on metrics and reports, and the design needs his answer before any build starts"
+    }
+  ]
+}

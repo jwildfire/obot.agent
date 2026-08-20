@@ -22,11 +22,20 @@
 // The contract that makes the check meaningful: **a verify command must exit 0
 // exactly when the item is done.** `grep -c`, `test -f` and a `gh api` read all do
 // this naturally. Pass/fail is the exit code; the `→` half is what he reads.
-import { execFile } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
+// The mechanics — the read-only allowlist, the runner, the judge and the ledger — are
+// not here any more. They are shared with decision-artifact premises in
+// `tools/lib/claims.mjs`, because a config item's claim and a decision's premise are
+// the same problem one artifact class apart (jwildfire/obot.roadmap#264 and #266, and
+// #266 asks for one mechanism by name). What stays here is the config list's own
+// grammar: how an entry is parsed into its five fields.
+//
+// Re-exported rather than moved out of reach, so every existing importer of this
+// module keeps working and there is still exactly one implementation.
+import {
+  AUTO_VERIFY_HEADS, judge, readChecks, runClaim, splitVerify, tokenize, verifyPlan,
+} from '../../lib/claims.mjs';
 
-import { opsDir, ensureStore, SENTINEL } from './store.mjs';
+export { AUTO_VERIFY_HEADS, judge, readChecks, splitVerify, tokenize, verifyPlan };
 
 // The field names, in the order they render. `Fix` is the pre-2026-08-16 name for
 // `Do` and is still read, so an entry written before this pass renders rather
@@ -38,30 +47,6 @@ const FIELD_RE = new RegExp(`^\\s*(${[...FIELDS, ...Object.keys(ALIAS)].join('|'
 
 /** Required before an entry counts as an installation qualification. */
 export const REQUIRED = ['do', 'expect', 'verify'];
-
-/**
- * The commands the dashboard will run for him, unattended, on a click.
- *
- * Read-only by construction, and deliberately short. A verify command comes out
- * of a file agents write, and a click-to-run button on agent-written content is
- * the wrong primitive to give a wide allowlist. Anything outside this list is not
- * refused as an item — it renders as copy-and-run with a manual pass/fail, which
- * is exactly right for the web-UI-only and device-side steps that cannot be
- * scripted at all.
- */
-export const AUTO_VERIFY_HEADS = ['grep', 'rg', 'test', 'ls', 'stat', 'wc', 'jq', 'cat', 'file', 'gh', 'git'];
-
-// Subcommands that read. `gh api` is here because most of the list's proofs are
-// GitHub reads; the method guard below is what keeps it a read.
-const READ_SUB = {
-  gh: ['api', 'issue', 'pr', 'repo', 'release', 'auth'],
-  git: ['status', 'log', 'show', 'diff', 'ls-files', 'rev-parse', 'config', 'branch', 'remote'],
-};
-// A write dressed as a read: `gh api -X DELETE`, `gh issue close`, `git config --global x y`.
-const WRITE_FLAG = /(^|\s)(-X|--method)(\s|=)\s*(?!GET\b)/i;
-const WRITE_SUB = /\b(create|close|delete|edit|merge|comment|ready|reopen|transfer|upload)\b/i;
-// Shell that turns one command into several, or into a file write.
-const SHELL_META = /[;&|><`$]|\(\)|\$\(/;
 
 const line = (s) => String(s ?? '').trim();
 
@@ -128,18 +113,6 @@ export function parseIQ(entry = '') {
 }
 
 /**
- * `Verify: <command> → <what its output should say>`, or `Verify: manual — …`.
- *
- * The arrow is the seam between the thing a machine runs and the thing he reads.
- */
-export function splitVerify(text = '') {
-  const t = line(text);
-  if (/^manual\b/i.test(t)) return { manual: true, command: null, expect: t.replace(/^manual\s*[—:-]?\s*/i, '') };
-  const [cmd, ...rest] = t.split('→');
-  return { manual: false, command: line(cmd).replace(/^`|`$/g, '') || null, expect: line(rest.join('→')) };
-}
-
-/**
  * `Blocks: owner/repo#12 (verified open 2026-08-16), #34`
  *
  * A reference only counts once something resolved it — see `blocker-log`, which
@@ -169,113 +142,12 @@ export function iqComplete(iq) {
 }
 
 /**
- * Can the dashboard run this proof for him, or does he run it himself?
+ * Run a proof and record the result — the pass/fail an installation qualification is
+ * supposed to leave behind, and the reason checking a box was never enough.
  *
- * Fail-closed: anything not positively recognised as a single read-only command
- * degrades to copy-and-run. The `why` is shown on the button so a "run it
- * yourself" never looks like a broken feature.
- */
-export function verifyPlan(iq) {
-  const cmd = iq?.verify?.command;
-  if (iq?.verify?.manual || !cmd) return { auto: false, why: 'manual check — nothing to run' };
-  if (SHELL_META.test(cmd)) return { auto: false, why: 'shell redirection or chaining — run it yourself' };
-  const argv = tokenize(cmd);
-  if (!argv.length) return { auto: false, why: 'not a command' };
-  const [head, ...rest] = argv;
-  const bin = head.split('/').pop();
-  if (!AUTO_VERIFY_HEADS.includes(bin)) return { auto: false, why: `${bin} is not on the read-only allowlist — run it yourself` };
-  if (WRITE_FLAG.test(cmd)) return { auto: false, why: 'names a write method — run it yourself' };
-  const subs = READ_SUB[bin];
-  if (subs) {
-    const sub = rest.find((a) => !a.startsWith('-'));
-    if (!sub || !subs.includes(sub)) return { auto: false, why: `${bin} ${sub ?? ''} is not a read — run it yourself` };
-    if (rest.slice(rest.indexOf(sub) + 1).some((a) => !a.startsWith('-') && WRITE_SUB.test(a))) {
-      return { auto: false, why: `${bin} ${sub} names a write — run it yourself` };
-    }
-  }
-  return { auto: true, argv, why: null };
-}
-
-/** Split a command into argv, honouring quotes. No shell is ever involved. */
-export function tokenize(cmd) {
-  const out = [];
-  const re = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g;
-  for (let m; (m = re.exec(cmd));) out.push(m[1] ?? m[2] ?? m[3]);
-  return out;
-}
-
-/**
- * Judge one proof's output against what the entry said it should say.
- *
- * The exit code carries the verdict by default - that is the contract every
- * verify command is written to (`grep -c`, `test -f`, a `gh api` read). Two
- * phrasings tighten it, because "exit 0" is not always the whole question:
- *
- *   `-> prints 2`        the output is exactly `2`, whatever the exit code
- *   `-> not u/3680095`   exit 0 and the output does not contain that
- *
- * `prints` deliberately **outranks the exit code**: the entry has stated exactly
- * what done looks like, and several perfectly good proofs answer correctly while
- * exiting non-zero — `grep -c x file` prints `0` and exits 1 when the answer is
- * "none, which is what we wanted". Trusting the exit code there would call a
- * correct answer a failure. (Found the hard way: `grep -L` reports differently
- * under `execFile` than in a shell, so no verify command should lean on an exit
- * code that subtle.)
- *
- * Deliberately two rules and not a language: an expectation he cannot read at a
- * glance is not an expectation.
- */
-export function judge(exitCode, stdout, expect) {
-  const e = String(expect ?? '').trim();
-  const out = String(stdout ?? '').trim();
-  const eq = /^prints\s+(\S+)$/i.exec(e);
-  if (eq) return out === eq[1] ? 'pass' : 'fail';
-  if (exitCode !== 0) return 'fail';
-  const not = /^not\s+(\S+)/i.exec(e);
-  if (not) return out.includes(not[1]) ? 'fail' : 'pass';
-  return 'pass';
-}
-
-/**
- * Run a proof and record the result — the pass/fail an IQ is supposed to leave
- * behind, and the reason checking a box was never enough.
- *
- * Appended to `.claude/ops/checks.jsonl`, never overwritten: "it passed on the
- * 16th and fails now" is exactly the history worth keeping, and the store is
- * local-only and sentinel-stamped like everything else in that folder.
+ * A thin call into the shared runner, kept at this name because the dashboard's
+ * click-to-check endpoint and its tests are written against it.
  */
 export function runVerify(workspace, { id, command, expect = null, by = 'jwildfire' }) {
-  const plan = verifyPlan({ verify: { command, manual: false } });
-  if (!plan.auto) return Promise.resolve({ id, result: 'refused', why: plan.why, command });
-
-  return new Promise((resolve) => {
-    const [bin, ...argv] = plan.argv;
-    execFile(bin, argv, { timeout: 15000, maxBuffer: 1 << 20, cwd: workspace }, (err, stdout, stderr) => {
-      const exitCode = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
-      const rec = {
-        _note: SENTINEL,
-        at: new Date().toISOString(),
-        id, by, command, expect,
-        exitCode,
-        result: judge(exitCode, stdout, expect),
-        stdout: String(stdout ?? '').slice(0, 2000).trim(),
-        stderr: String(stderr ?? '').slice(0, 500).trim(),
-      };
-      ensureStore(workspace);
-      fs.appendFileSync(path.join(opsDir(workspace), 'checks.jsonl'), `${JSON.stringify(rec)}\n`);
-      resolve(rec);
-    });
-  });
-}
-
-/** The most recent check per item, for the row and the panel. */
-export function readChecks(workspace) {
-  let raw = '';
-  try { raw = fs.readFileSync(path.join(opsDir(workspace), 'checks.jsonl'), 'utf8'); } catch { return {}; }
-  const byId = {};
-  for (const l of raw.split('\n')) {
-    if (!l.trim()) continue;
-    try { const r = JSON.parse(l); if (r.id) byId[r.id] = r; } catch { /* a truncated write; skip */ }
-  }
-  return byId;
+  return runClaim(workspace, { id, command, expect, by });
 }
