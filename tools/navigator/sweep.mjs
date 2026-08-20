@@ -75,6 +75,14 @@ import { collectLocal, localSection } from './localwatch.mjs'
 // list and the decision artifacts — and until now nothing re-checked either after the
 // day it was written. One mechanism, because #266 asked for one by name.
 import { readCurrency } from './currency.mjs'
+// What the fleet spends, before it spends it (jwildfire/obot.roadmap#275). Every
+// reading above is about work; this one is about the budget the work runs on. The
+// measurement already existed — `build_usage_data.py` has priced this machine's
+// transcripts since July — but its only heartbeat was the session wrapup, and when
+// the wrapup stopped the artifact sat five days old while the fleet spent a week's
+// allowance in five nights. The sweep is the cadence that cannot forget, and the
+// halt file is the refusal that does not depend on an agent remembering.
+import { ALARM_READING, applyHalt, readSpend, spendBroken, spendBrokenNote, writeVerdict } from './spend.mjs'
 // Carve-out routing (obot.agent#264, under jwildfire/obot.roadmap#220). A pull request
 // touching a guardrail path can be merged by nobody but @jwildfire, so it belongs in
 // the config bucket — the only one of his three that means "his hands". Nothing put it
@@ -200,7 +208,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -227,6 +235,16 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // keeps an append-only journal of every id it issues; this is the reading that
   // fires without anyone running the tool. Reported even when clean, because a
   // detector that only ever speaks up on failure is indistinguishable from a dead one.
+  // What tonight and this week have cost (jwildfire/obot.roadmap#275). FIRST in the
+  // block, above both ledgers: it is the one reading that decides whether anything
+  // below is worth dispatching, and this block is what the Operations Dashboard's ops
+  // tab renders and what an agent reads before it spawns. Reported even when clean,
+  // for the same reason the ledgers are — a detector that only ever speaks up on
+  // failure is indistinguishable from a dead one.
+  lines.push(spend?.note
+    ? spend.note
+    : `${ALARM_READING} — no spend reading ran this sweep, so nothing here says the fleet is under the cap. Unknown, not clean.`)
+  lines.push('')
   lines.push(ledger
     ? (ledger.ok ? `config ledger: ${ledger.summary}` : `**CONFIG LEDGER GAP** — ${ledger.summary}`)
     : 'config ledger: **NO READING** — `tools/blocker-log --audit` did not run this sweep (missing, not executable, or timed out). The ledger\'s state is unknown, not clean.')
@@ -291,6 +309,14 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   // queue rather than below it because its findings are about the things IN the queue:
   // a config item whose claim has gone stale and a decision page whose premise has
   // expired are both discovered here, before he goes to the keyboard rather than at it.
+  // The spend ladder in full, for /navigator/record and for anything reading the
+  // file whole. The one-line verdict is already at the top; this is the arithmetic
+  // behind it — the night, the week, the denominator and where each reading came
+  // from — because a cap nobody can audit is a cap nobody believes.
+  lines.push((spend?.section && spend.section.trim())
+    ? spend.section.trimEnd()
+    : spendBroken('no spend reading ran this sweep'), '')
+
   lines.push((currency && currency.trim())
     ? currency.trimEnd()
     : '## Claim currency — what has been re-checked, and when\n\n**CLAIM CHECK BROKEN** — no claim was re-checked this sweep, so nothing here says a config item is still outstanding or that a decision page still frames a live question. Unknown, not clean.', '')
@@ -751,6 +777,25 @@ const safeCurrency = async () => {
   }
 }
 
+// The spend reading (jwildfire/obot.roadmap#275). It shells out to the usage
+// generator on a TTL, so like the currency pass it is bounded and contained here: a
+// slow or missing python3 costs a section and a halt-file decision, never the sweep.
+// It is the only reading that WRITES as well as reads — `.claude/autonomy-halt`, the
+// switch obot-auto and the morning fold already honour — which is what makes the cap
+// enforcement rather than advice.
+const safeSpend = () => {
+  try {
+    const r = readSpend({ workspace: WS, hub: HUB, repoRoot: REPO_ROOT })
+    const halt = applyHalt(WS, r.verdict, { log })
+    writeVerdict(WS, r.verdict)
+    if (halt.wrote) scratchpad(`🧭🤖 nav — spend cap: dispatch parked, .claude/autonomy-halt written — ${r.verdict.why}`)
+    if (halt.cleared) scratchpad('🧭🤖 nav — spend cap: reading cleared, .claude/autonomy-halt lifted')
+    return r
+  } catch (e) {
+    return { note: spendBrokenNote(String(e.message)), section: spendBroken(String(e.message)) }
+  }
+}
+
 const safeAdmiral = () => {
   try { return runAdmiral() } catch (e) {
     return `## Admiral — triggered, acts and exits\n\n**ADMIRAL TRIGGER BROKEN** — ${String(e.message).slice(0, 160)}. No condition was evaluated this run; this is not a quiet fleet.\n`
@@ -814,7 +859,7 @@ async function main() {
     // neither of which needs the policy file, and a worker that stopped is exactly
     // as unjudged when the RC sweep is broken.
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -933,7 +978,8 @@ async function main() {
   const local = safeLocal(repos)
   const currency = await safeCurrency()
   const rankhead = safeRankhead()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead }))
+  const spend = safeSpend()
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.

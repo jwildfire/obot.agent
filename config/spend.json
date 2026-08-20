@@ -1,0 +1,27 @@
+{
+ "schema": 1,
+ "_": "The nightly spend cap. jwildfire/obot.roadmap#275. Read by tools/navigator/spend.mjs; changing a number here is a pull request, which is the point. Units are PERCENTAGE POINTS of the weekly allowance Anthropic meters, never dollars — see the header of spend.mjs for why there is no dollar allowance in this file.",
+
+ "nightlyCapPercent": 50,
+ "_nightlyCapPercent": "@jwildfire, dictated 2026-08-18: 'no more than fifty percent of my weekly usage in any given night at this point.' His number, in his unit.",
+
+ "weeklyStopPercent": 90,
+ "_weeklyStopPercent": "Where dispatch stops for the rest of the week. Not derived from the sentence above, which is about a night: this is his revealed threshold. On 2026-08-18 at roughly 95% he said 'defer any heavy design or build work until next week when my limit resets. Same with all other work for the next couple of days.' 90 leaves a margin under the point he actually called it. Declared, configurable, and his to move.",
+
+ "nightWarnFraction": 0.8,
+ "_nightWarnFraction": "The night warns once it has taken this share of the headroom it actually has. The other warning trigger needs no parameter: it fires when less than one full night's cap remains before the stop line.",
+
+ "usageTtlMinutes": 10,
+ "_usageTtlMinutes": "How stale the priced artifact may get before the Navigator sweep rebuilds it. The generator takes ~3s, reads only local transcripts and touches no network. The failure this replaces is that nothing ran it for five days.",
+
+ "weekAnchor": "2026-08-20T14:59:59.596883+00:00",
+ "_weekAnchor": "A real resets_at read from ~/.claude.json on 2026-08-20 — a Thursday, corroborated by his 'we're like ninety something percent of usage until Thursday' on 08-18. Any week's boundaries roll from it by whole weeks, so it does not go stale. Used only when the live meter cannot be read.",
+
+ "calibration": {
+  "at": "2026-08-20T10:42:05.623Z",
+  "weeklyPercent": 99,
+  "spentUsd": 3654.11,
+  "source": "inferred — bootstrap calibration, not a published figure",
+  "_": "One real meter reading against the measured spend behind it: at 10:42:05Z on 2026-08-20 the API reported the weekly_all bucket at 99%, and the obot2 artifact prices the complete UTC days of that allowance week (2026-08-14 through 2026-08-19) at $3,654.11. One point is therefore worth about $36.91 of API-equivalent spend. Deliberately conservative in two ways: it excludes the two partial days at the window edges, which the projection does count, and it prices at API list rates rather than at whatever Anthropic's meter actually weighs — both push the reading to trip sooner rather than later. It is an INFERENCE and is labelled as one everywhere it is printed. Anthropic publishes no numeric weekly limit for Max and every limit_dollars on this account is null, so no dollar allowance is asserted anywhere in this file. It is also inflated by the '+50% weekly limits promo through Aug 31' active on the account, which is another reason it is re-derived from the live meter rather than frozen."
+ }
+}
