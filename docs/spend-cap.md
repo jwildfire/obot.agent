@@ -134,6 +134,13 @@ The halt file names itself on its first line. A halt file @jwildfire wrote is ne
 touched; one this mechanism wrote is lifted on the next clear reading, because the
 allowance week resets on its own and nobody should have to remember to delete a file.
 
+The halt file is written on a **measured breach only**, never on `unknown`. It is the
+broad instrument — the 07:00 morning fold honours it too, and the fold is a report
+rather than a dispatch. Blinding the surface that would tell him about a spending
+problem, because the spending reading broke, is the same mistake as gating the
+Navigator on its own reading. `unknown` still refuses at the gate that is specifically
+about dispatch: obot-auto's pre-flight exits on it.
+
 ### The hook is one approval away
 
 `tools/spend-cap-hook` is written and tested but not registered, because registering

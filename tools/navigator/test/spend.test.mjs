@@ -401,13 +401,24 @@ test('a halt file @jwildfire wrote is never touched', () => {
   assert.equal(fs.readFileSync(halt, 'utf8'), 'stop everything — jeremy\n')
 })
 
-test('an unknown reading halts too — a broken measurement is not permission to spend', () => {
+test('an unknown reading refuses a dispatch but does not park the morning brief', () => {
+  // The halt file is the broad instrument — the 07:00 fold honours it too, and the
+  // fold is a REPORT. Blinding the surface that would tell him about a spending
+  // problem, because the spending reading broke, is the same mistake as gating the
+  // Navigator on its own reading. So a measured breach writes it and an unmeasurable
+  // one does not; the dispatch-specific gate is the stricter of the two.
   const ws = tmp()
   fs.mkdirSync(path.join(ws, '.claude'), { recursive: true })
   const usage = readUsage(path.join(tmp(), 'absent.json'))
   const v = judge({ meter: { read: false, ok: false, usable: false, why: 'none', expired: false, percent: null },
                     usage, config: CONFIG, now: new Date('2026-08-20T20:00:00Z') })
-  assert.equal(applyHalt(ws, v).wrote, true)
+  assert.equal(v.state, 'unknown')
+  assert.equal(v.allowed, false, 'a dispatch is still refused')
+  assert.equal(applyHalt(ws, v).wrote, false)
+  assert.equal(fs.existsSync(path.join(ws, '.claude', 'autonomy-halt')), false)
+  // And obot-auto, the gate that IS about dispatch, still stops on it.
+  const r = guard(['check'], { config: { ...CONFIG, calibration: null } })
+  assert.equal(r.code, 4)
 })
 
 // ------------------------------------------------------------------ the guard CLI

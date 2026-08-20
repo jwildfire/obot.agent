@@ -82,6 +82,8 @@ unknown  no reading, or no denominator
 
 **Two traps this program has already paid for, handled explicitly.** A check that cannot fail is not a check: the ladder is seeded with the real week and proven to fire, and the halt file, the guard exit codes and the hook deny each have a test that watches them trip. And the verdict is the first line of every output — of the guard, of the note, of the section — because callers summarise by first line, and when the config ledger printed its notes first the verdict vanished from nearly every sweep while looking perfectly healthy ([#129](https://github.com/jwildfire/obot.agent/issues/129)).
 
+**The halt file is written on a measured breach only, never on `unknown`.** It is the broad instrument — the 07:00 morning fold honours it too, and the fold is a report rather than a dispatch. Blinding the surface that would tell him about a spending problem, because the spending reading broke, is the same mistake as gating the Navigator on its own reading. `unknown` still refuses at the gate that is specifically about dispatch.
+
 **The halt file names itself.** A halt @jwildfire wrote is never touched; one this mechanism wrote is lifted on the next clear reading, because the allowance week resets on its own and nobody should have to remember to delete a file every Thursday.
 
 ## Next steps

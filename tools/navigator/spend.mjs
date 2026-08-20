@@ -459,6 +459,14 @@ export const haltMarker = () => HALT_MARKER
  * The marker line is load-bearing in both directions: a halt file WITHOUT it is his
  * and is never touched, and one WITH it is lifted automatically when the reading
  * clears — otherwise one breach parks the fleet until somebody notices, every week.
+ *
+ * Written on a MEASURED BREACH only, never on `unknown`. The halt file is the broad
+ * instrument: it parks the 07:00 morning fold as well as obot-auto, and the fold is
+ * a report rather than a dispatch. Blinding the surface that would tell him about a
+ * spending problem, because the spending reading broke, is the same mistake as
+ * gating the Navigator on its own reading. `unknown` still refuses at the gate that
+ * is specifically about dispatch — obot-auto's pre-flight exits on it — and the
+ * state file says BROKEN on every sweep until somebody fixes it.
  */
 export function applyHalt(workspace, verdict, { log = () => {} } = {}) {
   const halt = path.join(workspace, '.claude', 'autonomy-halt')
@@ -470,7 +478,7 @@ export function applyHalt(workspace, verdict, { log = () => {} } = {}) {
   }
   const ours = existing !== null && existing.startsWith(HALT_MARKER)
 
-  if (verdict.allowed === false) {
+  if (verdict.state === 'stop') {
     if (existing !== null) return { wrote: false, cleared: false, why: 'a halt is already in place' }
     fs.mkdirSync(path.dirname(halt), { recursive: true })
     fs.writeFileSync(halt, [
