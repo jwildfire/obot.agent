@@ -293,3 +293,39 @@ test('ids come from the journal, never from prose in the record (obot.agent#126)
     '--summary', 'A second closure still takes the next journal id and not the one named in prose.'])
   assert.match(read(w), /L0002/, 'the next id is L0002 — a mention in prose has no vote')
 })
+
+// ---- the check is bounded in WALL-CLOCK, not only in count ----
+//
+// `--max` bounds how many landings are looked at; it does not bound how long looking
+// takes. Five landings against a black-holing host is five curl timeouts in series,
+// inside a sweep that runs every five minutes and whose contract is the release-
+// candidate queue rather than this. A count cap that can still cost a minute is the
+// kind of bound that reads as one and is not.
+
+test('check: the budget stops the run, and what it did not reach is NAMED not swallowed', () => {
+  const w = ws()
+  for (let i = 0; i < 5; i += 1) {
+    // TEST-NET-1 (RFC 5737): reserved for documentation and guaranteed not to route,
+    // so curl hangs until its own timeout rather than being refused in a millisecond.
+    // A refused connection would finish all five inside the budget and the test would
+    // pass while proving nothing.
+    run(w, ['promise', '--asked', `thing ${i}`, '--landing', `https://192.0.2.1/${i}`])
+  }
+  const started = Date.now()
+  const r = run(w, ['check', '--budget-sec', '1', '--timeout', '1'])
+  const elapsed = (Date.now() - started) / 1000
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(elapsed < 12, `the run took ${elapsed}s; the budget is meant to stop it`)
+  assert.match(r.stdout, /not reached/,
+    'a silent truncation reads as "checked everything" when it did not (no-silent-caps)')
+})
+
+test('check: a budget that is not spent checks everything it was asked to', () => {
+  const w = ws()
+  for (let i = 0; i < 3; i += 1) {
+    run(w, ['promise', '--asked', `thing ${i}`, '--landing', join(w, `missing-${i}`)])
+  }
+  const r = run(w, ['check', '--budget-sec', '30'])
+  assert.match(r.stdout, /fetched 3 landing\(s\)/)
+  assert.doesNotMatch(r.stdout, /not reached/)
+})
