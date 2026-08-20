@@ -40,8 +40,10 @@ function bed(items) {
   fs.writeFileSync(path.join(hub, 'reports', 'decisions', 'registry.json'), JSON.stringify(REG));
 
   const payload = items.map((i) => [i.id, i.name, i.body ?? ''].join(FS_)).join(RS_);
+  // `-e` carries the script as an argument (that is how `mark_done` calls it); the
+  // read path pipes it on stdin. Reading stdin in both cases hangs the argument form.
   fs.writeFileSync(path.join(bin, 'osascript'), `#!/bin/sh
-script=$(cat)
+if [ "$1" = "-e" ]; then script="$2"; else script=$(cat); fi
 echo "$script" >> "${dir}/osascript.log"
 case "$script" in
   *"repeat with r in"*) printf '%s' '${payload.replace(/'/g, "'\\''")}' ;;

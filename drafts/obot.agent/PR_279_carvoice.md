@@ -11,7 +11,7 @@ His constraint, 2026-08-17: *"Remember that I'm mostly listening to these in the
 
 Three decisions are open on him as this lands. Every one of them was unanswerable without reaching a keyboard, which is why a decision he had already made stayed open until he got to one. The audio half of this already exists and has shipped — `save-to-spotify` plus local Kokoro produced three decision episodes on 18 August and he answered all three within two hours. What did not exist was the way back.
 
-Pairs with [#242](https://github.com/jwildfire/obot.roadmap/issues/242) (the brief read aloud, five minutes, derived from the text) and [#280](https://github.com/jwildfire/obot.roadmap/issues/280) (an open artifact has an episode he can answer from a car). The dictation close #280 specifies — *"subject word plus choice, spoken once and repeated slowly, no identifiers of any kind"* — is generated here rather than remembered by whoever writes the next script.
+Pairs with [jwildfire/obot.roadmap#242](https://github.com/jwildfire/obot.roadmap/issues/242) (the brief read aloud, five minutes, derived from the text) and [jwildfire/obot.roadmap#280](https://github.com/jwildfire/obot.roadmap/issues/280) (an open artifact has an episode he can answer from a car). The dictation close that requirement specifies — *"subject word plus choice, spoken once and repeated slowly, no identifiers of any kind"* — is generated here rather than remembered by whoever writes the next script.
 
 ## Evidence
 
@@ -30,7 +30,7 @@ Pairs with [#242](https://github.com/jwildfire/obot.roadmap/issues/242) (the bri
 
 **The asymmetry the design turns on.** An unrouted sentence costs him one repeat. A misrouted one puts his words on a decision he was not talking about, and nothing looks wrong from any surface afterwards — the store shows an answer, the sweep announces it, an agent applies it, and the decision he was answering is still open with nothing on it. So `ambiguous` is a first-class outcome that returns no decision under any score: two candidates within the margin, a handle known to collide, an ordinal against a queue whose fingerprint has moved since the episode, an ordinal past the end, or no snapshot at all. Matching is otherwise deliberately loose — exact, then sounds-the-same, then mostly-the-same-letters, and below a real resemblance zero rather than a small number so noise cannot accumulate into a match.
 
-**It flows through the existing path.** A routed sentence is written by `recordAnswer` into `.claude/ops/answers/`, the same store the dashboard writes to, with his sentence verbatim and a new `channel` field. So the Navigator announcement and the answered-but-unapplied detection that shipped this morning (#277/#278) cover a car answer with no new code, and a test asserts exactly that.
+**It flows through the existing path.** A routed sentence is written by `recordAnswer` into `.claude/ops/answers/`, the same store the dashboard writes to, with his sentence verbatim and a new `channel` field. So the Navigator announcement and the answered-but-unapplied detection that shipped this morning (jwildfire/obot.agent#277, PR jwildfire/obot.agent#278) cover a car answer with no new code, and a test asserts exactly that.
 
 **The receipt is the item.** A receipt he has to open something to read is not one. A routed reminder is stamped with the decision it reached and completed, so the list empties; an unrouted one is stamped with the reason and left there, because completing it would remove the only evidence he has that it failed. Nothing new is ever added to that list.
 
@@ -44,9 +44,9 @@ Pairs with [#242](https://github.com/jwildfire/obot.roadmap/issues/242) (the bri
 
 <ul>
 <li><code>obot.agent/tools/voice-decisions arm</code> — one command, and the five-minute sweep starts polling. Left to him because the first poll under launchd may raise a macOS automation prompt that only he can answer.</li>
-<li>The episodes themselves are still hand-produced. <code>voice-decisions script</code> now generates the words and reports its own length against the five minutes he set; wiring that into <code>save-to-spotify</code> on a schedule is <a href="https://github.com/jwildfire/obot.roadmap/issues/280">#280</a>.</li>
+<li>The episodes themselves are still hand-produced. <code>voice-decisions script</code> now generates the words and reports its own length against the five minutes he set; wiring that into <code>save-to-spotify</code> on a schedule is <a href="https://github.com/jwildfire/obot.roadmap/issues/280">jwildfire/obot.roadmap#280</a>.</li>
 <li>Per-question answers by voice are out of scope: a spoken answer records a verdict when it names one the page has, and his words verbatim when it does not. Nothing paraphrases him into a cleaner decision.</li>
-<li>Board write is still blocked for every agent (<a href="https://github.com/jwildfire/obot.roadmap/issues/252">hub#252</a>), so #265 is not moved on the board by this.</li>
+<li>Board write is still blocked for every agent (<a href="https://github.com/jwildfire/obot.roadmap/issues/252">jwildfire/obot.roadmap#252</a>), so the requirement is not moved on the board by this.</li>
 </ul>
 
 ---
