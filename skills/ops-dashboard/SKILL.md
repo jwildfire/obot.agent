@@ -47,7 +47,12 @@ The session tab needs the session hub's watch loop running to have anything to s
 
 ## Applying what he answered
 
-Answers stage in `~/Documents/obot2/.claude/ops/answers/*.json` and wait for an agent.
+Answers live in `~/Documents/obot2/.claude/ops/answers/*.json` in one of four states —
+`captured` (he clicked, nothing has seen it), `delivered` (the Navigator sweep announced
+it, an agent has it), `applied` (the artifact changed, with evidence), `superseded` (he
+answered again). Read the list with `obot.agent/tools/ops-answers pending`, which prints
+his verbatim words and the id to apply under.
+
 Applying one means, for the named artifact:
 
 1. Add the decision to the artifact's `<section id="decisions">` at the top — his words
@@ -57,14 +62,32 @@ Applying one means, for the named artifact:
 2. Move the artifact's `README.md` status and its row in `reports/decisions/README.md`
    to Decided, in the same commit.
 3. Push. The deploy regenerates the Decisions log; it fails if step 1 was skipped.
-4. Mark the staged answer `"status": "applied"` — never delete it; the store is the
-   audit trail of what he actually said.
+4. Stamp the record — with the tool, never by hand:
+
+   ```
+   obot.agent/tools/ops-answers apply <id> --evidence <url> --by <your W-id>
+   ```
+
+   `<id>` is anything `pending` printed: the decision id (`D0014`), the artifact slug,
+   or the record id. Evidence is required, because "applied" means the artifact changed
+   and here is where to see it. Hand-editing `"status": "applied"` into the JSON — which
+   this file used to tell you to do — leaves no `appliedAt`, no `appliedBy` and no
+   evidence, so an agent that did the work correctly still leaves no trace of having
+   done it. Never delete a record; the store is the audit trail of what he actually said.
 
 A `verdict` of `adopt-all` means every recommendation on the page, as written.
 
+An answer that goes unapplied past an hour is no longer a quiet list entry
+(jwildfire/obot.roadmap#241): it wakes the Navigator on the wake channel with its age,
+raises `**ANSWER DELIVERY GAP**` in the sweep's answers section, and pins the decision to
+the top of his critical queue. Two conditions, and they mean different things —
+`unclaimed` (the sweep never announced it, so the deliverer is the suspect) and `dropped`
+(it was announced and no agent acted, so an agent is). The one thing that silences either
+is step 4.
+
 ## Rules
 
-- **Never publish anything from this page.** Config items, staged answers, and the ops
+- **Never publish anything from this page.** Config items, recorded answers, and the ops
   store are local only, permanently.
 - Config rows show headlines only. Do not render or copy an item's body anywhere, and
   count-only on any public surface.

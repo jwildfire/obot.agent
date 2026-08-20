@@ -401,9 +401,19 @@ export function serve(args) {
           status: record.status,
           duplicate,
           supersedes: record.supersedes,
-          // What happens next, in one sentence, because the page's job is to
-          // answer "what did clicking that do?" before he has to ask.
-          next: 'Recorded on this machine. The Navigator picks it up within five minutes, then an agent updates the artifact — nothing else for you to do.',
+          // What happens next AND how he will know — jwildfire/obot.roadmap#241.
+          //
+          // The first half of this sentence has been here since 2026-08-15 and it was
+          // on screen the evening of the 16th. It was not too little to say; it was a
+          // definite promise with nothing watching it. The Navigator did pick all
+          // three up inside six minutes, no agent changed any artifact for nine
+          // hours, and "nothing else for you to do" stayed on the page throughout.
+          //
+          // So the fix is the second clause, not the first: a promise he can check.
+          // The row below now flags itself past the hour instead of repeating the
+          // promise for ever, and the same condition wakes an agent, so the sentence
+          // names a surface that changes rather than an outcome that might not.
+          next: 'Recorded on this machine. The Navigator picks it up within five minutes and an agent updates the artifact. Watch the row below: it turns to applied with a link when the artifact changes, and says so here if it is still unapplied an hour from now.',
           warning: listening === false ? NOT_LISTENING : null,
         }));
       }

@@ -23,6 +23,7 @@ import { rankQueue } from './rank.mjs';
 import { classifyRC, readPolicy, releaseBranchesByRepo } from '../../navigator/classify.mjs';
 import { collectDecisionLogIsolated, collectorPath } from './hub-collect.mjs';
 import { readFailure } from './absent.mjs';
+import { attachUnapplied, pendingAnswers } from './answers.mjs';
 
 /**
  * Open decisions, read from the hub clone's own collector — in its own process.
@@ -551,9 +552,24 @@ export function clearSweepFailure(workspace) {
  * learning anything about importance.
  */
 export async function collectQueue(workspace, hub, opts = {}) {
-  const decisions = await collectDecisions(hub);
+  const collected = await collectDecisions(hub);
   const config = collectConfig(workspace);
   const rcs = collectRCs(workspace, opts);
+
+  // His own answers, joined onto the decisions they answer
+  // (jwildfire/obot.roadmap#241). This is the first producer the critical pin's
+  // second route has ever had: `rank.mjs` has documented `item.computed` as the
+  // measured-condition seam since the tag was built, and named this exact case as
+  // what it was generalised for, and nothing ever wrote to it. So on 2026-08-16 the
+  // one page he actually reads had nothing to say about three answers of his that
+  // were sitting on disk unapplied.
+  //
+  // A failed read is an empty list here rather than an exception: the queue is his
+  // todo list and it must render without an answer store. What it must never do is
+  // invent a claim, and it cannot — the label comes off a clock.
+  let answers = [];
+  try { answers = pendingAnswers(workspace, { hub }); } catch { /* the panel says so */ }
+  const decisions = { ...collected, items: attachUnapplied(collected.items ?? [], answers) };
 
   // His triage first: a dismissed row should not be ranked, counted, or pinned.
   const t = applyTriage(workspace, [...rcs.items, ...decisions.items, ...config.items]);

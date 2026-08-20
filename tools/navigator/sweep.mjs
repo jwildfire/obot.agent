@@ -45,7 +45,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { answersSection, deliverAnswers, pendingAnswers } from '../ops-dashboard/lib/answers.mjs'
+import { answersSection, deliverAnswers, pendingAnswers, unappliedDetections } from '../ops-dashboard/lib/answers.mjs'
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
          orphansAccepted, orphansOutsideWindow, parseIndexRows, parseRefLookup, readJson,
          refLookupQuery, registryDisagreement, shapeRepo, siteVersionFreshness,
@@ -161,6 +161,12 @@ const CADENCE_MIN = 5
 // inside twenty-five minutes closed five requirements, and the run that has to
 // deliver all of them is exactly the run this exists for.
 const MAX_COMPLETIONS_PER_RUN = 5
+// Unapplied answers of his, budgeted apart from BOTH of the above, for the reason
+// completions were: a fleet with three unjudged closeouts must not be able to starve
+// the one notification that is about a decision he made himself. Three, because
+// three is what happened on 2026-08-16 and the run that has to carry all of them is
+// exactly the run this exists for.
+const MAX_ANSWERS_PER_RUN = 3
 const MAX_EVENTS = 15
 // The snapshot keeps more history than the state file shows: the dashboard's
 // Navigator tab renders these events as a feed, and a feed that forgets everything
@@ -649,7 +655,7 @@ function runChecks(repos, jobs = []) {
  * beside it, so the section can never read as a judged fleet because the delivery
  * lane broke. Delivery is last and cannot change what the section says.
  */
-function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [] }) {
+function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [], unapplied = [] }) {
   // `null` means the job ledger is not on this machine; every detector below reads
   // it, so the section has to say that rather than report a clear channel.
   const jobsRead = jobs !== null
@@ -682,13 +688,23 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [] 
   const { deliver: shipped, held: shipHeld } =
     deliverable(completions, log, now, { max: MAX_COMPLETIONS_PER_RUN })
 
-  for (const d of [...deliver, ...shipped]) {
+  // And an answer of his that nothing has applied (jwildfire/obot.roadmap#241). Its
+  // own budget again, and NOT once-only: a completion is an event and a decision
+  // waiting on an agent is a condition, so this one keeps going on its floor until
+  // `ops-answers apply` silences it. That is the whole difference between this and
+  // the nine hours of 2026-08-16, where the same finding was recomputed 105 times
+  // into a file and delivered to nobody.
+  const { deliver: answers, held: answersHeld } =
+    deliverable(unapplied, log, now, { max: MAX_ANSWERS_PER_RUN })
+
+  for (const d of [...deliver, ...shipped, ...answers]) {
     try { appendFileSync(WAKE_LOG, `${wakeLine(d, now.toISOString())}\n`) } catch { /* the section still carries it */ }
   }
 
   return {
     delivered: deliver,
     completions: shipped,
+    answers,
     section: wakeSection({
       pending: all,
       delivered: deliver,
@@ -699,11 +715,13 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [] 
       jobsRead,
       completions: shipped,
       completionsHeld: shipHeld,
+      answers,
+      answersHeld,
       awayNote: away
         ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
         : null,
     }),
-    note: `${all.length} pending, ${deliver.length} delivered, ${shipped.length} completion(s) sent, ${misread.length} misread suppressed, channel ${listener.armed ? 'armed' : 'DOWN'}`,
+    note: `${all.length} pending, ${deliver.length} delivered, ${shipped.length} completion(s) sent, ${answers.length} unapplied answer(s) sent, ${misread.length} misread suppressed, channel ${listener.armed ? 'armed' : 'DOWN'}`,
   }
 }
 
@@ -877,7 +895,7 @@ const safeRankhead = () => {
 // section says the channel is unreadable rather than saying nothing.
 const safeWake = (jobs, opts) => {
   try { return runWake(jobs, opts) } catch (e) {
-    return { delivered: [], completions: [], note: `wake broken: ${String(e.message).slice(0, 80)}`,
+    return { delivered: [], completions: [], answers: [], note: `wake broken: ${String(e.message).slice(0, 80)}`,
              section: `## Wake — workers that stopped, and what completed\n\n**WAKE CHECK BROKEN** — ${String(e.message).slice(0, 160)}. No worker stop-state was read this run; this is not a quiet fleet.\n` }
   }
 }
@@ -969,7 +987,11 @@ async function main() {
     // verdict says so rather than claiming every closed requirement is covered.
     const failState = safeLandingState()
     const wake = safeWake(jobs, { backlog: 0, backlogCapped: true, prevSweptIso: prevWrap.sweptIso,
-      completions: failState ? completionDetections(failState.closures ?? [], { now: new Date() }) : [] })
+      completions: failState ? completionDetections(failState.closures ?? [], { now: new Date() }) : [],
+      // His unapplied answers reach the channel on this path too. They come off the
+      // local store, they need no policy file, and an answer of his that nothing has
+      // applied is exactly as undelivered when the RC sweep is broken.
+      unapplied: unappliedDetections(safePending()) })
     writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }) }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
@@ -1106,7 +1128,8 @@ async function main() {
 
   // The wake, last of the readings and first in the file. It writes to the log the
   // Navigator's Monitor tails; everything it found is in the section either way.
-  const wake = safeWake(jobs, { backlog, backlogCapped, prevSweptIso: prevWrap.sweptIso, completions })
+  const wake = safeWake(jobs, { backlog, backlogCapped, prevSweptIso: prevWrap.sweptIso, completions,
+    unapplied: unappliedDetections(answers) })
 
   const ok = errors.length === 0
   const meta = { sweptAt, cadenceMin: CADENCE_MIN, repoCount: repos.length, ok, errors, lastGoodAt: ok ? sweptAt : prevWrap.lastGoodAt }
@@ -1139,7 +1162,7 @@ async function main() {
   if (wake.delivered.length) {
     scratchpad(`WAKE x${wake.delivered.length} delivered — ${wake.delivered.map(d => `${d.worker} ${d.kind}`).join(', ')}`)
   }
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over, ${wake.answers?.length ?? 0} woken) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 // `main` awaits the claim-currency pass, so it returns a promise. A rejection here has

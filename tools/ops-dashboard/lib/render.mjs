@@ -25,7 +25,7 @@ import { RANK_REL } from '../../navigator/rank.mjs';
 import { rosterHtml, ROSTER_CSS, emptyRoster } from './roster-view.mjs';
 import { agentsTableHtml, TABLE_CSS } from './roster-table.mjs';
 import { UNMEASURED, nothingYet } from './absent.mjs';
-import { STORELESS } from './answers.mjs';
+import { STORELESS, unappliedDetections } from './answers.mjs';
 import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
 
 /**
@@ -1134,12 +1134,20 @@ const VERDICT = {
  * questions: did the machine take it (captured), did anything see it (delivered),
  * did the artifact change (applied — and here is the link, go look).
  */
-const answerRow = (a, now) => {
-  const state = {
-    captured: 'the Navigator picks it up within five minutes',
-    delivered: 'an agent has it; the artifact updates next',
-    applied: 'the artifact was updated',
-  }[a.status] ?? a.status;
+const answerRow = (a, now, late = null) => {
+  // A promise with no expiry is how 2026-08-16 lasted nine hours. `delivered` said
+  // "an agent has it; the artifact updates next" for the whole of it, at every
+  // refresh, with no bar it could ever fail — so past the bar the row stops
+  // promising and starts reporting (jwildfire/obot.roadmap#241).
+  const state = late
+    ? (late.condition === 'dropped'
+      ? `past the hour — announced to the fleet ${AGO(late.at, now)} and the artifact still has not changed`
+      : `past the hour — nothing has picked it up, so the Navigator sweep is the suspect rather than an agent`)
+    : {
+      captured: 'the Navigator picks it up within five minutes',
+      delivered: 'an agent has it; the artifact updates next',
+      applied: 'the artifact was updated',
+    }[a.status] ?? a.status;
   const when = a.status === 'applied' ? (a.appliedAt ?? a.at) : a.at;
   const evidence = a.status === 'applied' && a.evidence
     ? ` — <a href="${esc(a.evidence)}" target="_blank" rel="noopener">see it</a>`
@@ -1156,6 +1164,20 @@ const answerRow = (a, now) => {
 
 const answersPanel = (answers, deliverer, now) => {
   const waiting = answers.filter((a) => a.status === 'captured');
+  // The other failure entirely, and the one that actually happened
+  // (jwildfire/obot.roadmap#241). The alarm below counts `captured` — answers nothing
+  // ever picked up — so an answer that WAS picked up and then dropped could never
+  // reach it. All three of the 2026-08-16 answers were `delivered` inside six
+  // minutes, which made that alarm structurally unreachable for the exact incident it
+  // would have been useful for.
+  const late = unappliedDetections(answers, { now });
+  const lateById = new Map(late.map((d) => [d.id, d]));
+  const stuck = late.length
+    ? `<p class="alarm"><strong>${late.length} answer${late.length === 1 ? '' : 's'} of yours ${late.length === 1 ? 'is' : 'are'} past the hour and the artifact has not changed.</strong>
+      ${late.map((d) => `${esc(d.name)} (${esc(AGO(d.at, now))})`).join(' &middot; ')}.
+      Each one is on the Navigator's wake channel, which reaches an agent rather than sitting in a file — that is what was missing on 16 August.
+      If a row here still says this at your next look, what is missing is an agent to apply it, not your answer.</p>`
+    : '';
   // `alive === false` is a fact and earns the alarm. `alive === null` is this process
   // not knowing, and an accusation made out of not knowing is worse than silence — it
   // sends him to restart a service that is fine (jwildfire/obot.agent#215).
@@ -1168,9 +1190,10 @@ const answersPanel = (answers, deliverer, now) => {
       : '');
   return `<div class="answers">
       <h2>Your answers <span class="q-n">${answers[STORELESS] ? UNMEASURED : answers.length}</span></h2>
+      ${stuck}
       ${alarm}
       <ul class="ans-list">${answers.length
-    ? answers.map((a) => answerRow(a, now)).join('')
+    ? answers.map((a) => answerRow(a, now, lateById.get(a.id))).join('')
     : `<li class="q-empty">${answers[STORELESS]
       ? 'No answer store on this machine yet — it appears the first time you answer a decision here.'
       : 'Nothing recorded yet. Answer a decision and it appears here with its state.'}</li>`}</ul>

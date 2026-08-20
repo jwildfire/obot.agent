@@ -376,7 +376,8 @@ the bar is mechanical (`lib/rank.mjs`):
   thing asking for attention: a `Blocks:` reference that GitHub confirmed **open** at capture
   time (`blocker-log` asks; no `gh`, or a closed or missing reference, means no stamp and no
   tag), or a computed condition on the item (`item.computed`) such as the answer pipeline's
-  OVERDUE. Self-declared urgency has nowhere to go.
+  OVERDUE — an answer of his recorded and unapplied past the hour, which is that seam's
+  first and so far only producer. Self-declared urgency has nowhere to go.
 - **The claim is displayed** — the row reads `critical · blocks obot.roadmap#182`, so a weak
   claim is obvious at a glance. That is the check no rule can perform for him.
 - **Budgeted at three.** Sparingly is enforced. A fourth claim is neither shown as critical nor
@@ -827,6 +828,45 @@ obot.agent/tools/ops-answers apply <id> --evidence <url> --by "a sibling"
 An answer unapplied for more than an hour is marked `OVERDUE` in the Navigator's
 section, on the page, and in the CLI. `pending --exit-code` exits 1 when anything is
 pending and 2 when anything is overdue, so a wrapper can act on it.
+
+### When one goes unapplied (jwildfire/obot.roadmap#241)
+
+On 2026-08-16 he answered three decisions, all three were announced inside six minutes,
+and none reached an artifact for nine hours. The detection was never what failed: the
+sweep recomputed `3 answers pending` 105 consecutive times and wrote it to a file that
+nothing was obliged to read. Four things were silent, and all four were mechanisms that
+already existed:
+
+- the wake channel had no answer detection and read job records only;
+- `**OVERDUE**` is not in `ALARM_RE`'s vocabulary — and a `- ` bullet is never
+  alarm-tested by `lib/navigator.mjs` anyway, so the row could not have gone red even
+  with the right word in it;
+- `item.computed`, the critical pin's own documented route for exactly this case, had
+  no producer;
+- and the panel alarm counted `captured` only, so an answer picked up and then dropped
+  — which is precisely what happened — could never reach it.
+
+Past the bar the same finding now takes four routes at once. `unappliedDetections` in
+`lib/answers.mjs` is the one producer:
+
+- **the wake channel**, on its own per-run budget and on a 60-minute floor rather than
+  once-only — a completion is an event, an unapplied answer is a condition that stays
+  true until somebody acts. Navigator-only: applying an answer is an agent's job and
+  this channel has no path to him.
+- **the sweep's answers section**, as an unindented verdict line reading
+  `**ANSWER DELIVERY GAP**` — unindented because that is the branch the Navigator tab
+  actually alarm-tests, and that vocabulary because it is what `ALARM_RE` matches.
+- **the critical pin**, so the decision moves to the top of his queue reading
+  `critical · answered, not applied — you decided this 8h50 ago…`.
+- **the answers panel**, which now alarms on recorded-and-unapplied rather than on
+  never-picked-up, and whose row stops promising `the artifact updates next` once that
+  promise is an hour old.
+
+Two conditions, because they have different remedies and the old clock could not tell
+them apart: `unclaimed` measures from his click and means the sweep never announced it,
+`dropped` measures from the announcement and means an agent was told and did nothing.
+None of these lines ever carries his prose — they reach the scratchpad, and a scratchpad
+can end up published.
 
 **Not automated on purpose:** nothing launches an agent by itself. The sweep announces;
 a session applies. Closing that last gap unattended means letting a scheduled job start
