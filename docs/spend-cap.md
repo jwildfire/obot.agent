@@ -46,8 +46,22 @@ measured spend behind it, in `config/spend.json`:
 | measured | $3,654.11 across the complete UTC days of that week (08-14 → 08-19) |
 | therefore | 1 point ≈ $36.91 of API-equivalent spend |
 
-It is an inference, dated, labelled as one everywhere it is printed, and deliberately
-conservative in two directions: it excludes the two partial days at the window edges
+### It maintains itself
+
+Every time the sweep sees a `fetchedAtMs` it has not seen before, it pairs that
+percentage with the dollars measured since the reset and records the result to
+`.claude/session-hub/cache/spend-calibration.json`. Whichever of that and the shipped
+bootstrap is **newer** prices a point, and the section always names which one is in
+force. Only above 20% of a week — one rounding step in an integer percentage moves a
+small ratio by tens of percent — and never from an expired reading.
+
+The lag is bounded by the cadence rather than argued about: the sweep sees a new fetch
+within five minutes and the artifact is at most ten minutes old, so the dollars trail
+the percentage by minutes. Trailing under-states dollars-per-point, which over-states
+what a night has spent — conservative in the direction that trips.
+
+The bootstrap is an inference, dated, labelled as one everywhere it is printed, and
+deliberately conservative in two directions: it excludes the two partial days at the window edges
 that the projection does count, and it prices at API list rates rather than at
 whatever Anthropic's meter actually weighs. Both push the reading to trip sooner. It
 is also inflated by the "+50% weekly limits promo through Aug 31" active on the
