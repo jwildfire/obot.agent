@@ -50,6 +50,9 @@ export const voiceDir = (workspace) => path.join(opsDir(workspace), 'voice');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}-/;
 
+/** How long after he decides one a sentence naming it still reads as a late answer. */
+export const RECENT_DAYS = 21;
+
 /** The slug as spoken words: the date is filing, the rest is the name. */
 export const deriveHandleWords = (slug) => String(slug ?? '')
   .replace(DATE_RE, '')
@@ -89,20 +92,38 @@ const soundOf = (words) => words.map(phoneticKey).join(' ');
  * absence is a real answer is the snapshot (`readQueue`), which legitimately does not
  * exist until the first episode is written.
  */
-export function openDecisions(hub) {
+export function openDecisions(hub, { now = new Date(), recentDays = RECENT_DAYS } = {}) {
   const file = path.join(hub ?? '', 'reports', 'decisions', 'registry.json');
   let reg;
   try {
     reg = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (e) {
-    return { decisions: [], read: false, why: `no readable decision registry at ${file} (${e.code ?? e.message})` };
+    return { decisions: [], recent: [], read: false, why: `no readable decision registry at ${file} (${e.code ?? e.message})` };
   }
-  const decisions = (reg.artifacts ?? [])
-    .filter((a) => a && a.state === 'open')
-    .map((a) => ({
-      id: a.id, slug: a.slug, title: a.title ?? null, date: a.date ?? null, questions: a.questions ?? [],
-    }));
-  return { decisions, read: true, why: '' };
+  // Schema drift is a FAILED READ, not an empty decision set. `(reg.artifacts ?? [])`
+  // turned a renamed key into "he has decided everything", which reads as success and
+  // makes every answer he dictates from then on an idea — and ideas are published.
+  if (!Array.isArray(reg.artifacts)) {
+    return { decisions: [], recent: [], read: false, why: `${file} has no artifacts array — the registry's shape has changed` };
+  }
+  const row = (a) => ({
+    id: a.id, slug: a.slug, title: a.title ?? null, date: a.date ?? null,
+    state: a.state ?? null, decidedOn: a.decidedOn ?? a.closedOn ?? a.date ?? null,
+    questions: a.questions ?? [],
+  });
+  const decisions = reg.artifacts.filter((a) => a && a.state === 'open').map(row);
+  // Decisions he answered recently. Not answerable, but a sentence that names one is an
+  // answer arriving late — a correction, or a second thought — and it must be kept and
+  // shown rather than filed as an idea on a public board.
+  const cut = now.getTime() - recentDays * 86400000;
+  const recent = reg.artifacts
+    .filter((a) => a && a.state !== 'open')
+    .map(row)
+    .filter((a) => {
+      const t = Date.parse(a.decidedOn ?? '');
+      return Number.isFinite(t) && t >= cut;
+    });
+  return { decisions, recent, read: true, why: '' };
 }
 
 /**
@@ -173,7 +194,7 @@ export const queueFingerprint = (decisions = []) => crypto.createHash('sha256')
 
 /** The open decisions, handled, numbered and fingerprinted. */
 export function buildQueue(hub, { now = new Date() } = {}) {
-  const open = openDecisions(hub);
+  const open = openDecisions(hub, { now });
   const decisions = allocateHandles(open.decisions);
   return {
     at: now.toISOString(),
@@ -181,6 +202,9 @@ export function buildQueue(hub, { now = new Date() } = {}) {
     why: open.why,
     fingerprint: queueFingerprint(decisions),
     decisions,
+    // Carried, never numbered: he is never told to say one of these, and an ordinal
+    // must never resolve into them.
+    recent: allocateHandles(open.recent ?? []).map((d) => ({ ...d, ordinal: null })),
   };
 }
 

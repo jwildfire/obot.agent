@@ -6,6 +6,7 @@
 // would otherwise look quiet). The second is the one that would go unnoticed for
 // days, so the section says which of the two it is on every sweep.
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { ALARM_RE } from '../../ops-dashboard/lib/navigator.mjs'
@@ -64,4 +65,41 @@ test('a section rendered by hand reports the lane without claiming a poll it did
   const md = unroutedSection([], { now: NOW, lane: { armed: true, read: null } })
   assert.doesNotMatch(md, ALARM_RE)
   assert.match(md, /did not poll/i)
+})
+
+test('an unreadable unrouted store is an alarm, never an all-clear about his sentences', () => {
+  // safeVoice took `.items` and threw the read flag away, so a store it could not open
+  // rendered the same line as a clean lane: a positive claim about his dictated
+  // sentences made from a failed read (obot.agent#206/#215).
+  const md = unroutedSection([], { now: NOW, lane: { armed: true, read: true, routed: 0 }, read: false, why: 'EACCES' })
+  const headline = md.split('\n').find((l) => ALARM_RE.test(l))
+  assert.ok(headline, 'a failed read must render as an alarm')
+  assert.doesNotMatch(md, /none unrouted/, 'and must never claim there are none')
+  assert.match(md, /EACCES/)
+})
+
+test('sentences left alone for being older than the queue are counted, not hidden', () => {
+  const md = unroutedSection([], { now: NOW, lane: { armed: true, read: true, routed: 0, stale: 2 } })
+  assert.match(md, /2/)
+  assert.match(md, /older|before/i)
+})
+
+test('a receipt that failed to write is an alarm — the stamp is what stops a re-read', () => {
+  const md = unroutedSection([], { now: NOW, lane: { armed: true, read: true, routed: 1, unstamped: 1 } })
+  assert.ok(md.split('\n').find((l) => ALARM_RE.test(l)))
+})
+
+test('BOTH sweep call sites pass the voice section — the wiring, not just the contract', async () => {
+  // renderState's contract was tested and neither call site was, so `voice: safeVoice()`
+  // could be deleted from either one and the suite stayed green.
+  const src = await readFile(new URL('../sweep.mjs', import.meta.url), 'utf8')
+  // The first split is the `export function renderState({` declaration; the rest are
+  // the calls.
+  const calls = src.split('renderState({').slice(2)
+  assert.equal(calls.length, 2, 'if a third call site appears, it needs the section too')
+  for (const [i, call] of calls.entries()) {
+    // Each call is written on one line, so the line is the argument list. Slicing at
+    // the first `})` would stop inside a nested call instead.
+    assert.match(call.split('\n')[0], /voice:\s*safeVoice\(\)/, `call site ${i + 1} must pass the voice section`)
+  }
 })

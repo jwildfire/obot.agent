@@ -17,6 +17,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { pendingAnswers } from '../../ops-dashboard/lib/answers.mjs';
+import { buildQueue } from '../lib/handles.mjs';
 import { readUnrouted } from '../lib/route.mjs';
 import {
   RECEIPT_DONE, RECEIPT_HELD, asQuote, listPending, osascriptRunner, parseRecords, pollReminders,
@@ -26,6 +27,8 @@ const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const NOW = new Date('2026-08-20T14:00:00Z');
 const FS = String.fromCharCode(31);
 const RS = String.fromCharCode(30);
+
+const SAID_AFTER = '2026-08-20T14:30:00.000Z';
 
 const REG = [
   {
@@ -40,10 +43,15 @@ function hub(artifacts = REG) {
   return dir;
 }
 
-/** A fake Reminders app: one canned list, and a log of every script it was sent. */
+/**
+ * A fake Reminders app: one canned list, and a log of every script it was sent.
+ *
+ * Items carry a creation date, because since the stale-sentence fix an answer must
+ * post-date the queue that was read to him; anything older is deliberately left alone.
+ */
 function fake(items) {
   const sent = [];
-  let payload = items.map((i) => [i.id, i.name, i.body ?? ''].join(FS)).join(RS);
+  let payload = items.map((i) => [i.id, i.name, i.body ?? '', i.created ?? SAID_AFTER].join(FS)).join(RS);
   return {
     sent,
     run(script) {
@@ -55,7 +63,7 @@ function fake(items) {
         payload = payload.split(RS).filter(Boolean)
           .map((rec) => {
             const f = rec.split(FS);
-            return f[0] === id ? [f[0], name, f[2] ?? ''].join(FS) : rec;
+            return f[0] === id ? [f[0], name, f[2] ?? '', f[3] ?? ''].join(FS) : rec;
           }).join(RS);
         return { ok: true, out: '' };
       }
@@ -106,7 +114,7 @@ test('an osascript that fails is a failed read, not an empty inbox', () => {
 test('a routed sentence is stamped and completed, so the list empties and he can hear that', () => {
   const b = { ws: tmp('rem-ws-'), hub: hub() };
   const f = fake([{ id: 'a1', name: 'branch protections, option A' }]);
-  const out = pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
+  const out = pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
 
   assert.equal(out.routed.length, 1);
   assert.equal(out.routed[0].kind, 'answer');
@@ -122,7 +130,7 @@ test('a routed sentence is stamped and completed, so the list empties and he can
 test('an UNROUTED sentence is stamped and LEFT on the list — the absence of a receipt is the receipt', () => {
   const b = { ws: tmp('rem-ws-'), hub: hub() };
   const f = fake([{ id: 'a1', name: 'answer: the thing about the branches' }]);
-  const out = pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
+  const out = pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
 
   assert.equal(out.unrouted.length, 1);
   assert.equal(readUnrouted(b.ws).items.length, 1);
@@ -138,7 +146,7 @@ test('an UNROUTED sentence is stamped and LEFT on the list — the absence of a 
 test('an idea is left completely alone for the lane that has always handled it', () => {
   const b = { ws: tmp('rem-ws-'), hub: hub() };
   const f = fake([{ id: 'a1', name: 'a goals page in the hub would be good' }]);
-  const out = pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
+  const out = pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
   assert.equal(out.ideas.length, 1);
   assert.equal(f.sent.filter((s) => /set name of|set completed of/.test(s)).length, 0);
 });
@@ -146,7 +154,7 @@ test('an idea is left completely alone for the lane that has always handled it',
 test('private: is left alone too — it is not this lane\'s to touch', () => {
   const b = { ws: tmp('rem-ws-'), hub: hub() };
   const f = fake([{ id: 'a1', name: 'private: something' }]);
-  const out = pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
+  const out = pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
   assert.equal(out.privates.length, 1);
   assert.equal(f.sent.filter((s) => /set name of|set completed of/.test(s)).length, 0);
 });
@@ -154,8 +162,8 @@ test('private: is left alone too — it is not this lane\'s to touch', () => {
 test('polling twice does not answer twice — the stamp is what makes it safe to run on a clock', () => {
   const b = { ws: tmp('rem-ws-'), hub: hub() };
   const f = fake([{ id: 'a1', name: 'branch protections, option A' }]);
-  pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
-  const second = pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
+  pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
+  const second = pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
   assert.equal(second.routed.length, 0);
   assert.equal(pendingAnswers(b.ws, { hub: b.hub })[0].clicks, 1);
 });
@@ -163,8 +171,8 @@ test('polling twice does not answer twice — the stamp is what makes it safe to
 test('an unrouted item stamped once is not re-stamped into a nest of prefixes', () => {
   const b = { ws: tmp('rem-ws-'), hub: hub() };
   const f = fake([{ id: 'a1', name: 'answer: fits nothing at all' }]);
-  pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
-  const second = pollReminders({ workspace: b.ws, hub: b.hub, run: f.run, now: NOW });
+  pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
+  const second = pollReminders({ workspace: b.ws, hub: b.hub, queue: buildQueue(b.hub, { now: NOW }), run: f.run, now: NOW });
   assert.equal(second.unrouted.length, 0, 'it is already wearing its stamp, so it is not read again');
   assert.equal(readUnrouted(b.ws).items.length, 1);
 });

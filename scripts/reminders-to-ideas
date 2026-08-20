@@ -7,7 +7,9 @@
 # script is safe to re-run. No LLM anywhere in this path — capture is zero-token.
 #
 # Privacy lane: an item whose text starts with "private:" is appended to a local
-# inbox file instead (never posted — the hub is public) and then marked complete.
+# inbox file instead (never posted — the hub is public) and then marked complete. That
+# lane now lives in `tools/voice-decisions` with the routing, so there is ONE rule about
+# what counts as private rather than two that disagreed about case and whitespace.
 #
 # ANSWER LANE (jwildfire/obot.roadmap#265): since he can now answer an open decision by
 # dictating into this same list, every item is first offered to `tools/voice-decisions`,
@@ -94,14 +96,6 @@ while IFS=$'\x1f' read -r rid rname rbody; do
     "✅"*|"⚠️"*) continue ;;
   esac
 
-  if [[ "$text" == private:* ]]; then
-    mkdir -p "$(dirname "$PRIVATE_INBOX")"
-    printf -- '- %s — %s\n' "$NOW" "${text#private:}" >> "$PRIVATE_INBOX"
-    mark_done "$rid"
-    kept=$((kept+1))
-    continue
-  fi
-
   # Is this an answer to an open decision rather than an idea? The router records it
   # and stamps the reminder; only `idea` falls through to the public board below.
   kind="ROUTER-UNAVAILABLE"
@@ -112,7 +106,13 @@ while IFS=$'\x1f' read -r rid rname rbody; do
     idea) ;;
     answer)   answered=$((answered+1)); printf 'answered: %s\n' "$rname"; continue ;;
     unrouted) held=$((held+1)); printf 'UNROUTED, left on the list with the reason: %s\n' "$rname" >&2; continue ;;
-    private)  kept=$((kept+1)); continue ;;
+    private)  # The router owns the private lane now, and it did the write and the
+              # completion under --reminder. This branch used to be `kept=$((kept+1))`
+              # and nothing else, behind a case-sensitive `private:*` test that the
+              # router's own /^\s*private\s*:/i did not agree with: "Private: ..."
+              # missed the branch that wrote the file, reached the router, came back
+              # `private`, and was counted as kept while nothing was kept anywhere.
+              kept=$((kept+1)); continue ;;
     *)        skipped=$((skipped+1))
               printf 'decision router unavailable (%s), leaving reminder pending rather than posting it: %s\n' "$kind" "$rname" >&2
               continue ;;

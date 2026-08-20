@@ -121,3 +121,21 @@ test('private: still never leaves the machine', () => {
   assert.deepEqual(ghCalls(b), []);
   assert.match(fs.readFileSync(path.join(b.dir, '.claude', 'private-inbox.md'), 'utf8'), /something for me only/);
 });
+
+test('PRIVATE, said any way he says it, is written locally and never counted as kept when it was not', () => {
+  // The bash pre-check was `private:*` — case-sensitive, no leading space — while the
+  // router matched /^\s*private\s*:/i. So "Private: ..." missed the branch that writes
+  // the file, reached the router, came back `private`, and the lane counted it as
+  // "1 kept private" while writing nothing anywhere and completing nothing. The note
+  // was never persisted and was re-counted on every run forever.
+  for (const said of ['private: my salary thoughts', 'Private: my salary thoughts', ' private : my salary thoughts']) {
+    const b = bed([{ id: 'a1', name: said }]);
+    const r = run(b);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(ghCalls(b).filter((c) => /createDiscussion/.test(c)), [], `${said} must never be posted`);
+    const inbox = path.join(b.dir, '.claude', 'private-inbox.md');
+    assert.ok(fs.existsSync(inbox), `${said} must actually be written somewhere`);
+    assert.match(fs.readFileSync(inbox, 'utf8'), /my salary thoughts/);
+    assert.match(fs.readFileSync(b.osaLog, 'utf8'), /set completed/, `${said} must be completed, or it repeats forever`);
+  }
+});
