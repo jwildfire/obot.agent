@@ -1,0 +1,198 @@
+#!/usr/bin/env node
+// voice-decisions — he answers an open decision out loud, from a car, with no screen
+// and no identifier in his head (jwildfire/obot.roadmap#265).
+//
+// @jwildfire, 2026-08-17: "Remember that I'm mostly listening to these in the car and
+// then maybe dictating a response, so I don't have a screen and I don't expect that I
+// remember any GitHub issue numbers."
+//
+// Two halves and one vocabulary between them.
+//
+//   OUT   `script` writes the narration an episode reads: every open decision named
+//         in words, its choices stated so they can be said back, and a close that
+//         tells him exactly what to say. It also stamps the queue snapshot, because
+//         the moment the words are read out is the moment they become the vocabulary.
+//   BACK  `poll` reads the Reminders list Siri writes to, routes each sentence, and
+//         records an answer in the same store the dashboard writes to — so today's
+//         answered-but-unapplied detection covers a car answer for free.
+//
+// The whole design turns on one asymmetry: an UNROUTED sentence costs him one repeat,
+// a MISROUTED one puts his words on a page he was not talking about and nothing looks
+// wrong afterwards. So a close call is always refused, and refusing is loud.
+//
+// Usage (from the workspace root — bare path, no `bash ` prefix, it has its own shebang):
+//   obot.agent/tools/voice-decisions queue [--json]
+//   obot.agent/tools/voice-decisions script [--json] [--no-write]
+//   obot.agent/tools/voice-decisions route --text '<what he said>' [--json]
+//   obot.agent/tools/voice-decisions answer --text '<what he said>' [--reminder <id>] [--json|--kind]
+//   obot.agent/tools/voice-decisions poll [--json] [--no-stamp]
+//   obot.agent/tools/voice-decisions unrouted [--json] [--exit-code]
+//   obot.agent/tools/voice-decisions resolve <id> [--note '<why>'] [--by W0000]
+//   obot.agent/tools/voice-decisions section
+//   obot.agent/tools/voice-decisions arm | disarm | armed
+//
+//   OBOT_WORKSPACE  workspace root (default ~/Documents/obot2)
+//   OBOT_HUB        obot.roadmap clone (default <workspace>/obot.roadmap)
+//   OBOT_VOICE_LIST Reminders list to poll (default "obot")
+//
+// LOCAL ONLY. Every store this touches lives under `.claude/ops/` and holds his
+// verbatim words. Nothing here commits, publishes, or posts anything — and `poll`
+// deliberately leaves ideas and `private:` items untouched for the lane that has
+// always filed them, so that an answer of his can never reach the public ideas board.
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+
+import { isArmed, setArmed } from './voice/lib/armed.mjs';
+import { buildQueue, readQueue, writeQueue } from './voice/lib/handles.mjs';
+import { RECEIPT_DONE, RECEIPT_HELD, asQuote, osascriptRunner, pollReminders } from './voice/lib/reminders.mjs';
+import { readUnrouted, resolveUnrouted, routeSpoken, unroutedSection } from './voice/lib/route.mjs';
+import { queueScript } from './voice/lib/speech.mjs';
+
+const WS = path.resolve(process.env.OBOT_WORKSPACE || path.join(process.env.HOME ?? '', 'Documents/obot2'));
+const HUB = path.resolve(process.env.OBOT_HUB || path.join(WS, 'obot.roadmap'));
+const LIST = process.env.OBOT_VOICE_LIST || 'obot';
+
+const argv = process.argv.slice(2);
+const cmd = argv[0] ?? 'queue';
+const flags = {};
+const positional = [];
+for (let i = 1; i < argv.length; i++) {
+  const a = argv[i];
+  if (!a.startsWith('--')) { positional.push(a); continue; }
+  const next = argv[i + 1];
+  if (next && !next.startsWith('--')) { flags[a] = next; i++; } else flags[a] = true;
+}
+const flag = (n) => Boolean(flags[n]);
+const value = (n) => (typeof flags[n] === 'string' ? flags[n] : null);
+const out = (s) => process.stdout.write(`${s}\n`);
+const json = (o) => out(JSON.stringify(o, null, 2));
+
+const needText = () => {
+  const t = value('--text');
+  if (t) return t;
+  process.stderr.write('what did he say? pass it: --text \'branch protections, option A\'\n');
+  process.exit(2);
+  return '';
+};
+
+function main() {
+  if (cmd === 'queue') {
+    const q = buildQueue(HUB);
+    if (flag('--write')) writeQueue(WS, q);
+    if (flag('--json')) return json(q);
+    if (!q.read) { process.stderr.write(`${q.why}\n`); process.exit(1); }
+    if (!q.decisions.length) return out('no open decisions — nothing is waiting on him.');
+    out(`${q.decisions.length} open decision(s), as he would be told to name them:\n`);
+    for (const d of q.decisions) {
+      out(`  ${d.ordinal}. "${d.handle}"${d.collidesWith.length ? `  ⚠️ sounds like ${d.collidesWith.join(', ')} — he must use the number` : ''}`);
+      out(`     ${d.id} · ${d.slug}`);
+    }
+    return out('\nHe never hears the second line. It is here so an agent can join the two.');
+  }
+
+  if (cmd === 'script') {
+    const q = buildQueue(HUB);
+    const s = queueScript(q, { hub: HUB });
+    // The vocabulary is whatever the script just said. Persisting it here, and only
+    // here, is what makes "number two" answerable and what stops a second list
+    // existing (#265).
+    if (!flag('--no-write') && q.read) writeQueue(WS, q);
+    if (flag('--json')) return json({ ...s, fingerprint: q.fingerprint, at: q.at });
+    out(s.text);
+    process.stderr.write(`\n[${s.words} words, about ${s.minutes} min${s.overRuns ? ' — OVER the 5 minute guideline he set; say why or cut it' : ''}]\n`);
+    return undefined;
+  }
+
+  if (cmd === 'route' || cmd === 'answer') {
+    const text = needText();
+    // `route` is the dry run: it must not write, so it gets a throwaway workspace.
+    const workspace = cmd === 'route' ? fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'voice-dry-')) : WS;
+    const snapshot = readQueue(WS).queue;
+    const r = routeSpoken(text, { workspace, hub: HUB, queue: snapshot });
+    if (cmd === 'answer' && value('--reminder') && (r.kind === 'answer' || r.kind === 'unrouted')) {
+      // Stamp the item he dictated, so the list itself is the receipt.
+      const id = value('--reminder');
+      const line = r.kind === 'answer'
+        ? `${RECEIPT_DONE} ${r.decision.handle} - recorded`
+        : `${RECEIPT_HELD} could not route: ${text.replace(/\s+/g, ' ').slice(0, 140)}`;
+      osascriptRunner(`tell application "Reminders" to set name of (first reminder whose id is "${asQuote(id)}") to "${asQuote(line)}"`);
+      if (r.kind === 'answer') {
+        osascriptRunner(`tell application "Reminders" to set completed of (first reminder whose id is "${asQuote(id)}") to true`);
+      }
+    }
+    // One word on stdout, for `scripts/reminders-to-ideas`, which decides from it
+    // whether an item may be posted to a PUBLIC board. Anything other than these four
+    // words — including no output at all — is treated there as "do not post".
+    if (flag('--kind')) return out(r.kind);
+    if (flag('--json')) return json(summarise(r));
+    if (r.kind === 'answer') {
+      return out(`ANSWER → ${r.decision.id} "${r.decision.handle}" (${r.matchedBy}, ${Math.round(r.confidence * 100)}%)`
+        + `\n  verdict: ${r.verdict}\n  his words: ${r.record.words}`);
+    }
+    if (r.kind === 'unrouted') return out(`UNROUTED (${r.reasonKind}) — ${r.reason}\n  kept whole: "${text}"`);
+    return out(`${r.kind.toUpperCase()} — left for the lane that already handles it.`);
+  }
+
+  if (cmd === 'poll') {
+    const r = pollReminders({
+      workspace: WS, hub: HUB, queue: readQueue(WS).queue, list: LIST, stamp: !flag('--no-stamp'),
+    });
+    if (flag('--json')) return json({ ...r, routed: r.routed.map(summarise), unrouted: r.unrouted.map(summarise), ideas: r.ideas.length, privates: r.privates.length });
+    if (!r.read) { process.stderr.write(`the car lane could not be read: ${r.why}\n`); process.exit(1); }
+    out(`${r.routed.length} answered, ${r.unrouted.length} unrouted, ${r.ideas.length} idea(s) and ${r.privates.length} private item(s) left for reminders-to-ideas.`);
+    for (const a of r.routed) out(`  ✅ ${a.decision.id} "${a.decision.handle}" — ${a.verdict}`);
+    for (const u of r.unrouted) out(`  ⚠️ ${u.reasonKind} — ${u.reason}`);
+    return undefined;
+  }
+
+  if (cmd === 'unrouted') {
+    const { items, read, why } = readUnrouted(WS, { all: flag('--all') });
+    if (flag('--json')) return json({ items, read, why });
+    if (!read) { process.stderr.write(`${why}\n`); process.exit(2); }
+    if (!items.length) out('nothing unrouted — every sentence dictated into the lane reached a decision or was an idea.');
+    for (const i of items) {
+      out(`${i.id}\n  heard ${i.heard}× · ${i.reasonKind} · ${i.reason}\n  "${i.text}"`
+        + `${i.candidates?.length ? `\n  candidates: ${i.candidates.map((c) => `${c.handle} (${c.id})`).join(', ')}` : ''}`);
+    }
+    if (flag('--exit-code')) process.exit(items.length ? 1 : 0);
+    return undefined;
+  }
+
+  if (cmd === 'resolve') {
+    const id = positional[0];
+    if (!id) { process.stderr.write('usage: voice-decisions resolve <id> [--note "<why>"] [--by W0000]\n'); process.exit(2); }
+    const rec = resolveUnrouted(WS, id, { by: value('--by') ?? 'an agent', note: value('--note') });
+    return out(`resolved ${rec.id} — kept, not deleted.`);
+  }
+
+  if (cmd === 'section') return out(unroutedSection(readUnrouted(WS).items).trimEnd());
+
+  if (cmd === 'arm' || cmd === 'disarm') {
+    setArmed(WS, cmd === 'arm');
+    return out(cmd === 'arm'
+      ? 'armed — the Navigator sweep will poll the Reminders list every five minutes.'
+      : 'disarmed — the sweep will not touch Reminders. The lane still works when run by hand.');
+  }
+  if (cmd === 'armed') { const on = isArmed(WS); out(on ? 'armed' : 'not armed'); return process.exit(on ? 0 : 1); }
+
+  process.stderr.write('usage: voice-decisions queue|script|route|answer|poll|unrouted|resolve|section|arm|disarm|armed'
+    + ' — see the header of this file\n');
+  process.exit(2);
+  return undefined;
+}
+
+const summarise = (r) => ({
+  kind: r.kind,
+  reasonKind: r.reasonKind ?? null,
+  reason: r.reason ?? null,
+  decision: r.decision ? { id: r.decision.id, slug: r.decision.slug, handle: r.decision.handle } : null,
+  matchedBy: r.matchedBy ?? null,
+  confidence: r.confidence ?? null,
+  verdict: r.verdict ?? null,
+  duplicate: r.duplicate ?? false,
+  candidates: (r.candidates ?? []).map((c) => ({ id: c.id, handle: c.handle })),
+  reminderId: r.reminderId ?? null,
+});
+
+main();

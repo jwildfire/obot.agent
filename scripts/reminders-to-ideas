@@ -9,6 +9,15 @@
 # Privacy lane: an item whose text starts with "private:" is appended to a local
 # inbox file instead (never posted — the hub is public) and then marked complete.
 #
+# ANSWER LANE (jwildfire/obot.roadmap#265): since he can now answer an open decision by
+# dictating into this same list, every item is first offered to `tools/voice-decisions`,
+# which routes it to the local answer store if it names an open decision and stamps the
+# reminder either way. ONLY what comes back as `idea` is posted here. That order is not
+# a preference: this list is filed to a PUBLIC discussion board, and a sentence in which
+# he decides something is local-only. If the router cannot be run at all, the item is
+# LEFT PENDING rather than posted — failing closed costs a re-run, failing open publishes
+# his decision.
+#
 # Adapted from the OpenClaw-era ~/Documents/obot/scripts/ingest-reminders.sh.
 # First run triggers a one-time macOS Reminders permission prompt.
 #
@@ -19,6 +28,8 @@
 #   OBOT_IDEAS_CATEGORY_ID  GraphQL node id of Ideas category
 #   OBOT_PRIVATE_INBOX      path for private: items (default: $CLAUDE_PROJECT_DIR/.claude/private-inbox.md,
 #                           falling back to ~/Documents/obot2/.claude/private-inbox.md)
+#   OBOT_VOICE_CLI          the decision router (default: <script dir>/../tools/voice-decisions)
+#   OBOT_APP_TOKEN_CMD      how to mint the bot token (default: <script dir>/obot-app-token)
 
 set -euo pipefail
 
@@ -26,6 +37,8 @@ REPO_ID="${OBOT_IDEAS_REPO_ID:-R_kgDOTLuTVg}"
 CATEGORY_ID="${OBOT_IDEAS_CATEGORY_ID:-DIC_kwDOTLuTVs4DBzqe}"
 PRIVATE_INBOX="${OBOT_PRIVATE_INBOX:-${CLAUDE_PROJECT_DIR:-$HOME/Documents/obot2}/.claude/private-inbox.md}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VOICE_CLI="${OBOT_VOICE_CLI:-$SCRIPT_DIR/../tools/voice-decisions}"
+APP_TOKEN_CMD="${OBOT_APP_TOKEN_CMD:-$SCRIPT_DIR/obot-app-token}"
 
 fail() { printf 'reminders-to-ideas: %s\n' "$1" >&2; exit 1; }
 
@@ -55,14 +68,31 @@ mark_done() {
   osascript -e "tell application \"Reminders\" to set completed of (first reminder whose id is \"$1\") to true" >/dev/null
 }
 
-TOKEN="$("$SCRIPT_DIR/obot-app-token")"
+# Minted on the first post, not up front: a sweep in which everything he said was a
+# decision answer posts nothing, and should not be reaching for a GitHub token at all.
+# And checked non-empty before it is used: an empty GH_TOKEN is not "no token", it is
+# `gh` falling back to @jwildfire's own keyring and posting as him (obot.agent#207).
+TOKEN=""
+token() {
+  if [ -z "$TOKEN" ]; then
+    TOKEN="$("$APP_TOKEN_CMD" || true)"
+    [ -n "$TOKEN" ] || fail 'could not mint an app token — not posting as anyone else'
+  fi
+  printf '%s' "$TOKEN"
+}
 NOW="$(TZ=America/New_York date '+%Y-%m-%d %H:%M %Z')"
-posted=0 kept=0
+posted=0 kept=0 answered=0 held=0 skipped=0
 
 while IFS=$'\x1f' read -r rid rname rbody; do
   [ -z "$rid" ] && continue
   text="$rname"
   [ -n "$rbody" ] && text="$rname"$'\n\n'"$rbody"
+
+  # Anything this lane already stamped. Reading a receipt back in would re-handle it
+  # forever, and would eventually post one to the ideas board.
+  case "$rname" in
+    "✅"*|"⚠️"*) continue ;;
+  esac
 
   if [[ "$text" == private:* ]]; then
     mkdir -p "$(dirname "$PRIVATE_INBOX")"
@@ -72,11 +102,27 @@ while IFS=$'\x1f' read -r rid rname rbody; do
     continue
   fi
 
+  # Is this an answer to an open decision rather than an idea? The router records it
+  # and stamps the reminder; only `idea` falls through to the public board below.
+  kind="ROUTER-UNAVAILABLE"
+  if [ -x "$VOICE_CLI" ]; then
+    kind=$("$VOICE_CLI" answer --text "$text" --reminder "$rid" --kind 2>/dev/null) || kind="ROUTER-FAILED"
+  fi
+  case "$kind" in
+    idea) ;;
+    answer)   answered=$((answered+1)); printf 'answered: %s\n' "$rname"; continue ;;
+    unrouted) held=$((held+1)); printf 'UNROUTED, left on the list with the reason: %s\n' "$rname" >&2; continue ;;
+    private)  kept=$((kept+1)); continue ;;
+    *)        skipped=$((skipped+1))
+              printf 'decision router unavailable (%s), leaving reminder pending rather than posting it: %s\n' "$kind" "$rname" >&2
+              continue ;;
+  esac
+
   title="$rname"
   [ "${#title}" -gt 80 ] && title="${title:0:77}..."
   body="$text"$'\n\n'"— captured via Siri/Reminders, $NOW"
 
-  url=$(GH_TOKEN="$TOKEN" gh api graphql \
+  url=$(GH_TOKEN="$(token)" gh api graphql \
     -f query='mutation($t:String!,$b:String!,$r:ID!,$c:ID!){createDiscussion(input:{repositoryId:$r,categoryId:$c,title:$t,body:$b}){discussion{url}}}' \
     -f t="$title" -f b="$body" -f r="$REPO_ID" -f c="$CATEGORY_ID" \
     --jq '.data.createDiscussion.discussion.url') || { printf 'post failed, leaving reminder pending: %s\n' "$rname" >&2; continue; }
@@ -86,4 +132,5 @@ while IFS=$'\x1f' read -r rid rname rbody; do
   printf 'filed: %s -> %s\n' "$rname" "$url"
 done <<< "${RAW//$'\x1e'/$'\n'}"
 
-printf 'done: %d filed, %d kept private\n' "$posted" "$kept"
+printf 'done: %d filed, %d kept private, %d answered a decision, %d unrouted, %d left pending\n' \
+  "$posted" "$kept" "$answered" "$held" "$skipped"
