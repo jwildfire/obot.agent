@@ -83,6 +83,90 @@ export const NAVIGATOR_TAG = '\u{1F9ED}\u{1F916}' // 🧭🤖
  */
 export const WAKE_WINDOW_HOURS = 24
 
+/**
+ * THREE STATES, AND NOTHING MAY COLLAPSE TWO OF THEM (obot.agent#157).
+ *
+ * The channel woke the Navigator three times in nine minutes of being armed, for the
+ * same three workers — `DEAD W0009`, `WAITING W0007`, `WAITING W0008` — and would
+ * have kept waking for them for as long as their job records sat on this machine,
+ * because nothing about them could change. All three had carried a verdict since
+ * 21:31 the previous evening. Measured against the real log afterwards: 7 of the 97
+ * stop-state wakes ever delivered went out for a worker that already had one, and
+ * `dead:63b5b6fb` went out seven times across sixteen hours for a session that died
+ * at 07:39 and could not come back.
+ *
+ * So every stop-state is in exactly one of three states, and the whole fix is
+ * keeping them apart:
+ *
+ *   RESOLVED     a verdict exists in the delivery record, recorded AFTER this
+ *                stop-state began. It never wakes anyone again. Counted and named
+ *                in the section, because the verdict is the record and a reader
+ *                must still be able to find it.
+ *   LIVE         terminal and unjudged, or stuck for less time than anything on
+ *                this machine has ever taken to come back. It keeps waking on its
+ *                floor. That is the channel working and it is not to be quietened.
+ *   STANDING     permanently unactionable — dead, or parked past the point where
+ *                anything has ever resumed. Reported ONCE with what it needs, then
+ *                never again, and never silently: it stays in the section under
+ *                `### Standing` for as long as it is true.
+ *
+ * AFTER, and not merely "a verdict exists". W0049 is why. It was judged `confirmed`
+ * at 06:22 on 2026-08-18, went on working, and was found parked at 06:55 — a wake
+ * this channel was right to deliver, and which produced the `drift` verdict at
+ * 07:59. An untimed verdict gate would have swallowed it. So the comparison is
+ * against the instant this particular stop-state began (`d.at`), which for a
+ * closeout is `firstTerminalAt` and for everything else is the last time the session
+ * moved.
+ */
+
+/**
+ * When a stop-state stops being something anybody can still resolve.
+ *
+ * MEASURED, and measured from the same corpus as the admiral's own bar rather than
+ * from a second reading: of every span a worker on this machine spent blocked and
+ * then RESOLVED, the longest was 106 minutes and the next longest 80. Every block
+ * that ran past that was never resolved at all — 21h, 21h, 22h, a day — and had to
+ * be closed by hand. 180 minutes therefore sits above every recovery ever recorded
+ * here and below every observed failure.
+ *
+ * Held equal to `ACT_MIN.waiting` in admiral.mjs by intent rather than by import,
+ * exactly as `TRIGGERED_QUIET_MIN` is: admiral.mjs imports this file, so the
+ * dependency cannot run the other way. The two numbers being the same is the point.
+ * The admiral is the thing that ACTS on a stuck session at 180 minutes; past that
+ * bar the wake has handed the condition on, and repeating it is asking a reader to
+ * do a second time what an actor is already doing.
+ *
+ * It is NOT applied to `stopped`. See `RETIRES` below.
+ */
+export const RETIRE_MIN = 180
+
+/**
+ * The kinds a retirement may silence — every stop-state except the closeout.
+ *
+ * HOW THIS INTERACTS WITH THE BOUND THAT ALREADY EXISTS, because a channel with two
+ * different notions of "stop waking for this" and no stated relationship between
+ * them is worse than one with none. `WAKE_WINDOW_HOURS` reads on `firstTerminalAt`
+ * and therefore only ever touches `stopped`; this set deliberately excludes
+ * `stopped`. The two are disjoint by construction: no stop-state can be suppressed
+ * by both, no closeout is ever retired, and `outsideWindow`'s count and the standing
+ * list can never describe the same thing twice. `wake.test.mjs` holds that.
+ *
+ * The bound is therefore untouched — not widened, not lengthened, not extended to a
+ * new kind. Making an unjudged closeout quieter is the failure this fix would be
+ * trading for, and `stopped` keeps nagging until a verdict silences it.
+ */
+export const RETIRES = new Set(['dead', 'waiting', 'stalled', 'wedged'])
+
+/**
+ * The kinds whose onset is a liveness clock, and therefore the kinds where "has this
+ * been judged" has to mean "judged SINCE this began".
+ *
+ * The same set as `RETIRES` and for the same underlying reason rather than by
+ * coincidence: these are the readings taken from `updatedAt`, which moves. A closeout
+ * is not one of them — see `judgedSince` for the measurement that settles it.
+ */
+export const TIMED_VERDICT = RETIRES
+
 /** Quiet-for, in minutes, before a tempo=active worker counts as stalled. */
 export const STALL_MIN = 30
 /** Grace before a worker waiting on a human is called unresolved. */
@@ -173,6 +257,9 @@ export const ONCE_KINDS = new Set(['delivered'])
 
 /** Wakes delivered per run. The overflow is reported, never hidden. */
 export const MAX_WAKES_PER_RUN = 3
+
+/** How many resolved workers the section names before it points at the record instead. */
+export const RESOLVED_NAMES = 6
 
 /**
  * A worker that died rather than one waiting for an answer.
@@ -454,27 +541,157 @@ export function classify(job, now = new Date(), { hostWasAway = false, workspace
 }
 
 /**
- * The pending set: every stop-state across the fleet, minus the closeouts that
- * already carry a verdict.
+ * Has this worker been judged since this particular stop-state began?
  *
- * Suppression is on the delivery journal alone. A wake that was delivered but never
- * judged stays pending on purpose — the re-wake floor spaces it out, and the only
- * thing that silences it is the verdict it is asking for.
+ * Returns the verdict key and when it was recorded, or null.
+ *
+ * THE CLOCK IS ONLY ASKED ABOUT THE KINDS WHOSE ONSET IS A CLOCK, and that
+ * distinction was learned from the machine rather than reasoned out. `stopped`
+ * begins at `firstTerminalAt`, and the ordering there is not what it looks like:
+ * across the 118 closeouts on this machine that can be joined to a verdict, 16 of
+ * them — 14% — carry a verdict recorded BEFORE the watermark it judges, with a
+ * median lead of 4 minutes and a worst case of 23 hours. Both halves have plain
+ * explanations. The Navigator judges a worker's close-out REPORT, and the harness
+ * stamps the watermark when the process actually goes terminal a few minutes later;
+ * and where a session had to be stopped by hand — W0002, W0008, W0009 — the
+ * watermark lands at the stop, hours after the verdict. Timing this gate would
+ * therefore have resurrected every judged closeout on the machine into a permanent
+ * nag: measured live, it turned a pending list of 0 into one of 4 and would have
+ * grown with every worker judged from then on.
+ *
+ * It is also unnecessary there. `firstTerminalAt` is a first-write-wins watermark
+ * the harness never resets, so a worker has exactly one of them and a verdict for
+ * that worker can only ever be about that one closeout. There is no second episode
+ * to confuse it with, which is precisely what there IS for the liveness kinds: their
+ * onset is `updatedAt`, which moves every time the session does, so a verdict from
+ * this morning can predate an entirely new stop-state this afternoon. That is
+ * W0049 on 2026-08-18, and it is why those kinds are timed.
+ *
+ * `judgedAt` is optional and its absence is the OLD behaviour exactly: any verdict
+ * at all resolves. That fallback is deliberate rather than lazy — a caller holding
+ * only the set of judged names (the admiral, every test written before this) must
+ * not have its suppression silently switched off by a field it does not pass.
  */
-export function pending(jobs = [], { now = new Date(), judged = new Set(), hostWasAway = false,
-                                    workspace = null } = {}) {
-  const out = []
+export function judgedSince(job, d, judged = new Set(), judgedAt = null) {
+  const key = verdictKeys(job).find((k) => judged.has(k))
+  if (key === undefined) return null
+  const at = judgedAt?.get?.(key)
+  if (at === undefined || at === null) return { key, at: null }
+  if (!TIMED_VERDICT.has(d?.kind)) return { key, at }
+  const began = Date.parse(d?.at ?? '')
+  // An unparseable onset cannot order anything, so it falls back to resolving — the
+  // same direction as a missing `judgedAt`, and for the same reason.
+  if (Number.isNaN(began) || at >= began) return { key, at }
+  return null
+}
+
+/**
+ * Why this stop-state can never produce a new fact — or null while it still can.
+ *
+ * The two shapes, and they are different in kind rather than in degree:
+ *
+ *   DEAD is unactionable at the instant it is detected. A session that died on an
+ *   API error is not slow, it is over; there is no hour at which it becomes more
+ *   likely to come back. One report is the whole delivery.
+ *
+ *   WAITING / STALLED / WEDGED are unactionable only once the clock says so. A
+ *   prompt opened four minutes ago may well be answered, so the channel keeps
+ *   waking. Past RETIRE_MIN nothing on this machine has ever come back, and nobody
+ *   can answer a prompt inside somebody else's session anyway (obot.agent#315: the
+ *   message queue of a parked session never drains).
+ *
+ * `stopped` is absent on purpose and the omission is load-bearing. A closeout with
+ * no verdict is the backlog the whole role exists to clear, and it is actionable
+ * forever — the action is to judge it. It is bounded by WAKE_WINDOW_HOURS and by
+ * nothing else.
+ */
+export function unactionable(d, job, now = new Date()) {
+  if (!RETIRES.has(d?.kind)) return null
+  if (d.kind === 'dead') {
+    return 'a dead session\'s record is terminal — it will never produce another fact, so the death is reported once and then stands'
+  }
+  const quiet = minsSince(job?.updatedAt, now)
+  if (quiet === null || quiet < RETIRE_MIN) return null
+  return `it has not moved for ${Math.round(quiet)}m — nothing on this machine has ever resumed past ${RETIRE_MIN}m, and a prompt inside another session is one nobody else can answer`
+}
+
+/**
+ * The standing form of a detection: same reading, different ask.
+ *
+ * Its own KEY (`standing:…`) rather than the detection's, because the ask has
+ * changed and the log is the record of what was asked. A `waiting` worker was woken
+ * for three times to say "somebody resolve this"; the standing line says "nobody is
+ * going to, so stop it and judge what it produced" — a different action, and one
+ * that must reach the Navigator once even though the underlying key has been in the
+ * log for hours.
+ *
+ * `once: true` is read by `deliverable`, which suppresses on the log entry rather
+ * than on a clock. That is what makes the retirement RECORDED rather than implied by
+ * silence: `grep ' WAKE standing:' navigator-wake.log` is the permanent, timestamped
+ * list of everything this channel has ever stopped waking for, and why.
+ */
+export function standingWake(d, why) {
+  return {
+    ...d,
+    once: true,
+    key: `standing:${d.key}`,
+    why,
+    line: `${d.line} · ${why} — stop the session if it is still up, then judge what it produced against GitHub and record it with delivery-log`,
+  }
+}
+
+/**
+ * Every stop-state across the fleet, split three ways (obot.agent#157).
+ *
+ * `live` is what wakes anyone. `resolved` and `standing` are what does not, and both
+ * are RETURNED rather than dropped: a suppression that produces no output is
+ * indistinguishable from a gate that never ran, and the section prints both counts.
+ *
+ * Order matters and is not arbitrary. RESOLVED is tested first because a verdict
+ * outranks everything — a judged worker is finished business whether or not it is
+ * also permanently stuck, and reporting it as standing would ask for an action that
+ * has already been taken. STANDING is tested second, so a live detection is what is
+ * left over rather than what was selected: a new kind added to `classify` tomorrow
+ * lands in `live` and wakes somebody, which is the safe direction for this file to
+ * fail in.
+ */
+export function triage(jobs = [], { now = new Date(), judged = new Set(), judgedAt = null,
+                                    hostWasAway = false, workspace = null } = {}) {
+  const live = []
+  const resolved = []
+  const standing = []
   for (const job of jobs) {
     for (const d of classify(job, now, { hostWasAway, workspace })) {
-      if (d.kind === 'stopped' && verdictKeys(job).some((k) => judged.has(k))) continue
       // Nobody is woken to look at a state that was never real. It is counted in the
       // section instead, which is where a suppression belongs: visible, and not a
       // notification (obot.agent#176).
       if (d.kind === 'misread' || d.kind === 'settling') continue
-      out.push(d)
+      const v = judgedSince(job, d, judged, judgedAt)
+      if (v) {
+        resolved.push({ ...d, verdictKey: v.key, verdictAt: v.at })
+        continue
+      }
+      const why = unactionable(d, job, now)
+      if (why) {
+        standing.push(standingWake(d, why))
+        continue
+      }
+      live.push(d)
     }
   }
-  return out.sort((a, b) => Date.parse(b.at ?? 0) - Date.parse(a.at ?? 0))
+  const newestFirst = (a, b) => Date.parse(b.at ?? 0) - Date.parse(a.at ?? 0)
+  return { live: live.sort(newestFirst), resolved: resolved.sort(newestFirst), standing: standing.sort(newestFirst) }
+}
+
+/**
+ * The pending set — what still wakes somebody.
+ *
+ * Kept as its own name because it is what every caller and every test asks for, and
+ * because "pending" is the honest word for it: these are the stop-states with an
+ * action still outstanding that somebody can still take.
+ */
+export function pending(jobs = [], opts = {}) {
+  return triage(jobs, opts).live
 }
 
 /**
@@ -558,9 +775,31 @@ export function deliverable(detections = [], log = [], now = new Date(), { max =
     // Once-only first, and on the KEY rather than on the clock: the log is
     // append-only and holds days, so a key that appears in it at all has already
     // reached a person and never goes out again however long ago that was.
-    if (ONCE_KINDS.has(d.kind) && last.has(d.key)) {
+    const deliveredAt = last.get(d.key)
+    if (ONCE_KINDS.has(d.kind) && deliveredAt !== undefined) {
       held.push({ ...d, why: 'already delivered — a finish is an event, not a nag' })
       continue
+    }
+    // `d.once` is the same rule for a retirement (obot.agent#157) with one addition
+    // it cannot do without: the suppression is anchored to the detection's own onset.
+    //
+    // A retirement key is per JOB, and a job can be stuck, come back, and be stuck
+    // again — the second episode is genuinely new and must wake somebody, which an
+    // unanchored key would gag for the rest of the machine's life. So the hold stands
+    // only when the log entry is at or after the instant this reading began; a later
+    // onset is a later episode and goes out.
+    //
+    // It is NOT applied to ONCE_KINDS above. `delivered` means an issue closed, and
+    // its `at` is the closure time rather than a liveness clock; the rule there is
+    // deliberately "ever, however long ago" (jwildfire/obot.roadmap#257) and this is
+    // not the change that gets to reopen it. An unparseable onset falls back to the
+    // same unanchored behaviour rather than to a burst.
+    if (d.once && deliveredAt !== undefined) {
+      const began = Date.parse(d.at ?? '')
+      if (Number.isNaN(began) || deliveredAt >= began) {
+        held.push({ ...d, why: 'already delivered — it is standing, and standing is reported once' })
+        continue
+      }
     }
     const floor = REWAKE_MIN[d.kind] ?? 60
     const since = last.has(d.key) ? (now.getTime() - last.get(d.key)) / 60000 : Infinity
@@ -723,6 +962,41 @@ export function judgedWorkers(journalText = '') {
 }
 
 /**
+ * WHEN each of those workers was last judged — the other half of the same read.
+ *
+ * A Set answers "has this worker ever been judged", which is the wrong question by
+ * one word (obot.agent#157). W0049 was judged `confirmed` at 06:22 on 2026-08-18,
+ * carried on working, and was found parked at 06:55; that wake was right and it
+ * produced the `drift` verdict at 07:59. So the question is whether a verdict exists
+ * SINCE this stop-state began, and that needs a clock.
+ *
+ * LAST rather than first, deliberately. The record is append-only and corrections
+ * are written as new lines — W0009 and W0049 each carry one — so the most recent
+ * verdict is the current state of the Navigator's opinion, and it is the one that
+ * can be after a given onset.
+ *
+ * Returned as a separate Map rather than folded into `judgedWorkers`, because that
+ * function's Set is what the admiral and every existing caller reads, and a widened
+ * return type is how a suppression quietly changes shape for a caller that never
+ * asked for it.
+ */
+export function judgedAt(journalText = '') {
+  const out = new Map()
+  for (const raw of String(journalText).split('\n')) {
+    if (!raw.trim()) continue
+    try {
+      const r = JSON.parse(raw)
+      if (r.op !== 'verdict' || !r.worker) continue
+      const t = Date.parse(r.at ?? '')
+      if (Number.isNaN(t)) continue
+      const k = String(r.worker)
+      if (t > (out.get(k) ?? 0)) out.set(k, t)
+    } catch { /* a torn line is not a reason to drop the rest */ }
+  }
+  return out
+}
+
+/**
  * Is anything listening?
  *
  * The listener writes this file every twenty seconds. A stale one means the
@@ -759,17 +1033,24 @@ export function hostWasAway(prevSweptIso, now = new Date()) {
  * the third time (verdict swallowed, detail kept), and the one alarm here that must
  * never be quiet is the one saying the alarms are not being delivered.
  */
-export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true, misread = [], completions = [], completionsHeld = [], answers = [], answersHeld = [] } = {}) {
+export function wakeSection({ pending = [], delivered = [], held = [], listener = null, awayNote = null, outside = 0, jobsRead = true, misread = [], completions = [], completionsHeld = [], answers = [], answersHeld = [], resolved = [], standing = [] } = {}) {
   const lines = ['## Wake — workers that stopped, and what completed', '']
   // Every detector here reads `~/.claude/jobs`. With no ledger on the machine the
   // pending list is empty because nothing was looked at, and "clear — every worker
   // that stopped has been judged" is the strongest possible claim built on the
   // weakest possible evidence (jwildfire/obot.roadmap#223).
+  //
+  // And "clear" is refused a second way (obot.agent#157): a fleet with standing
+  // stop-states is not a clear one, it is one whose remaining items nobody can act
+  // on. Saying "clear" over the top of them is how the list would come to forget
+  // quietly, which is worse than the repeating it replaces.
   lines.push(!jobsRead
     ? 'wake: **NO READING** — there is no job ledger on this machine, so no worker\'s stop-state has been looked at. This is not a clear channel; it is an unwatched one.'
     : pending.length
       ? `wake: **${pending.length} unresolved stop-state${pending.length === 1 ? '' : 's'}** — ${delivered.length} delivered this sweep`
-      : 'wake: clear — every worker that stopped has been judged, and no worker is stalled or waiting')
+      : standing.length
+        ? `wake: nothing anyone can act on — no new stop-state this sweep; ${standing.length} standing below, each reported once already`
+        : 'wake: clear — every worker that stopped has been judged, and no worker is stalled or waiting')
   if (listener) lines.push(listener.summary)
   // What the channel carried TO A PERSON this sweep (jwildfire/obot.roadmap#257).
   // Unindented like every verdict line here, and stated even when it is none: the
@@ -798,6 +1079,28 @@ export function wakeSection({ pending = [], delivered = [], held = [], listener 
   }
   if (awayNote) lines.push(awayNote)
   if (outside) lines.push(`bounded: ${outside} unjudged closeout(s) older than ${WAKE_WINDOW_HOURS}h are not woken for — judge them from the delivery record, not from here`)
+  // The two suppressions this channel makes on its own reading, both counted and
+  // both NAMED (obot.agent#157). A wake list that quietly forgets is worse than one
+  // that repeats, so neither of these is allowed to be a silence: `resolved` names
+  // the workers whose verdicts are already in the delivery record, and `standing`
+  // gets a heading and a row each below.
+  //
+  // Unindented like every other verdict line here. The dashboard's reader treats an
+  // indented line as the detail of the line above it, and a suppression rendered as
+  // small print under somebody else's headline is the same defect as not printing it.
+  if (resolved.length) {
+    // NAMED, but bounded at six. The delivery record is where a verdict is findable
+    // and this line is not a second register of it — 31 names on one line, growing by
+    // one per worker judged, would be the wall of text this whole fix is about,
+    // arriving one line higher up the page than the list it was meant to shorten.
+    const names = [...new Set(resolved.map((d) => `${d.worker} (${d.kind})`))]
+    const shown = names.slice(0, RESOLVED_NAMES)
+    const more = names.length > shown.length ? `, +${names.length - shown.length} more` : ''
+    lines.push(`resolved: ${resolved.length} stop-state(s) carry a verdict and are not woken for — ${shown.join(', ')}${more} · every one of them is in the delivery record, which is where a verdict stays findable`)
+  }
+  if (standing.length) {
+    lines.push(`standing: ${standing.length} stop-state(s) nothing can change — reported once each and not woken for again, listed below so the channel forgets nothing`)
+  }
   // Unindented, like every line above the list: the dashboard's reader treats an
   // indented line as a detail of the one above it, and this is the line that says
   // how much of the channel's own reading was thrown away.
@@ -809,17 +1112,25 @@ export function wakeSection({ pending = [], delivered = [], held = [], listener 
     if (settling.length) parts.push(`${settling.length} held one sweep to be re-read before anyone is woken: ${settling.map((d) => d.worker).join(', ')}`)
     lines.push(`held: ${parts.join(' · ')} — obot.agent#176. Nothing was closed on any of them.`)
   }
+  const stateOf = (d) => (delivered.some((x) => x.key === d.key)
+    ? 'delivered'
+    : (held.find((x) => x.key === d.key)?.why ?? 'pending'))
   if (pending.length) {
     lines.push('', '### Pending', '')
     for (const d of pending) {
-      const state = delivered.some((x) => x.key === d.key)
-        ? 'delivered'
-        : (held.find((x) => x.key === d.key)?.why ?? 'pending')
       // No markdown emphasis on the state: the dashboard's reader strips `*` and
       // backticks but not underscores, so an italicised tail arrives on the page as
       // literal underscores. Plain text renders correctly on both surfaces.
-      lines.push(`- ${d.kind.toUpperCase()} ${d.line} · ${state}`)
+      lines.push(`- ${d.kind.toUpperCase()} ${d.line} · ${stateOf(d)}`)
     }
+  }
+  // BELOW the pending list, always, and that ordering is the whole point of the
+  // issue this closes: a genuinely new stop-state has to be the first thing in the
+  // section rather than the fourth. Standing rows are history that has not been
+  // tidied away — they are here to be findable, not to be read first.
+  if (standing.length) {
+    lines.push('', '### Standing — nothing can change these; they are not woken for', '')
+    for (const d of standing) lines.push(`- ${d.kind.toUpperCase()} ${d.line} · ${stateOf(d)}`)
   }
   return lines.join('\n') + '\n'
 }
