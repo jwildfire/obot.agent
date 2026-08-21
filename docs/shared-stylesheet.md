@@ -36,6 +36,21 @@ Two rules:
 - **Do not copy the bytes.** The string `obot shared stylesheet` is in the file header precisely so a copy is greppable.
 - **Layout is yours.** The sheet carries palette, type and components. It sets no grid, no positioning and no page chrome, so it can sit under a document and under an app shell without a fight.
 
+## Adopting: the trap that caught both of the first two adoptions
+
+The sheet carries components with generic names — `.wrap`, `.card`, `.lede`, `.facts`, `.q`, `.ok`, `.mono`, `.pre`, `.term`, `.cut`, `.mast`, `.eyebrow`, `.callout`, `.verdict`, `.tbl`, `.foot`, `.bad`, `.warn`. A page that already uses one of those names for something of its own does not replace the shared rule; it overrides the properties it happens to set and inherits the rest.
+
+Both adoptions on 2026-08-21 hit it, and one reached the deployed site:
+
+- The hub's Decision artifacts landing set `.card { display; border; border-radius; background; padding; text-decoration; color }` and inherited `margin:22px 0 0` from the sheet, which put a 22px gap on every item of a CSS grid. `.wrap` inherited `padding:0 24px`, and `.lede` inherited a `font-size`. Measured on the live page, not guessed at.
+- The config cards' `.facts` grid inherited `font:500 12.5px/1.5 var(--mono)` and `color`, which would have turned the decision strip monospace.
+
+Both were fixed by prefixing the page's own classes (`.da-card`, `.cc-facts`) rather than by patching the leaked properties one at a time — a patch is correct until the sheet gains a property.
+
+So: before adopting, check whether the page uses any of the names above for something of its own, and rename it if so. Inheriting from the sheet is the point; inheriting a component you did not ask for is not.
+
+One pre-existing case is left alone deliberately. `tools/ops-dashboard/lib/render.mjs` adopted on 2026-08-20 and its `.q` inherits `margin` and `border` from the sheet's question component. Its `.mono` inheriting `font-family` and its `.ok` inheriting `font-weight` look like the adoption working as intended. Nobody has measured the `.q` case against the rendered page; it is worth a look and it is not a change to make blind.
+
 ## The theme contract
 
 Three states, and the sheet states the palette three times:

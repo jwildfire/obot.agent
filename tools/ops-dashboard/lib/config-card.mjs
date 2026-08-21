@@ -470,7 +470,7 @@ export function renderCard(card) {
   <section class="sum">
     <h2>The short version</h2>
     ${card.front.deadline ? `<p class="clock" data-deadline="${esc(card.front.deadline)}">Deadline ${esc(card.front.deadline)} daily.</p>` : ''}
-    ${strip ? `<div class="facts">${strip}\n    </div>` : ''}
+    ${strip ? `<div class="cc-facts">${strip}\n    </div>` : ''}
     ${card.summary ? blocks(card.summary) : ''}
   </section>
 
@@ -576,8 +576,14 @@ const CARD_CSS = `
      room — he reads this to decide whether to stand up, so it must not need a
      sideways scroll at 390px. minmax(0,…) because a long value in a grid track
      whose minimum is auto pushes the whole page wider than the viewport. */
-  .facts { display:grid; grid-template-columns:1fr; gap:0.4rem 1rem; margin:0 0 0.8rem; }
-  @media (min-width:34rem) { .facts { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  /* Renamed off `.facts` on 2026-08-21. The shared sheet has a component of that
+     name — a masthead strip — and this grid overrode only its layout properties, so
+     its `font:500 12.5px/1.5 var(--mono)` and `color:var(--mute)` came through and
+     turned the decision strip monospace. Adopting a sheet with generic component
+     names means checking what the names already mean; a class this page owns should
+     not be a class the sheet owns. */
+  .cc-facts { display:grid; grid-template-columns:1fr; gap:0.4rem 1rem; margin:0 0 0.8rem; }
+  @media (min-width:34rem) { .cc-facts { grid-template-columns:repeat(2, minmax(0,1fr)); } }
   .fact { display:flex; flex-direction:column; gap:0.05rem; min-width:0; }
   .fact .lab { font-size:0.6rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--faint); }
   .fact .val { font-size:0.9rem; overflow-wrap:anywhere; }
