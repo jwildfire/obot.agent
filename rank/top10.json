@@ -41,12 +41,12 @@
       "why": "one bullet left and it is his: he has never read a config card and said whether it is better"
     },
     {
-      "issue": 266,
-      "why": "D0021's premise had already expired by the time he read it; a decision argued from a fact that stopped being true wastes the one thing only he can spend"
-    },
-    {
       "issue": 274,
       "why": "SafetyCensus rebuilt on metrics and reports, and the design needs his answer before any build starts"
+    },
+    {
+      "issue": 194,
+      "why": "he asked for a view tying agent ids to pull requests to packages, and the id half is broken - obot.agent#276 established the id never reaches the session, so every ledger write records a session instead of a worker"
     }
   ]
 }
