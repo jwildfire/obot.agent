@@ -149,7 +149,12 @@ export const TRIGGERED_QUIET_MIN = 30
  * the nine hours of 2026-08-16 are exactly what one silent delivery buys. Its
  * silencer is `ops-answers apply`, and nothing else.
  */
-export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, wedged: 60, idle: 45, delivered: 1440, unapplied: 60 }
+// `stall` is stallwatch.mjs's kind and its floor lives here rather than there, because
+// `deliverable()` reads this table and a second table is how one channel comes to have
+// two answers for the same key. Fifteen rather than sixty: an open prompt is a
+// condition nothing clears on its own, and the whole finding is that it is expensive
+// to leave standing (obot.agent#317).
+export const REWAKE_MIN = { stopped: 30, stalled: 60, waiting: 60, dead: 60, wedged: 60, idle: 45, delivered: 1440, unapplied: 60, stall: 15 }
 
 /**
  * Kinds where the event is the whole condition, so one wake is the whole delivery.
@@ -586,6 +591,12 @@ export function deliverable(detections = [], log = [], now = new Date(), { max =
  * waiting for a human from one that has gone quiet, `needs` says what it is waiting
  * for, and `updatedAt` is the only liveness clock there is.
  *
+ * What it CANNOT add is `status`, and that is worth stating here because the field is
+ * repeatedly assumed to be in these records: no job record on this machine carries the
+ * key at all. `status` lives only in the live daemon view `claude agents --json`, and it
+ * is the one field that separates a session at a real permission prompt from one a
+ * classifier read as blocked out of its own prose. stallwatch.mjs joins the two.
+ *
  * `firstTerminalAt` is the closeout watermark, written once and never revised. Where
  * the state file lacks it the timeline is read, because a job that died has a state
  * file reading `done` with a normal-looking completion note and the death survives
@@ -650,6 +661,29 @@ export function readJobs(dir, { read = readFileSync, list = readdirSync } = {}) 
       // name is a claim, a working directory is a fact, and all 110 records on this
       // machine carry one.
       cwd: s.cwd ?? null,
+      // The session id, so a reading that has only that can still find this record.
+      // `claude agents --json` carries `id` for every background session and
+      // `sessionId` for every session there is, and stallwatch.mjs joins on the first
+      // and falls back to the second (obot.agent#317).
+      sessionId: s.sessionId ?? null,
+      // Messages sent to this session that it has not read. On a session parked at a
+      // permission prompt this number never falls: the queue drains at the receiver's
+      // next turn boundary, and a prompting session's next turn boundary is the
+      // permission decision itself, so whatever is counted here dies with the session
+      // (obot.agent#315, docs/session-reachability.md). Read here rather than in a
+      // second reader of the same files, for the reason at the top of this function.
+      //
+      // It is a FLOOR and not the count, and the difference bites exactly where it
+      // matters: this file is only rewritten when the session publishes state, and a
+      // session parked at a prompt publishes nothing, so the number frozen here is
+      // whatever was true before the prompt opened — measured 2026-08-21 as 0 on a
+      // session with a message provably sitting in its queue. stallwatch.mjs takes the
+      // larger of this and what the append-only transcript says.
+      queued: s.inFlight?.queued ?? 0,
+      // Where that transcript is. The harness records every cross-session message as a
+      // `queue-operation` entry there, which is the only record of one that a frozen
+      // state file cannot understate.
+      transcript: s.linkScanPath ?? null,
       children: s.children || [],
     })
   }

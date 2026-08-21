@@ -31,12 +31,21 @@ No timeout and no auto-decline are involved. Nothing expires. The message simply
 - **Every "stop and tell the lead" instruction is unreachable exactly when it applies.** A worker that has already begun waiting cannot be reached, and cannot be told to stop waiting. The remedy for a stall has to be structural — a call site that does not prompt — rather than conversational.
 - **The sender gets `success: true` either way.** `SendMessage` returned success for all three probes, including the one whose message was never read. A lead attempting an unstick has no signal that it failed, which is why two of them believed they had tried something. If a conversational lane is kept at all, this is the part to fix first: the send is a false positive by construction.
 - **`state` cannot tell a prompting worker from a prose-blocked one.** Both A and B read `state: blocked`. Only `status` separates them — `waiting` against `idle`. Anything that acts on `blocked` alone will conflate a worker that needs a permission decision with one that has merely said it is stuck, and those need opposite responses. It is the same trap the ledger pid set: an inferred field standing in for a measured one.
-- **The signals a stall detector wants already exist**, in `~/.claude/jobs/{id}/state.json`: `status == waiting`, an `updatedAt` that stops moving the moment the prompt opens, `needs` carrying the pending approval as free text (`approve Bash: cd … && node --test …`), and `inFlight.queued` counting messages nobody will ever read. None of it requires new instrumentation.
+- **The signals a stall detector wants already exist**, and no new instrumentation is needed — but they are in two files rather than one, and one of them lies. Corrected 2026-08-21 while building the detector ([obot.agent#317](https://github.com/jwildfire/obot.agent/issues/317)); the original bullet placed all four in `state.json`:
+  - `status` is in `claude agents --json` and ONLY there. No job record on this machine carries the key — 194 were checked and the count of matches is zero. The live daemon view also carries `waitingFor`, which reads `permission prompt`. The join to the record is on `id`, which is the job directory name.
+  - `updatedAt` and `needs` are in `~/.claude/jobs/{id}/state.json`, and both behave as described: the clock stops the moment the prompt opens, and `needs` carries the pending approval as free text.
+  - `inFlight.queued` is in the record too, and it reads **nought for exactly the sessions it is about**. The file is rewritten only when the session publishes state and a parked session publishes nothing, so the number frozen there predates the prompt. Measured: a message sent to a parked probe enqueued at 21:48:27.301Z and its record still read `queued: 0` at 21:48:54 and stayed there — it flipped to `1` only when the session was stopped and its record was written one last time, which is the same moment this experiment saw it. The count that is true while it matters comes from the transcript's `queue-operation` entries after the prompt opened, which is what `tools/navigator/stallwatch.mjs` reads.
 
 ## What this does not answer
 
 Whether a queued message would drain if the prompt were later approved. Nothing in this experiment could produce a human approval, and probe A was stopped rather than answered. The three outcomes that were distinguished — delivered and acted on, queued and acted on later, never read — are distinguished for the states above and nothing more.
 
+## What was built on it
+
+`tools/navigator/stallwatch.mjs`, on the five-minute sweep ([obot.agent#317](https://github.com/jwildfire/obot.agent/issues/317)). It is keyed on `status` and never on `state`, for the reason three bullets up, and it reports a parked session at three minutes rather than the wake's fifteen — the wake's ten minutes of grace plus five of settling exist to tell a real prompt from a prose misread, and that is the distinction `status` makes for free.
+
+Both probes were reproduced live against it on 2026-08-21, independently of the run above: a parked session was reported with its age, its `needs` verbatim and one undelivered message; a `state: blocked` session whose block came from its own prose was excluded by name and answered a message in **9 ms**, against this experiment's 8.
+
 ---
 
-Measured by 👯🤖 W0112 (Claude Code, Opus 5).
+Measured by 👯🤖 W0112 (Claude Code, Opus 5), corrected and extended by 👯🤖 W0113.

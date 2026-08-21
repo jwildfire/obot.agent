@@ -119,6 +119,15 @@ import { collectRankHead, rankheadSection, readingBroken as rankheadBroken } fro
 import { hostWasAway, idleDetection, judgedWorkers, listenerState, outsideWindow,
          deliverable, misreadHolds, parseWakeLog, pending as pendingWakes, readJobs,
          readyBacklog, wakeLine, wakeSection } from './wake.mjs'
+// The other half of the same lane, and the earlier one (obot.agent#317, under hub#212).
+// The wake above asks whether a worker STOPPED; this asks whether one is stuck at a
+// permission prompt — which was measured on 2026-08-21 to be a state no message can reach
+// (docs/session-reachability.md), so the "tell the lead" instruction in every briefing is
+// unreachable exactly when it applies. It is keyed on `status` from the live daemon rather
+// than on `state`, because `state` reads `blocked` both for a session at a real prompt and
+// for one a classifier misread from its own prose, and those two need opposite responses.
+import { collectStalls, readAgents as readAgentRows, stallBroken, stallDetections,
+         stallSection } from './stallwatch.mjs'
 // And the other half of the same lane (jwildfire/obot.roadmap#257). The wake carries
 // "a worker stopped"; this makes it also carry "something completed, here is the
 // sentence", and compares GitHub's closed requirements against the record so a
@@ -189,6 +198,14 @@ const MAX_COMPLETIONS_PER_RUN = 5
 // three is what happened on 2026-08-16 and the run that has to carry all of them is
 // exactly the run this exists for.
 const MAX_ANSWERS_PER_RUN = 3
+// Parked sessions delivered per run, budgeted apart from all three above and
+// deliberately the largest (obot.agent#317). Every other kind on this channel is
+// about work that has already happened; this one is about work that has STOPPED
+// happening and is still burning a session, and a fleet with a queue of unjudged
+// closeouts must not be able to hold back the reading that says nobody can reach
+// a worker. Five is the whole fleet — there have never been more than five
+// background sessions in this workspace at once — so in practice it never truncates.
+const MAX_STALLS_PER_RUN = 5
 const MAX_EVENTS = 15
 // The snapshot keeps more history than the state file shows: the dashboard's
 // Navigator tab renders these events as a feed, and a feed that forgets everything
@@ -251,7 +268,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null, constraints = null, style = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, stalls = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null, constraints = null, style = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -316,7 +333,16 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push(landingsLine(landingsVerdict))
   for (const d of (landingsVerdict?.detail) || []) lines.push(`  ${d}`)
   lines.push('')
-  // The wake goes first — before the RC queue, before everything. The RC queue is
+  // Above even the wake (obot.agent#317). The wake's subject is a session that has
+  // STOPPED and is waiting to be judged, which costs a cycle. This one's subject is a
+  // session that is stuck NOW, cannot be reached by any message, and is burning whatever
+  // nobody notices — 67, 81 and 59 minutes in the week this was written. Between two
+  // readings the reader may only get through one, the more expensive goes first, and a
+  // reading that did not run is alarmed rather than omitted.
+  lines.push((stalls && stalls.trim())
+    ? stalls.trimEnd()
+    : '## Stalled at a prompt — sessions nobody can reach\n\n**STALL READING BROKEN** — no parked-session reading ran this sweep, so nothing here says any worker can be reached. Unknown, not clear.', '')
+  // The wake goes next — before the RC queue, before everything else. The RC queue is
   // @jwildfire's work; this is the Navigator's own, it is the section that says
   // whether anything is reaching it at all, and on a cold start it is the answer to
   // "what did I miss while I was not running".
@@ -761,7 +787,15 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [],
   const { deliver: answers, held: answersHeld } =
     deliverable(unapplied, log, now, { max: MAX_ANSWERS_PER_RUN })
 
-  for (const d of [...deliver, ...shipped, ...answers]) {
+  // And the parked sessions (obot.agent#317). Its own budget for the third time and for
+  // the same reason, and it is computed BEFORE delivery and rendered whether or not
+  // anything went out — the ordering above is the safety property of this whole function
+  // and a new reading does not get to be the exception to it.
+  const stallReading = safeStalls(jobs, now)
+  const { deliver: parked, held: parkedHeld } =
+    deliverable(stallDetections(stallReading, { now }), log, now, { max: MAX_STALLS_PER_RUN })
+
+  for (const d of [...deliver, ...shipped, ...answers, ...parked]) {
     try { appendFileSync(WAKE_LOG, `${wakeLine(d, now.toISOString())}\n`) } catch { /* the section still carries it */ }
   }
 
@@ -769,6 +803,14 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [],
     delivered: deliver,
     completions: shipped,
     answers,
+    parked,
+    parkedHeld,
+    stalls: stallReading,
+    // Its own section rather than a paragraph inside the wake's. They answer different
+    // questions — "who stopped" against "who cannot be reached" — the second is the more
+    // urgent, and a reading folded into another section is a reading that disappears the
+    // day somebody rewrites the section around it.
+    stallSection: stallSection(stallReading),
     section: wakeSection({
       pending: all,
       delivered: deliver,
@@ -785,7 +827,7 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [],
         ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
         : null,
     }),
-    note: `${all.length} pending, ${deliver.length} delivered, ${shipped.length} completion(s) sent, ${answers.length} unapplied answer(s) sent, ${misread.length} misread suppressed, channel ${listener.armed ? 'armed' : 'DOWN'}`,
+    note: `${all.length} pending, ${deliver.length} delivered, ${shipped.length} completion(s) sent, ${answers.length} unapplied answer(s) sent, ${misread.length} misread suppressed, ${stallReading.read ? `${stallReading.stalls.length} parked at a prompt (${parked.length} sent)` : 'stall reading BROKEN'}, channel ${listener.armed ? 'armed' : 'DOWN'}`,
   }
 }
 
@@ -875,6 +917,19 @@ const safeStyle = () => {
   }
 }
 const safeChecks = (repos, jobs) => { try { return runChecks(repos, jobs) } catch { return null } }
+// The parked-session reading (obot.agent#317). It shells `claude agents --json` — the only
+// place `status` exists, since no job record carries the key — with the reader's own 20s
+// timeout, and is wrapped anyway: a section that threw would take the whole state file with
+// it, and one that vanished would read as a fleet nobody is stuck in. A reading that did not
+// happen says so and is alarmed, because "no session is parked" and "nothing looked" are the
+// same silence otherwise.
+const safeStalls = (jobs, now) => {
+  try {
+    return collectStalls({ agents: readAgentRows(), jobs: jobs ?? [], ws: WS, now })
+  } catch (e) {
+    return { read: false, why: String(e.message).slice(0, 160), stalls: [], reachable: [], watched: 0 }
+  }
+}
 // `null` when the job ledger is not on this machine at all — distinct from `[]`,
 // which means it was read and no agent has run. `readJobs` (wake.mjs) flattens both
 // to an empty list, and the difference is what keeps an unread directory out of the
@@ -1219,7 +1274,7 @@ async function main() {
       // local store, they need no policy file, and an answer of his that nothing has
       // applied is exactly as undelivered when the RC sweep is broken.
       unapplied: unappliedDetections(safePending()) })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: safeStyle().section }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, stalls: wake.stallSection, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: safeStyle().section }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -1373,7 +1428,7 @@ async function main() {
   const rankhead = safeRankhead()
   const spend = safeSpend()
   const style = safeStyle()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: style.section }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, stalls: wake.stallSection, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: style.section }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
