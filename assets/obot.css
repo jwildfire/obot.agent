@@ -1,0 +1,329 @@
+/* obot shared stylesheet — the decision-artifact reading language, in one place.
+ *
+ * Requirement jwildfire/obot.agent#15. @jwildfire, 2026-08-20: "match the css of the
+ * decision docs. Prioritize creating a shared style sheet for the project."
+ *
+ * ## What this is, measured rather than remembered
+ *
+ * Seventeen of the twenty-four decision artifacts under obot.roadmap/reports/decisions
+ * carry the same eleven colours, the same three font stacks, and the same component
+ * vocabulary — byte-identical values, in seventeen separate <style> blocks. That is not
+ * a house style anybody wrote down; it is a paste that happened seventeen times. This
+ * file is that paste, written once. Every value below was read off those pages, and
+ * tools/ops-dashboard/test/shared-css.test.mjs reads them off again on every run, so
+ * the sheet cannot drift from the pages it was extracted from without going red.
+ *
+ * Two things the pages did NOT have, added here deliberately:
+ *
+ *   - A dark theme. Zero of the seventeen answer prefers-color-scheme, so every one of
+ *     them is a white page on a phone at midnight — and he reads them on a phone. The
+ *     palette below is stated three times, per the program's theme contract: the full
+ *     light palette on bare :root, the dark palette under the media query guarded so an
+ *     explicit light choice still wins, and the same dark palette again under
+ *     [data-theme="dark"] so a toggle wins in both directions. No colour is defined only
+ *     inside a theme block.
+ *   - Tokens for the colours the pages hard-coded. #f2eee3 behind inline code, #f4f8f4
+ *     behind a recommendation, rgba(47,111,168,.32) under a link: each was a literal on
+ *     ten to seventeen pages, and a literal is a colour the dark theme cannot reach.
+ *
+ * ## What this is NOT
+ *
+ * This is the *document* language — the one @jwildfire reads decisions and reports in,
+ * and now the one the operations dashboard is dressed in. The program also has an
+ * espresso *keynote* language (paper #faf6f1, espresso #271810, Instrument Serif) that
+ * dresses the public sites: obot.roadmap/site/assets/styles.css, safety.viz/site/site.css
+ * sections 1-4, open.gismo/site/src/style.css. Those are four copies of a second theme
+ * and they still have no shared home. See docs/shared-stylesheet.md.
+ *
+ * ## Consuming it
+ *
+ * Inline it. `import { OBOT_CSS } from '<obot.agent>/assets/obot-css.mjs'` and drop it in
+ * a <style> block. Decision artifacts and config cards are self-contained single files by
+ * contract, so a <link> would break them; a surface that is genuinely multi-page can link
+ * the file instead. Either way the bytes come from here — a consumer that copies them has
+ * re-made the problem, and the greppable string "obot shared stylesheet" is how you find
+ * one that did.
+ *
+ * Layout is the consumer's. This sheet carries palette, type, and the components below;
+ * it sets no grid, no fixed positioning, and no page chrome.
+ */
+
+/* ── Palette ──────────────────────────────────────────────────────────────────
+   The eleven colours, byte for byte off the seventeen pages, plus the surfaces
+   they hard-coded and a terminal ink that four of them invented. */
+:root {
+  --paper:#faf7f0;      /* page ground */
+  --panel:#fffdf9;      /* anything raised off the page: card, callout, table */
+  --ink:#17191c;        /* body text and headings */
+  --ink2:#454a51;       /* secondary text — ledes, card bodies, quotes */
+  --mute:#7b8089;       /* labels, eyebrows, footers: present but not read first */
+  --rule:#e2dccf;       /* hairline */
+  --rule2:#c8bfa9;      /* the heavier rule, for edges that mean something */
+  --blue:#2f6fa8;       /* links, and the primary accent */
+  --bronze:#a95d10;     /* attention without alarm: notes, tags, section marks */
+  --flag:#b83a2e;       /* the thing that is wrong */
+  --go:#2b7a4b;         /* the thing that is settled, passing, or recommended */
+
+  /* Surfaces the pages wrote as literals. */
+  --code-bg:#f2eee3;    /* was #f2eee3 on 13 pages */
+  --pre-bg:#f7f4ec;     /* was #f7f4ec on 6 */
+  --go-soft:#f4f8f4;    /* was #f4f8f4 behind .rec on 10 */
+  --blue-soft:#eef3f8;
+  --bronze-soft:#f8efe3;
+  --flag-soft:#f6ede5;  /* was rgba(184,58,46,.055) over --paper */
+  --link-rule:#b9cbd9;  /* was rgba(47,111,168,.32) on all 17 */
+
+  /* The console block: a real terminal, quoted. Dark in both themes on purpose —
+     it is a picture of a screen, not a surface of this page. */
+  --term-bg:#1c1e22;
+  --term-ink:#e6e3dc;
+  --term-go:#8fd39a;
+  --term-flag:#f2857a;
+  --term-bronze:#e0b070;
+
+  --display:"Avenir Next","Avenir","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+
+  --measure:72ch;       /* prose */
+  --measure-wide:76ch;  /* lists, footers */
+  --measure-lede:68ch;
+  --wrap:960px;
+
+  --radius-sm:3px;
+  --radius:6px;
+  --radius-md:5px;
+}
+
+/* The system's dark theme, unless the reader has explicitly asked for light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:#141517;
+    --panel:#1c1e21;
+    --ink:#eceae5;
+    --ink2:#bfc3c9;
+    --mute:#8b9099;
+    --rule:#2b2e33;
+    --rule2:#454a52;
+    --blue:#7fb2e3;
+    --bronze:#dd9a4d;
+    --flag:#f0857b;
+    --go:#79c495;
+    --code-bg:#24272b;
+    --pre-bg:#1e2124;
+    --go-soft:#1c2a22;
+    --blue-soft:#1a232c;
+    --bronze-soft:#2c2317;
+    --flag-soft:#2e1e1c;
+    --link-rule:#3d5266;
+    --term-bg:#0f1113;
+    --term-ink:#e6e3dc;
+    --term-go:#8fd39a;
+    --term-flag:#f2857a;
+    --term-bronze:#e0b070;
+  }
+}
+
+/* An explicit dark choice, which must win even in a light system. Same values as
+   above; the test asserts the two blocks stay identical, because a toggle that
+   renders a third theme is a theme nobody designed. */
+:root[data-theme="dark"] {
+  --paper:#141517;
+  --panel:#1c1e21;
+  --ink:#eceae5;
+  --ink2:#bfc3c9;
+  --mute:#8b9099;
+  --rule:#2b2e33;
+  --rule2:#454a52;
+  --blue:#7fb2e3;
+  --bronze:#dd9a4d;
+  --flag:#f0857b;
+  --go:#79c495;
+  --code-bg:#24272b;
+  --pre-bg:#1e2124;
+  --go-soft:#1c2a22;
+  --blue-soft:#1a232c;
+  --bronze-soft:#2c2317;
+  --flag-soft:#2e1e1c;
+  --link-rule:#3d5266;
+  --term-bg:#0f1113;
+  --term-ink:#e6e3dc;
+  --term-go:#8fd39a;
+  --term-flag:#f2857a;
+  --term-bronze:#e0b070;
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+* { box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font:16px/1.6 var(--body);
+  -webkit-font-smoothing:antialiased;
+}
+
+.wrap { max-width:var(--wrap); margin:0 auto; padding:0 24px; }
+
+a { color:var(--blue); text-decoration:none; border-bottom:1px solid var(--link-rule); }
+a:hover { border-bottom-color:var(--blue); }
+
+h1, h2, h3 { font-family:var(--display); font-weight:700; letter-spacing:-.018em; line-height:1.15; margin:0; }
+h1 { font-size:clamp(28px,4.6vw,42px); margin:14px 0 0; }
+h2 { font-size:clamp(21px,2.8vw,27px); margin-top:4px; }
+h3 { font-size:16.5px; margin:30px 0 0; }
+
+p { max-width:var(--measure); }
+ul, ol { max-width:var(--measure-wide); padding-left:22px; }
+li { margin:7px 0; }
+
+code, .mono { font-family:var(--mono); }
+code {
+  background:var(--code-bg);
+  border:1px solid var(--rule);
+  border-radius:var(--radius-sm);
+  padding:1px 5px;
+  font-size:13.5px;
+  overflow-wrap:anywhere;
+}
+
+blockquote {
+  margin:18px 0 0;
+  padding:12px 18px;
+  border-left:3px solid var(--rule2);
+  color:var(--ink2);
+  max-width:70ch;
+  font-size:15.5px;
+}
+
+section { padding-top:24px; }
+
+/* ── Masthead ─────────────────────────────────────────────────────────────── */
+.mast { padding:56px 0 26px; }
+.eyebrow {
+  font:600 11px/1 var(--mono);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--mute);
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+}
+.eyebrow .dot { width:4px; height:4px; border-radius:50%; background:var(--rule2); }
+.lede { max-width:var(--measure-lede); margin:16px 0 0; font-size:17.5px; color:var(--ink2); }
+.facts {
+  display:flex; flex-wrap:wrap; gap:6px 22px; margin:22px 0 0;
+  font:500 12.5px/1.5 var(--mono); color:var(--mute);
+}
+.facts b { color:var(--ink2); font-weight:600; }
+
+/* The section mark: a dashed rule with a word sitting on it. */
+.cut { position:relative; margin:56px 0 0; height:0; border-top:1px dashed var(--rule2); }
+.cut span {
+  position:absolute; top:-9px; left:0;
+  background:var(--paper); padding-right:14px;
+  font:600 12px/1 var(--mono); color:var(--bronze); letter-spacing:.06em;
+}
+
+/* ── Components ───────────────────────────────────────────────────────────────
+   Four boxes, and they are not interchangeable:
+     .verdict  what was concluded. One per page, near the end.
+     .callout  something the reader must not miss on the way past.
+     .card     one item in a set — an option, a finding, a piece of work.
+     .q        a question being put to the reader, with a recommendation.
+   The decisions README currently tells authors to paste a .callout and notes that
+   pages call the same box .callout, .card or .verdict. They are three components;
+   this is where the difference is written down. */
+
+.verdict {
+  margin:26px 0 0;
+  border:1px solid var(--rule2); border-left:4px solid var(--go);
+  border-radius:var(--radius-md); background:var(--panel);
+  padding:20px 22px;
+}
+.verdict .k { font:600 10.5px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--go); }
+.verdict p { margin:10px 0 0; font-size:16.5px; }
+
+.callout {
+  margin:22px 0 0;
+  border:1px solid var(--rule2); border-left:4px solid var(--flag);
+  border-radius:var(--radius); background:var(--panel);
+  padding:16px 18px; max-width:100%;
+}
+.callout .k { font:600 10.5px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--flag); }
+.callout p { margin:8px 0 0; }
+.callout.good { border-left-color:var(--go); }
+.callout.good .k { color:var(--go); }
+.callout.note { border-left-color:var(--bronze); }
+.callout.note .k { color:var(--bronze); }
+
+.card {
+  margin:22px 0 0;
+  border:1px solid var(--rule); border-radius:var(--radius);
+  background:var(--panel); padding:18px 20px;
+}
+.card .tag { font:600 10.5px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--bronze); }
+.card.block .tag { color:var(--flag); }
+.card.done .tag { color:var(--go); }
+.card h3 { margin-top:8px; }
+.card p { margin:8px 0 0; font-size:15.5px; }
+.card ul { margin:10px 0 0; font-size:15.5px; }
+
+.q {
+  margin:26px 0 0;
+  border:1px solid var(--rule2); border-radius:var(--radius);
+  background:var(--panel); padding:18px 22px;
+}
+.q .qid { font:600 12px/1 var(--mono); color:var(--bronze); letter-spacing:.06em; }
+.q h3 { margin-top:6px; }
+.q .rec { margin:12px 0 0; padding:10px 14px; border-left:3px solid var(--go); background:var(--go-soft); font-size:15px; }
+.q .rec b { color:var(--go); }
+
+/* ── Tables ───────────────────────────────────────────────────────────────────
+   .tbl is not optional. A table wide enough to be worth having is wider than a
+   phone, and without its own scroller it takes the whole page sideways. */
+.tbl { overflow-x:auto; margin:20px 0 0; -webkit-overflow-scrolling:touch; }
+table { border-collapse:collapse; width:100%; min-width:560px; font-size:14.5px; background:var(--panel); }
+th { font:600 11px/1.4 var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--mute); text-align:left; }
+th, td { border:1px solid var(--rule); padding:9px 12px; vertical-align:top; }
+td b { font-weight:650; }
+
+/* Verdict words, wherever they appear. */
+.ok { color:var(--go); font-weight:650; }
+.bad { color:var(--flag); font-weight:650; }
+.warn { color:var(--bronze); font-weight:650; }
+
+/* ── Quoted output ────────────────────────────────────────────────────────── */
+.pre {
+  margin:16px 0 0; padding:14px 16px;
+  border:1px solid var(--rule); border-radius:var(--radius-md);
+  background:var(--pre-bg); color:var(--ink2);
+  font:13px/1.6 var(--mono);
+  overflow-x:auto; white-space:pre;
+}
+.term {
+  margin:16px 0 0; padding:16px 18px;
+  border-radius:var(--radius); background:var(--term-bg); color:var(--term-ink);
+  font:13px/1.55 var(--mono);
+  overflow-x:auto; white-space:pre; max-width:100%;
+}
+.term .ok { color:var(--term-go); }
+.term .bad { color:var(--term-flag); }
+.term .warn { color:var(--term-bronze); }
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+.foot {
+  margin:64px 0 0; padding:22px 0 46px;
+  border-top:1px solid var(--rule);
+  color:var(--mute); font-size:13.5px;
+}
+.foot p { max-width:var(--measure-wide); }
+
+/* ── The phone ────────────────────────────────────────────────────────────────
+   390px is the measurement that matters; 520 is where the page starts giving up
+   horizontal padding to keep the measure. */
+@media (max-width:520px) {
+  .wrap { padding:0 16px; }
+  .verdict, .card, .q, .callout { padding:15px 15px; }
+  .facts { gap:6px 14px; font-size:12px; }
+  .mast { padding:40px 0 18px; }
+}

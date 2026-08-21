@@ -27,6 +27,7 @@ import { agentsTableHtml, TABLE_CSS } from './roster-table.mjs';
 import { UNMEASURED, nothingYet } from './absent.mjs';
 import { STORELESS, unappliedDetections } from './answers.mjs';
 import { deliveryTablesHtml, LOG_CSS } from './log-view.mjs';
+import { OBOT_CSS } from '../../../assets/obot-css.mjs';
 
 /**
  * The long form of the header's last-look phrase, for the tooltip.
@@ -506,24 +507,40 @@ const rankFinding = (f, m) => {
 const issueHref = (m, n) => (m.repo ? `https://github.com/${m.repo}/issues/${n}` : `https://github.com/jwildfire/obot.roadmap/issues/${n}`);
 
 const SHELL_CSS = `
+  /* The palette, the type and the components are the shared sheet's now
+     (assets/obot.css, jwildfire/obot.agent#15) — @jwildfire, 2026-08-20: "match the css
+     of the decision docs". What is left here is this page's own names pointed at that
+     sheet's tokens, and the layout, which the sheet deliberately does not carry.
+
+     The aliases are a bridge, not a second palette: every one of them resolves to a
+     token defined once, so the dashboard follows the theme — including the dark half
+     the decision artifacts never had. Roles, not shades, decide the mapping: the
+     accent is the link/primary blue, config is bronze, critical is the flag red, and
+     a settled thing is green. Renaming the ~200 call sites is a later, larger diff
+     with nothing to show for it. */
   :root {
-    --paper:#F4F1EC; --card:#FDFCFA; --ink:#26211B; --muted:#6F6558; --faint:#9C917F;
-    --line:#E2DACC; --accent:#B4470E; --accent-soft:#F4E2D2; --good:#2F6B4F; --good-soft:#E2EFE7;
-    --warn:#8A5A00; --warn-soft:#F6ECD8; --crit:#A8201A;
-    --sans:"Instrument Sans","Avenir Next","Segoe UI",system-ui,sans-serif;
-    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --card:var(--panel);
+    --muted:var(--ink2);
+    --faint:var(--mute);
+    --line:var(--rule);
+    --accent:var(--blue);
+    --accent-soft:var(--blue-soft);
+    --good:var(--go);
+    --good-soft:var(--go-soft);
+    --warn:var(--bronze);
+    --warn-soft:var(--bronze-soft);
+    --crit:var(--flag);
+    --sans:var(--body);
     --header:40px;
   }
-  @media (prefers-color-scheme: dark) { :root {
-    --paper:#1A1611; --card:#232019; --ink:#EAE4D8; --muted:#A69B89; --faint:#7E7462;
-    --line:#383126; --accent:#E8843C; --accent-soft:#3C2A18; --good:#7FBF9B; --good-soft:#1E2E25;
-    --warn:#D9A441; --warn-soft:#33280F; --crit:#F0736B;
-  } }
-  * { box-sizing:border-box; }
   html, body { height:100%; }
-  body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.5; }
-  a { color:var(--accent); }
-  .mono { font-family:var(--mono); font-size:0.85em; }
+  /* Denser than a document: this is a list he triages, not a page he reads. */
+  body { line-height:1.5; }
+  /* App chrome, so no reading-measure and no link underline — both belong to prose. */
+  .main p, .side p, .rail p, header.top p { max-width:none; }
+  a { border-bottom:0; }
+  a:hover { border-bottom:0; text-decoration:underline; }
+  .mono { font-size:0.85em; }
 
   /* Persistent header — the same strip on both tabs, and the thing that stays put
      across everything below it. One row at 390px: brand, tabs, counts, all short. */
@@ -559,7 +576,7 @@ const SHELL_CSS = `
      Without this the alarm box pushes the whole page sideways at 390px — measured in
      an iframe probe, 452px of scroll in a 386px viewport — and he reads this on a
      phone. */
-  .dead { border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink);
+  .dead { border:1px solid var(--crit); background:var(--warn-soft); color:var(--ink);
           border-radius:8px; padding:0.5rem 0.6rem; margin:0 0 0.7rem; font-size:0.82rem;
           overflow-wrap:anywhere; }
   .dead code { font-family:var(--mono); font-size:0.74rem; overflow-wrap:anywhere; }
@@ -726,22 +743,12 @@ const DASHBOARD_CSS = `
   .dlv-why.gone { color:var(--crit); }
   .dlv-why.unknown { color:var(--warn); }
 
-  /* The installation qualification, in the main pane. */
-  .iq { padding:0.9rem 1rem; overflow-y:auto; max-width:60rem; }
-  .iq h2 { font-size:1rem; margin:0 0 0.1rem; }
-  .iq .iq-meta { font-size:0.7rem; color:var(--faint); font-family:var(--mono); margin:0 0 0.8rem; }
-  .iq-f { margin:0 0 0.7rem; }
-  .iq-f > .lab { font-size:0.62rem; letter-spacing:0.11em; text-transform:uppercase; color:var(--faint);
-                 display:block; margin-bottom:0.1rem; }
-  .iq-f p { margin:0; font-size:0.86rem; }
-  /* Wrapped, not scrolled: on a phone a horizontal scrollbar inside a code block
-     hides the half of the command he has not discovered yet. Wrapping is purely
-     visual — the copy button hands over the exact text either way. */
-  .iq-f pre { margin:0.3rem 0 0; padding:0.45rem 0.55rem; background:var(--paper); border:1px solid var(--line);
-              border-radius:7px; font-family:var(--mono); font-size:0.74rem; overflow-x:auto;
-              white-space:pre-wrap; word-break:break-word; }
-  .iq-f .copy { font-size:0.66rem; padding:0.1rem 0.4rem; border:1px solid var(--line); border-radius:5px;
-                background:var(--card); color:var(--accent); cursor:pointer; margin-left:0.35rem; }
+  /* The proof, in the sidebar. It is the one thing on a config item that a static
+     card cannot do, so it is the one thing that did not move into the card. */
+  .config-check { border-top:1px solid var(--line); margin-top:0.7rem; padding-top:0.6rem; }
+  .config-check .lab { font-size:0.62rem; letter-spacing:0.11em; text-transform:uppercase;
+                       color:var(--faint); display:block; margin-bottom:0.25rem; }
+  .config-check .cc-what { margin:0 0 0.35rem; font-size:0.8rem; color:var(--muted); }
   .iq-check { display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap; margin-top:0.35rem; }
   .iq-check button { font-size:0.76rem; padding:0.25rem 0.6rem; border-radius:7px; border:1px solid var(--accent);
                      background:var(--accent-soft); color:var(--accent); cursor:pointer; }
@@ -751,9 +758,6 @@ const DASHBOARD_CSS = `
   .iq-res.pass, .iq-res.holds { color:var(--good); }
   .iq-res.fail, .iq-res.fails { color:var(--crit); }
   .iq-res.refused, .iq-res.unknown { color:var(--warn); }
-  .iq-warn { font-size:0.72rem; color:var(--warn); margin:0.5rem 0 0; }
-  .iq-card { margin:0 0 0.9rem; font-size:0.8rem; }
-  .iq-card a { text-decoration:none; border-bottom:1px solid var(--accent-soft); }
 
   /* Triage: one bar, in the sidebar, for whatever is selected. */
   .triage { border-top:1px solid var(--line); margin-top:0.7rem; padding-top:0.5rem; }
@@ -825,7 +829,7 @@ const agentsPage = (body, { lastLook = null, wrap = 'ag-wrap' } = {}) => `<!doct
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agents · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}${ROSTER_CSS}${TABLE_CSS}${METRICS_CSS}${LOG_CSS}
+<style>${OBOT_CSS}${SHELL_CSS}${NAV_CSS}${ROSTER_CSS}${TABLE_CSS}${METRICS_CSS}${LOG_CSS}
 </style>
 </head>
 <body>
@@ -1035,7 +1039,7 @@ export const wirePage = (feed, look, lastLook) => `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wire · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}${METRICS_CSS}${WIRE_CSS}
+<style>${OBOT_CSS}${SHELL_CSS}${NAV_CSS}${METRICS_CSS}${WIRE_CSS}
 </style>
 </head>
 <body>
@@ -1057,7 +1061,7 @@ const navigatorPage = (body) => `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Navigator · obot</title>
-<style>${SHELL_CSS}${NAV_CSS}${METRICS_CSS}
+<style>${OBOT_CSS}${SHELL_CSS}${NAV_CSS}${METRICS_CSS}
 </style>
 </head>
 <body>
@@ -1297,10 +1301,14 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
       id: it.id, title: it.title, filed: it.date, verified: it.verified,
       complete: it.complete ?? null,
       claim: it.criticalClaim ?? null,
-      fields: ['do', 'expect', 'verify', 'unblocks', 'blocks', 'source', 'why']
-        .map((f) => (it.iq[f] ? { name: f, text: it.iq[f].text, code: it.iq[f].code ?? [] } : null))
-        .filter(Boolean),
-      verify: { command: it.iq.verify?.command ?? null, expect: it.iq.verify?.expect ?? null, manual: Boolean(it.iq.verify?.manual) },
+      // The card at /config/<id> carries the item's prose now, so the page does not
+      // also ship it: the sidebar needs the check and the sentence describing it.
+      verify: {
+        command: it.iq.verify?.command ?? null,
+        expect: it.iq.verify?.expect ?? null,
+        text: it.iq.verify?.text ?? null,
+        manual: Boolean(it.iq.verify?.manual),
+      },
       check: it.check ?? null,
       // The same sentence the row shows, computed once on the server. Two surfaces
       // phrasing one reading differently is how "unknown" turns back into "failed".
@@ -1313,7 +1321,7 @@ export function render({ queue, answers = [], deliverer = null, provenance = nul
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Operations Dashboard · obot</title>
-<style>${SHELL_CSS}${DASHBOARD_CSS}
+<style>${OBOT_CSS}${SHELL_CSS}${DASHBOARD_CSS}
 </style>
 </head>
 <body>
@@ -1365,7 +1373,7 @@ ${integrityBanner(integrity)}
         </ul>
       </div>`}
       <h2>Your todo list, and where you answer it.</h2>
-      <p>Pick anything on the left: a <strong>decision</strong> opens here and you answer it in the sidebar, a <strong>release candidate</strong> opens here too — summary, release notes, what it closes, and its demo page running live, with approval still a deliberate click on GitHub — and a <strong>config</strong> item opens as an installation qualification: the exact step, what you should see, and a check that proves it. Local, never published.</p>
+      <p>The top of the list is already open. Anything else is one click on the left: a <strong>decision</strong> and a <strong>config</strong> item each open as the page they were written as, and you answer or check them in the sidebar; a <strong>release candidate</strong> opens as its summary, release notes, what it closes, and its demo page running live, with approval still a deliberate click on GitHub. Local, never published.</p>
     </div>
   </main>
 
@@ -1390,6 +1398,7 @@ ${integrityBanner(integrity)}
       : 'Your click is recorded on this machine, handed to an agent by the Navigator within five minutes, and applied to the artifact — you can watch all three below.')}</p>
       <p class="ok" id="ok" hidden></p>
     </div>
+    <div class="config-check" id="config-check" hidden></div>
     <div class="triage" id="triage" hidden>
       <div class="row">
         <button id="tri-done" hidden>Done</button>
@@ -1434,54 +1443,24 @@ ${integrityBanner(integrity)}
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 
-  const LABEL = { do: 'Do', expect: 'Expect', verify: 'Verify', unblocks: 'Unblocks', blocks: 'Blocks', source: 'Source', why: 'Why' };
-
-  // The installation qualification, rendered where he can act on it: the exact
-  // step, what he should see, and a check that leaves a real pass/fail behind.
-  // Text and code are kept apart on purpose — the code is what he pastes, and a
-  // copy button beats selecting wrapped text on a phone.
-  function renderIQ(key) {
+  // The check, in the sidebar, because the main pane now holds the card itself.
+  //
+  // What the card cannot carry: it is a static page, and only this server can run a
+  // command and write the result down. So the two halves split by what each is for —
+  // the reading is the artifact, the acting is here, beside the triage buttons that
+  // were already the sidebar's job.
+  function renderCheck(key) {
+    const box = $('config-check');
+    box.innerHTML = '';
     const iq = IQ[key];
-    $('placeholder').hidden = true;
-    document.querySelectorAll('#main iframe, #main .iq').forEach((n) => n.remove());
-    if (!iq) return;
-    const box = el('div', 'iq');
-    const h = el('h2', null, iq.title);
-    box.appendChild(h);
-    const meta = el('p', 'iq-meta', [iq.id, iq.filed ? 'filed ' + iq.filed : null, iq.verified ? 'verified ' + iq.verified : null].filter(Boolean).join(' · '));
-    box.appendChild(meta);
-    if (iq.claim) { const c = el('p', 'iq-res fail', 'critical · ' + iq.claim); box.appendChild(c); }
-    // The same item written as a page he can read rather than a form he has to
-    // decode (jwildfire/obot.roadmap#263). It opens beside this panel rather than
-    // replacing it: the fields stay until he has read one of these and said which
-    // he wants, which is a decision the requirement leaves to him.
-    if (iq.id) {
-      const p = el('p', 'iq-card');
-      const a = document.createElement('a');
-      a.href = '/config/' + encodeURIComponent(iq.id);
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.textContent = 'Read this as a page \u2192';
-      p.appendChild(a);
-      box.appendChild(p);
-    }
-
-    for (const f of iq.fields) {
-      const wrap = el('div', 'iq-f');
-      wrap.appendChild(el('span', 'lab', LABEL[f.name] || f.name));
-      if (f.text) wrap.appendChild(el('p', null, f.text));
-      if (f.code && f.code.length) {
-        const pre = el('pre', null, f.code.join('\\n'));
-        wrap.appendChild(pre);
-        wrap.appendChild(copyBtn(f.code.join('\\n')));
-      }
-      if (f.name === 'verify') wrap.appendChild(checkRow(key, iq));
-      box.appendChild(wrap);
-    }
+    if (!iq || !iq.verify) { box.hidden = true; return; }
+    box.hidden = false;
+    box.appendChild(el('span', 'lab', 'The proof'));
+    if (iq.verify.text) box.appendChild(el('p', 'cc-what', iq.verify.text));
+    box.appendChild(checkRow(key, iq));
     if (iq.complete && iq.complete.ok === false) {
-      box.appendChild(el('p', 'iq-warn', 'This entry is missing ' + iq.complete.missing.join(' and ') + ' — it was filed before the list became an installation qualification.'));
+      box.appendChild(el('p', 'iq-warn', 'This entry is missing ' + iq.complete.missing.join(' and ') + ' — it was filed before the list carried a check.'));
     }
-    $('main').appendChild(box);
   }
 
   function copyBtn(text) {
@@ -1555,7 +1534,7 @@ ${integrityBanner(integrity)}
 
     if (kind === 'decision') {
       $('placeholder').hidden = true;
-      document.querySelectorAll('#main .iq').forEach((n) => n.remove());
+      $('config-check').hidden = true;
       // The RC panel owns an iframe of its own inside #main, so it goes before the
       // artifact frame is looked up by selector.
       const panel = $('rc-panel'); if (panel) panel.remove();
@@ -1566,17 +1545,25 @@ ${integrityBanner(integrity)}
       $('side-hint').textContent = 'Adopt all is one click. Otherwise pick a verdict and say why.';
     } else if (kind === 'rc') {
       $('answer').hidden = true;
-      document.querySelectorAll('#main .iq').forEach((n) => n.remove());
+      $('config-check').hidden = true;
       renderRC(li.dataset.key);
       $('side-hint').textContent = 'Skim it here, then approve on GitHub — the RC gate stays a deliberate click.';
     } else if (kind === 'config') {
+      // The same treatment a decision gets, for the same reason: the artifact already
+      // exists at /config/<id>, and rebuilding it here only produced a second version
+      // of it that could disagree. @jwildfire, 2026-08-20: "show the html artifacts by
+      // default - just like the decisions."
       $('answer').hidden = true;
+      $('placeholder').hidden = true;
       const panel = $('rc-panel'); if (panel) panel.remove();
-      renderIQ(li.dataset.key);
+      let f = document.querySelector('#main > iframe');
+      if (!f) { f = document.createElement('iframe'); $('main').appendChild(f); }
+      f.title = 'Config artifact';
+      f.src = '/config/' + encodeURIComponent((IQ[li.dataset.key] || {}).id || li.dataset.key);
+      renderCheck(li.dataset.key);
       $('side-hint').textContent = 'Only your keyboard can apply this one. Run the check when you have.';
     } else {
       $('answer').hidden = true;
-      document.querySelectorAll('#main .iq').forEach((n) => n.remove());
       const panel = $('rc-panel'); if (panel) panel.remove();
       $('side-hint').textContent = 'Nothing to show for this one.';
     }
@@ -1684,6 +1671,16 @@ ${integrityBanner(integrity)}
   }
 
   document.querySelectorAll('.q:not(.q-off)').forEach((li) => li.addEventListener('click', () => select(li)));
+
+  // Nothing is one click in. @jwildfire, 2026-08-20: "show the html artifacts by
+  // default". The rail is already in the order he should work it, so the page opens
+  // the top of it and the placeholder is what he sees only when there is nothing to
+  // open — which is the one time it has anything to say.
+  function selectFirst() {
+    const first = document.querySelector('.rail .q:not(.q-off)');
+    if (first) select(first);
+  }
+  selectFirst();
 
   document.querySelectorAll('.verdicts button').forEach((b) => b.addEventListener('click', () => {
     state.verdict = b.dataset.v;
