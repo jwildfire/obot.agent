@@ -30,6 +30,15 @@
 //   list is local-only and this file is read by agents. Premise sentences ARE printed,
 //   because they are already published on the artifact's own public page.
 //
+// ## What gets re-checked
+//
+// The premise's own declaration, not its artifact's state. `scope="live"` is a claim
+// about the present and rides the cadence whatever state the page is in; `scope="history"`
+// is what was true when the decision was made and is measured at publish time only; a
+// premise declaring neither falls back to the artifact's state, and once that settles it
+// is UNDECLARED — not re-checked, and named with its id so that cannot read as coverage.
+// Full reasoning on `premiseClaims` below (obot.agent#302, obot.roadmap#266 call n0245).
+//
 // ## Headlines
 //
 // Spelled for `ALARM_RE` in tools/ops-dashboard/lib/navigator.mjs, which admits only
@@ -48,6 +57,12 @@ import {
   CONFIG_WORDS, FAILS, HOLDS, PREMISE_WORDS, UNKNOWN,
   agoPhrase, currency, currencyPhrase, parseClaim, readChecks, runClaim, verifyPlan,
 } from '../lib/claims.mjs';
+
+/** A claim about the present. Re-checked whatever state its artifact is in. */
+export const LIVE = 'live';
+/** True when the decision was made. Measured at publish time and deliberately not again. */
+export const HISTORY = 'history';
+const SCOPES = [LIVE, HISTORY];
 
 /** A premise that was measured and does not hold. The page is framing an expired question. */
 export const ALARM_PREMISE = '**PREMISE BROKEN**';
@@ -104,6 +119,9 @@ export function configClaims(workspace) {
 export const PREMISE_META = /<meta\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
 const IS_PREMISE = /\bname=(["'])premise\1/i;
 const CONTENT = /\bcontent=(["'])([\s\S]*?)\1/i;
+// Which kind of claim this premise is, declared by the author on the tag rather than
+// inferred from its words. One attribute, on a line they are already writing.
+const SCOPE = /\bscope=(["'])([\s\S]*?)\1/i;
 // A loose scan, used only to count what the strict one could not read. A declaration
 // that vanishes because its quoting is broken is worse than one that fails: nothing
 // says it was ever there.
@@ -116,14 +134,28 @@ const unescape = (s) => String(s)
   .replace(/&rarr;/g, '\u2192').replace(/&#8594;/g, '\u2192').replace(/&#x2192;/gi, '\u2192')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
-/** Every premise one artifact page declares, in the order it declares them. */
+/**
+ * Every premise one artifact page declares, in the order it declares them.
+ *
+ * `scope` is the author's declaration of which kind of claim this is, and it is carried
+ * through exactly as written or not at all. A value that is neither word becomes
+ * `scopeError` and leaves `scope` null — never a default, because picking one for the
+ * author is the inference this attribute exists to replace.
+ */
 export function parsePremises(html = '') {
   const out = [];
   for (const tag of String(html).match(PREMISE_META) ?? []) {
     if (!IS_PREMISE.test(tag)) continue;
     const content = CONTENT.exec(tag)?.[2];
     if (!content) continue;
-    out.push(parseClaim(unescape(content)));
+    const said = SCOPE.exec(tag)?.[2];
+    const scope = said === undefined ? null : unescape(said).trim().toLowerCase();
+    const ok = scope === null || SCOPES.includes(scope);
+    out.push({
+      ...parseClaim(unescape(content)),
+      scope: ok ? scope : null,
+      scopeError: ok ? null : unescape(said).trim(),
+    });
   }
   return out;
 }
@@ -142,12 +174,39 @@ export function malformedPremises(html = '') {
 }
 
 /**
- * The premises declared by the artifacts still awaiting him.
+ * Every premise the artifacts declare, and which of them are still worth re-checking.
  *
- * Only those, deliberately: a premise matters because it frames a question he has not
- * answered yet, and re-checking the framing of a page he already ruled on would put
- * settled work back in front of him. How many artifacts were skipped for that reason is
- * printed, because a bound nobody can see reads as full coverage.
+ * The selection belongs to the premise, not to the artifact. Until 2026-08-21 this
+ * skipped every decided or closed artifact, for a good reason — most of a settled
+ * artifact's premises are history, and re-asserting history every five minutes across
+ * eighteen artifacts is how a section stops being read.
+ *
+ * But a decided artifact can still make a claim about the present. D0020 is decided and
+ * its page says goal #73's rename and rewritten body are approved and not yet applied:
+ * true the day it was written, false the moment somebody applies them, and nothing was
+ * looking. So `decided` was never the property to key on — it is a proxy for "does this
+ * still need checking" rather than the answer (obot.roadmap#266, call n0245, found by
+ * 👯🤖 W0074 while recording D0020 rather than while looking for this).
+ *
+ * The author declares the answer instead, on the tag:
+ *
+ *   scope="live"      a claim about the present. Re-checked whatever the artifact's state.
+ *   scope="history"   true when the decision was made. Publish time only, never again.
+ *   nothing declared  the artifact's state supplies the default — re-checked while it is
+ *                     still awaiting him, UNDECLARED once it settles.
+ *
+ * Undeclared is a third state and is not history. It is not re-checked, because putting
+ * eighteen settled artifacts back on the cadence is the regression this must not cause;
+ * and it is named, with ids, on the surface, because "not re-checked" must never be able
+ * to read as "checked and fine". A scope that is neither word is refused rather than
+ * guessed: a checker deciding for itself which kind the author meant is exactly what
+ * this attribute replaces, and it would be wrong in both directions.
+ *
+ * `claims` is what the cadence runs. `all` is every premise on every page whatever its
+ * scope, which is what the publish-time gate answers for — a live premise added to a
+ * settled page has to be able to reach green at the moment it is written, and until now
+ * `checkArtifact` read through this same filter and told such an author their page
+ * declared no premise at all.
  *
  * The hub clone is read as files and never as code. Importing anything from that repo
  * arms a local-only guard that replaces `node:fs` for this whole process, and every
@@ -159,40 +218,92 @@ export function premiseClaims(hubRoot) {
   let registry;
   try { registry = JSON.parse(fs.readFileSync(regFile, 'utf8')); } catch (e) {
     const f = readFailure(e, regFile);
-    return { claims: [], read: false, absent: f.absent, why: f.why, artifacts: 0, skipped: 0, unreadable: [] };
+    return {
+      claims: [], all: [], read: false, absent: f.absent, why: f.why, artifacts: 0,
+      skipped: 0, live: 0, liveArtifacts: 0, history: 0, undeclared: [],
+      awaitingSilent: 0, declared: 0, unreadable: [],
+    };
   }
 
-  const claims = [];
+  const all = [];
   const unreadable = [];
+  const undeclared = [];
   let artifacts = 0;
   let skipped = 0;
+  let live = 0;
+  let liveArtifacts = 0;
+  let history = 0;
+  let awaitingSilent = 0;
   for (const a of registry.artifacts ?? []) {
     // `state` is generated from the page itself by the hub's own stamper, so this is
-    // the page's declaration rather than a second opinion about it.
-    if (a.state !== 'open' && a.state !== 'partially decided') { skipped += 1; continue; }
-    artifacts += 1;
+    // the page's declaration rather than a second opinion about it. It is now only the
+    // default a premise falls back to, never the decision.
+    const awaiting = a.state === 'open' || a.state === 'partially decided';
     const file = path.join(dir, a.slug, 'index.html');
     let html;
     try { html = fs.readFileSync(file, 'utf8'); } catch (e) {
       const f = readFailure(e, file);
       unreadable.push(`${a.id}: ${f.why}`);
+      if (!awaiting) skipped += 1;
       continue;
     }
     const bad = malformedPremises(html);
     if (bad) unreadable.push(`${a.id}: ${bad} premise declaration${bad === 1 ? '' : 's'} on reports/decisions/${a.slug}/index.html could not be read — check the quoting; a declaration that does not parse is never checked and says nothing`);
-    parsePremises(html).forEach((p, i) => claims.push(claimOf({
-      id: `${a.id}.p${i + 1}`,
-      kind: 'premise',
-      artifact: a.id,
-      slug: a.slug,
-      title: a.title ?? null,
-      command: p.command,
-      expect: p.expect,
-      manual: p.manual,
-      sentence: p.sentence,
-    })));
+
+    let rechecked = 0;
+    let liveHere = 0;
+    const declared = parsePremises(html);
+    declared.forEach((pr, i) => {
+      const id = `${a.id}.p${i + 1}`;
+      if (pr.scopeError) {
+        unreadable.push(`${id}: scope="${pr.scopeError}" is not a scope — write live, for a claim about the present, or history, for one that was true when the decision was made. Refused rather than guessed, so this premise is not being re-checked`);
+      }
+      // The premise decides. The artifact's state is consulted only where the author
+      // said nothing, and a scope nobody could read is not a place to fall back to a
+      // default either — it is a declaration to fix.
+      const recheck = pr.scope === LIVE ? true
+        : pr.scope === HISTORY ? false
+          : awaiting && !pr.scopeError;
+      if (recheck) rechecked += 1;
+      if (recheck && !awaiting) liveHere += 1;
+      if (pr.scope === HISTORY) history += 1;
+      if (!recheck && !awaiting && !pr.scope && !pr.scopeError) undeclared.push(id);
+      all.push(claimOf({
+        id,
+        kind: 'premise',
+        artifact: a.id,
+        slug: a.slug,
+        title: a.title ?? null,
+        scope: pr.scope,
+        recheck,
+        command: pr.command,
+        expect: pr.expect,
+        manual: pr.manual,
+        sentence: pr.sentence,
+      }));
+    });
+
+    if (rechecked) artifacts += 1;
+    else if (!awaiting) skipped += 1;
+    if (liveHere) { live += liveHere; liveArtifacts += 1; }
+    if (awaiting && !declared.length && !bad) awaitingSilent += 1;
   }
-  return { claims, read: true, absent: false, why: null, artifacts, skipped, unreadable };
+  return {
+    claims: all.filter((c) => c.recheck),
+    all,
+    read: true,
+    absent: false,
+    why: null,
+    artifacts,
+    skipped,
+    live,
+    liveArtifacts,
+    history,
+    undeclared,
+    awaitingSilent,
+    declared: all.length,
+    unreadable,
+  };
 }
 
 /**
@@ -359,11 +470,31 @@ export function currencySection({ config, premises, now = new Date() } = {}) {
               : `last changed ${sfc.at.slice(0, 16).replace('T', ' ')}, after the premise broke`}`);
     }
   }
-  lines.push(`premises: ${r.length} declared across ${premises.artifacts} artifact${premises.artifacts === 1 ? '' : 's'} still awaiting him · ${holds.length} hold · ${broken.length} expired · ${unknown.length} unchecked${fresh ? ` · newest reading ${fresh}` : ''}${premises.skipped ? ` · ${premises.skipped} decided or closed artifact${premises.skipped === 1 ? '' : 's'} not re-checked` : ''}`);
+  const s = (n) => (n === 1 ? '' : 's');
+  lines.push(`premises: ${r.length} re-checked across ${premises.artifacts} artifact${s(premises.artifacts)} · ${holds.length} hold · ${broken.length} expired · ${unknown.length} unchecked${fresh ? ` · newest reading ${fresh}` : ''}${premises.skipped ? ` · ${premises.skipped} decided or closed artifact${s(premises.skipped)} not re-checked` : ''}`);
   if (holds.length) lines.push(`  holding: ${ids(holds)}`);
   for (const u of unknown) lines.push(`  ${u.id} unchecked — ${u.why ?? 'no reading'}. Unknown, not expired.`);
+  // What the selection did, in the three answers it can give. A premise its author
+  // called history, and one nobody has classified at all, are different things — and
+  // neither of them is a premise that was checked and held. Naming the third is the
+  // whole reason the skip could be narrowed without going quiet somewhere else.
+  if (premises.live) {
+    lines.push(`  live on settled: ${premises.live} premise${s(premises.live)} on ${premises.liveArtifacts} decided or closed artifact${s(premises.liveArtifacts)} ${premises.live === 1 ? 'declares itself a claim about today and is' : 'declare themselves claims about today and are'} re-checked above. Decided is not the same as no longer claiming anything.`);
+  }
+  if (premises.history) {
+    lines.push(`  history: ${premises.history} premise${s(premises.history)} ${premises.history === 1 ? 'says it is' : 'say they are'} about what was true when the decision was made — measured at publish time and deliberately not again. Not unchecked.`);
+  }
+  if (premises.undeclared?.length) {
+    const n = premises.undeclared.length;
+    lines.push(`  no scope declared: ${n} premise${s(n)} on decided or closed artifacts ${n === 1 ? 'declares' : 'declare'} neither live nor history, so nothing knows whether ${n === 1 ? 'it is' : 'they are'} still claiming something about today. Not re-checked, and not the same as history: ${premises.undeclared.join(', ')}.`);
+  }
+  if (premises.awaitingSilent) {
+    lines.push(`  ${premises.awaitingSilent} artifact${s(premises.awaitingSilent)} still awaiting him ${premises.awaitingSilent === 1 ? 'declares' : 'declare'} no premise at all, so nothing here is watching ${premises.awaitingSilent === 1 ? 'its' : 'their'} framing.`);
+  }
   for (const u of premises.unreadable ?? []) lines.push(`  ${ALARM_READING} — ${u}`);
-  if (!r.length) lines.push('  No artifact declares a premise yet. That is a gap in the artifacts, not a clean result: nothing here has checked anything.');
+  const declared = premises.declared ?? r.length;
+  if (!declared) lines.push('  No artifact declares a premise yet. That is a gap in the artifacts, not a clean result: nothing here has checked anything.');
+  else if (!r.length) lines.push('  No premise is re-checked at all: every one declared is history or has no scope. Nothing here measured anything this pass, which is not the same as nothing being wrong.');
 
   return `${lines.join('\n')}\n`;
 }
@@ -401,11 +532,18 @@ export async function readCurrency(workspace, hubRoot, opts = {}) {
  * of writing. The gate is worth having; the declaration is the part doing the work.
  *
  * Exits non-zero when a premise does not hold, so it can gate an authoring session.
+ *
+ * It answers over EVERY premise the page declares — every scope, and whatever state the
+ * artifact is in. Until 2026-08-21 it read through the cadence's filter, so an author
+ * adding a live premise to a decided page was told the page declared no premise at all:
+ * a clean bill of health, from the gate built to stop exactly that (obot.agent#302).
+ * A history premise is evaluated here too, and only here — once, at the moment it is
+ * written, which is the whole of what "checked at publish time" means.
  */
 export async function checkArtifact(workspace, hubRoot, slug, opts = {}) {
   const all = premiseClaims(hubRoot);
   if (!all.read) return { ok: false, read: false, why: all.why, results: [] };
-  const mine = all.claims.filter((c) => c.slug === slug);
+  const mine = (all.all ?? all.claims).filter((c) => c.slug === slug);
   if (!mine.length) return { ok: true, read: true, why: `no artifact at reports/decisions/${slug}/ declares a premise`, results: [] };
   const { results } = await runClaims(workspace, mine, opts);
   return { ok: results.every((r) => r.state === HOLDS), read: true, why: null, results };
@@ -430,7 +568,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       if (!r.read) { process.stderr.write(`premises unread: ${r.why}\n`); process.exitCode = 2; return; }
       if (r.why) { process.stdout.write(`${r.why}\n`); return; }
       for (const p of r.results) {
-        process.stdout.write(`${p.state === HOLDS ? 'holds ' : p.state === FAILS ? 'BROKEN' : 'UNKNWN'}  ${p.id}  ${p.sentence ?? p.command}\n`);
+        process.stdout.write(`${p.state === HOLDS ? 'holds ' : p.state === FAILS ? 'BROKEN' : 'UNKNWN'}  ${p.id}  ${(p.scope ?? 'no scope').padEnd(8)}  ${p.sentence ?? p.command}\n`);
         if (p.state !== HOLDS) process.stdout.write(`        ${p.command} → ${p.expect || 'exit 0'}${p.why ? ` · ${p.why}` : ''}\n`);
       }
       // Non-zero on a premise that does not hold, so an authoring session cannot

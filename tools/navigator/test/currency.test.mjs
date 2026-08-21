@@ -26,9 +26,9 @@ import os from 'node:os'
 import path from 'node:path'
 
 import {
-  ALARM_PREMISE, ALARM_READING, checkArtifact, companionSurfaces, configClaims,
-  configCurrency, currencySection, malformedPremises, parsePremises, premiseClaims,
-  runClaims,
+  ALARM_PREMISE, ALARM_READING, HISTORY, LIVE, checkArtifact, companionSurfaces,
+  configClaims, configCurrency, currencySection, malformedPremises, parsePremises,
+  premiseClaims, runClaims,
 } from '../currency.mjs'
 import {
   FAILS, HOLDS, UNKNOWN, currency, currencyPhrase, judge, noAnswer, parseClaim,
@@ -507,4 +507,137 @@ test('an artifact that declares no premise is not a failure', async () => {
   const r = await checkArtifact(tmp(), root, 'quiet')
   assert.equal(r.ok, true)
   assert.match(r.why, /declares a premise/)
+})
+
+// ------------------------------------- what decides a re-check is the premise, not the
+// artifact's state (obot.agent#302, under obot.roadmap#266 call n0245)
+
+/** One premise line, with a scope when one is given. */
+const prem = (sentence, { scope = null, cmd = 'test -f /nonexistent', expect = 'the file exists' } = {}) =>
+  `<meta name="premise"${scope === null ? '' : ` scope="${scope}"`} content="${sentence} | ${cmd} → ${expect}">`
+
+test('a live premise on a decided artifact is re-checked and a history one is not', () => {
+  const root = hub([{
+    id: 'D0020',
+    slug: 'decided-one',
+    state: 'decided',
+    page: `<head>
+${prem('the rename is approved and nobody has applied it yet', { scope: 'live' })}
+${prem('the release was published before this page was written', { scope: 'history' })}
+</head>`,
+  }])
+  const r = premiseClaims(root)
+  assert.deepEqual(r.claims.map((c) => c.id), ['D0020.p1'], 'decided is not the same as no longer claiming anything')
+  assert.equal(r.claims[0].scope, LIVE)
+  assert.equal(r.live, 1)
+  assert.equal(r.liveArtifacts, 1)
+  assert.equal(r.history, 1)
+  assert.equal(r.declared, 2, 'the history one is still read — it is checked at publish time')
+  assert.equal(r.skipped, 0, 'this artifact IS re-checked, so counting it as skipped would be a lie')
+  assert.deepEqual(r.undeclared, [])
+})
+
+test('the premise decides on an open artifact too — history is history wherever it is written', () => {
+  const root = hub([{
+    id: 'D0022',
+    slug: 'open-one',
+    state: 'open',
+    page: `${prem('a claim about today')}${prem('what was true in June', { scope: 'history' })}`,
+  }])
+  const r = premiseClaims(root)
+  assert.deepEqual(r.claims.map((c) => c.id), ['D0022.p1'], 'the artifact state is only the default')
+  assert.equal(r.history, 1)
+  assert.equal(r.claims[0].scope, null, 'undeclared on an open artifact still defaults to re-checked')
+})
+
+test('an undeclared premise on a settled artifact is named, never quietly dropped', () => {
+  const root = hub([
+    { id: 'D0018', slug: 'settled', state: 'decided', page: prem('nobody said which kind this is') },
+    { id: 'D0017', slug: 'gone-quiet', state: 'closed', page: '<html></html>' },
+  ])
+  const r = premiseClaims(root)
+  assert.deepEqual(r.claims, [])
+  assert.deepEqual(r.undeclared, ['D0018.p1'])
+  assert.equal(r.history, 0, 'undeclared is not history — collapsing them is the defect')
+  assert.equal(r.skipped, 2)
+  const section = currencySection({ config: { read: true, results: [] }, premises: { ...r, results: [] } })
+  assert.match(section, /no scope declared: 1 premise[^\n]*D0018\.p1/)
+  assert.match(section, /not the same as history/)
+  // A gap in the artifacts, not a finding about the world: it must not go red, or the
+  // permanent-alarm problem the skip exists to prevent comes back one word over.
+  assert.doesNotMatch(section, ALARM_RE)
+})
+
+test('a scope nobody can read is refused rather than defaulted, and says so', () => {
+  const root = hub([{ id: 'D0022', slug: 'open-one', state: 'open', page: prem('a claim', { scope: 'alive' }) }])
+  const r = premiseClaims(root)
+  assert.deepEqual(r.claims, [], 'guessing which kind the author meant is what this replaces')
+  assert.equal(r.unreadable.length, 1)
+  assert.match(r.unreadable[0], /is not a scope/)
+  assert.match(r.unreadable[0], /Refused rather than guessed/)
+  const section = currencySection({ config: { read: true, results: [] }, premises: { ...r, results: [] } })
+  assert.match(section, ALARM_RE, 'a declaration nothing can read must be loud, not a silent default')
+})
+
+test('the three scopes render as three states in one section', () => {
+  const now = new Date()
+  const held = {
+    id: 'D0020.p1', artifact: 'D0020', slug: 'a', sentence: 'still true today', scope: LIVE,
+    command: 'test -f a', expect: '', state: HOLDS, cur: currency({ at: now.toISOString(), result: 'pass' }, { now }),
+  }
+  const section = currencySection({
+    config: { read: true, results: [] },
+    premises: {
+      read: true, results: [held], artifacts: 1, skipped: 16, live: 1, liveArtifacts: 1,
+      history: 3, undeclared: ['D0021.p2', 'D0021.p3'], awaitingSilent: 0, declared: 6, unreadable: [],
+    },
+  })
+  assert.match(section, /premises: 1 re-checked across 1 artifact/)
+  assert.match(section, /16 decided or closed artifacts not re-checked/)
+  assert.match(section, /live on settled: 1 premise on 1 decided or closed artifact/)
+  assert.match(section, /history: 3 premises[^\n]*publish time/)
+  assert.match(section, /no scope declared: 2 premises[^\n]*D0021\.p2, D0021\.p3/)
+  assert.doesNotMatch(section, ALARM_RE)
+})
+
+test('nothing re-checked is not the same as nothing declared', () => {
+  const base = { read: true, results: [], artifacts: 0, skipped: 1, live: 0, liveArtifacts: 0, history: 0, undeclared: [], awaitingSilent: 0, unreadable: [] }
+  const none = currencySection({ config: { read: true, results: [] }, premises: { ...base, declared: 0 } })
+  const some = currencySection({ config: { read: true, results: [] }, premises: { ...base, declared: 4, history: 4 } })
+  assert.match(none, /No artifact declares a premise yet/)
+  assert.match(some, /No premise is re-checked at all/)
+  assert.doesNotMatch(some, /No artifact declares a premise yet/)
+})
+
+test('the publish-time gate answers for a decided artifact, whatever the scope', async () => {
+  // The hole underneath the hole: `checkArtifact` read through the cadence's filter, so
+  // an author adding a live premise to a decided page was told the page declared none.
+  const root = hub([{
+    id: 'D0020',
+    slug: 'decided-one',
+    state: 'decided',
+    page: `${prem('a', { scope: 'live', cmd: 'git rev-parse --git-dir', expect: 'the answer' })}${prem('b', { scope: 'history', cmd: 'git rev-parse --git-dir', expect: 'the answer' })}`,
+  }])
+  const r = await checkArtifact(tmp(), root, 'decided-one')
+  assert.equal(r.why, null, 'a page that declares two premises must never be reported as declaring none')
+  assert.deepEqual(r.results.map((x) => x.scope), [LIVE, HISTORY])
+  assert.equal(r.results.length, 2, 'a history premise is measured here and only here')
+})
+
+// ------------------------------------------- a live premise that cannot break is not one
+
+test('prints compares the whole expectation, not its first word', () => {
+  // D0020's premise expects a title with spaces in it. Judged on the first word alone
+  // the rest never mattered; judged on the exit code — where a multi-word expectation
+  // used to land — a `gh ... --jq` read passes whatever it printed.
+  assert.equal(judge(0, 'Goal: increased autonomy in obot.agent', 'prints Goal: increased autonomy in obot.agent'), 'pass')
+  assert.equal(judge(0, 'Goal: the app', 'prints Goal: increased autonomy in obot.agent'), 'fail')
+  assert.equal(judge(0, 'OPEN', 'prints OPEN'), 'pass')
+  assert.equal(judge(1, '0', 'prints 0'), 'pass', 'the single-token reading is unchanged')
+})
+
+test('a multi-word prints claim whose command errored is unknown, not broken', () => {
+  assert.match(noAnswer(1, '', 'prints No destinations configured'), /nothing to compare|no output to compare/)
+  assert.match(noAnswer(1, '{"message":"Not Found"}', 'prints No destinations configured', 'gh: Not Found'), /the failure rather than the answer/)
+  assert.equal(noAnswer(1, '0', 'prints 0'), null, 'grep -c printing 0 with no stderr is still an answer')
 })
