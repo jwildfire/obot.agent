@@ -45,7 +45,18 @@ export function sweptEvents(workspace, sinceIso, { now = new Date() } = {}) {
   }
   const since = sinceIso ? Date.parse(sinceIso) : 0
   const events = (snap.events ?? []).filter((e) => e.ts && Date.parse(e.ts) > since)
-  return { unknown: false, why: null, events, snapshot: snap.snapshot ?? {}, sweptIso: snap.sweptIso }
+  // `lastGoodAt: null` is the sweep saying it has never once read GitHub on this
+  // machine — which is what the first morning of a new one looks like, and the
+  // snapshot it writes anyway is an empty object rather than an empty queue. The
+  // events and the staleness reading above are unaffected; only the RC snapshot is
+  // withheld, because that is the one thing here that becomes a printed count
+  // (jwildfire/obot.roadmap#223).
+  // An EXPLICIT null, not a missing key. The sweep always writes the field, so `null`
+  // is it stating that no pass has ever succeeded here; a snapshot from before the
+  // field existed carries no such statement and must not be reinterpreted as one.
+  const everRead = !('lastGoodAt' in snap) || snap.lastGoodAt !== null
+  return { unknown: false, why: null, events, snapshot: everRead ? (snap.snapshot ?? {}) : null,
+           snapshotRead: everRead, sweptIso: snap.sweptIso }
 }
 
 /**

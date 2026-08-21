@@ -45,11 +45,25 @@ test('an answer store that does not exist is not every answer applied', () => {
   assert.match(out, /dashboard/i, 'the notice has to say what would create it');
 });
 
-test('an answer store that exists and is empty still reads as measured', () => {
+test('a store that has ever held an answer reads as measured', () => {
+  // The rehearsal corrected the first version of this fix, which is the argument for
+  // rehearsing. Keying "has a store" on the DIRECTORY existing looked right and lasted
+  // five minutes: the Navigator sweep creates `.claude/ops/` on its first pass, so one
+  // sweep into the new machine's life an empty folder made the old sentence true again.
+  // What the distinction is about is whether an answer was ever written here, which no
+  // reader's mkdir can establish — so an empty directory is storeless, and a directory
+  // holding a record, applied or not, is a measurement.
   const ws = freshWs();
-  fs.mkdirSync(path.join(ws, '.claude', 'ops', 'answers'), { recursive: true });
-  const { out } = run('ops-answers', ['pending'], ws);
-  assert.match(out, /every answer he has recorded has been applied/);
+  const dir = path.join(ws, '.claude', 'ops', 'answers');
+  fs.mkdirSync(dir, { recursive: true });
+  const empty = run('ops-answers', ['pending'], ws);
+  assert.match(empty.out, /no answer store on this machine/i, 'a folder a reader made is not a record');
+
+  fs.writeFileSync(path.join(dir, 'a.json'), JSON.stringify({
+    id: 'a', at: '2026-08-20T10:00:00.000Z', artifact: '2026-08-20-x', verdict: 'approve', status: 'applied',
+  }));
+  const held = run('ops-answers', ['pending'], ws);
+  assert.match(held.out, /every answer he has recorded has been applied/);
 });
 
 test('the exit code does not turn an unread store into a clean one', () => {

@@ -244,6 +244,13 @@ export function readAnswers(workspace, { hub = null } = {}) {
   try { names = fs.readdirSync(answersDir(workspace)).filter((n) => n.endsWith('.json')); } catch (e) {
     return e?.code === 'ENOENT' ? storeless() : unreadable(`the answer store could not be read (${e?.code ?? e?.message})`);
   }
+  // A directory that exists and holds nothing is storeless too. The Navigator sweep
+  // creates `.claude/ops/` on its first pass, so five minutes into a new machine's life
+  // an empty folder made "every answer he has recorded has been applied" true again —
+  // about a machine where he has recorded nothing. What the mark is about is whether an
+  // answer has EVER been written here, which no reader's mkdir can establish
+  // (jwildfire/obot.roadmap#223).
+  if (!names.length) return storeless();
   return names
     .map((n) => { try { return backfill(normalize(JSON.parse(fs.readFileSync(path.join(answersDir(workspace), n), 'utf8'))), hub); } catch { return null; } })
     .filter(Boolean)
@@ -278,7 +285,11 @@ export function currentAnswers(workspace, { hub = null } = {}) {
 }
 
 /** Has this machine ever had an answer store? Absent is not the same as empty. */
-export const answersStoreExists = (workspace) => fs.existsSync(answersDir(workspace));
+// Whether an answer has ever been recorded here — not whether some reader created the
+// folder. See `readAnswers`: an empty directory is storeless.
+export const answersStoreExists = (workspace) => {
+  try { return fs.readdirSync(answersDir(workspace)).some((n) => n.endsWith('.json')); } catch { return false; }
+};
 
 /** What he has decided that no agent has applied. The bounded read. */
 export function pendingAnswers(workspace, { hub = null } = {}) {

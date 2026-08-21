@@ -14,7 +14,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { render } from '../fold.mjs';
+import { sweptEvents } from '../lib/collect.mjs';
 
 const base = {
   at: '2026-08-21T15:00:00.000Z',
@@ -34,6 +39,25 @@ test('a queue line does not print a count for a source it could not read', () =>
   assert.match(line, /\? todos/);
   assert.match(line, /\? config items/, 'the one that was already right stays right');
   assert.match(line, /4 decisions/, 'and a source that WAS read still prints its number');
+});
+
+test('a sweep that has never once read GitHub does not supply a release-candidate count', () => {
+  // The state the machine is actually in five minutes after its first boot: the sweep
+  // has run, so a snapshot file exists and is fresh, and every repository in it failed
+  // to list. `lastGoodAt: null` is the sweep saying so. Without this the fold read a
+  // present, fresh, empty snapshot as a measured queue of zero.
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'fold-fresh-'));
+  fs.mkdirSync(path.join(ws, '.claude', 'session-hub', 'cache'), { recursive: true });
+  fs.writeFileSync(path.join(ws, '.claude', 'session-hub', 'cache', 'navigator-rc.json'),
+    JSON.stringify({ lastGoodAt: null, sweptIso: new Date().toISOString(), snapshot: {}, events: [] }));
+  const swept = sweptEvents(ws, null, { now: new Date() });
+  assert.equal(swept.unknown, false, 'the file is there and fresh; that part was read');
+  assert.equal(swept.snapshotRead, false, 'but no pass ever read GitHub, so the queue is unmeasured');
+
+  fs.writeFileSync(path.join(ws, '.claude', 'session-hub', 'cache', 'navigator-rc.json'),
+    JSON.stringify({ lastGoodAt: '2026-08-21T11:00:00.000Z', sweptIso: new Date().toISOString(), snapshot: {}, events: [] }));
+  const good = sweptEvents(ws, null, { now: new Date() });
+  assert.equal(good.snapshotRead, true, 'a sweep that has read GitHub reports a real zero');
 });
 
 test('a source that was read and holds nothing still prints its zero', () => {

@@ -183,7 +183,7 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
       todos: todos.items.length,
       // Carried rather than re-derived: by the time `render` holds a number it can no
       // longer tell an unread source from an empty one.
-      rcsRead: !swept.unknown,
+      rcsRead: !swept.unknown && swept.snapshotRead !== false,
       todosRead: !todos.unknown,
       blockers: blockers.count,
       commits: git.commits.length,
@@ -193,6 +193,8 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
     unknowns: [
       ...git.failed.map((f) => `git: ${f}`),
       swept.unknown ? `sweep: ${swept.why}` : null,
+      (!swept.unknown && swept.snapshotRead === false)
+        ? 'sweep: no sweep has ever read GitHub on this machine, so the release-candidate queue is unmeasured rather than empty' : null,
       decisions.unknown ? `decisions: ${decisions.why}` : null,
       blockers.unknown ? `blockers: ${blockers.why}` : null,
       todos.unknown ? `todos: ${todos.why}` : null,
