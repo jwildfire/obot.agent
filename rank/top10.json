@@ -28,6 +28,11 @@
       "why": "he asked for it tonight and it compounds - every new surface starts by copying whichever one was nearest, and the number of surfaces he reads has roughly doubled this week"
     },
     {
+      "issue": 260,
+      "why": "agent commits still go out under his name, and no token fixes that lane",
+      "review": "prime moved this to the bench on 2026-08-20 arguing the new machine fixes it at the root; three agent commits landed under his name on the hub that same evening, so it is back"
+    },
+    {
       "issue": 252,
       "why": "nobody can write the board, so every requirement's stage is wrong and every surface built on it inherits that"
     },
@@ -38,10 +43,6 @@
     {
       "issue": 266,
       "why": "D0021's premise had already expired by the time he read it; a decision argued from a fact that stopped being true wastes the one thing only he can spend"
-    },
-    {
-      "issue": 281,
-      "why": "he asked for CRAN restoration by name and has already decided the approach; the only user-facing product work on the head"
     },
     {
       "issue": 274,
