@@ -129,9 +129,18 @@ def epoch(records):
     return None
 
 
-def claim(jp, slug, task=None, sub=None):
+def claim(jp, slug, task=None, sub=None, requirement=None):
     """Allocate one id and record it. The whole read-allocate-write is one
-    critical section - worker spawns land 2.4 seconds apart on this machine."""
+    critical section - worker spawns land 2.4 seconds apart on this machine.
+
+    `requirement` is what this worker was dispatched under, and it is the field that
+    makes a collision visible (jwildfire/obot.roadmap#267, call n0233). Three times in
+    the week it was added, two workers were sent at overlapping work and neither was
+    told the other existed; the fact was knowable at dispatch, known by exactly one
+    party - the dispatcher - and carried by nothing. It is optional because an
+    unrecorded requirement must not stop a spawn, and the sweep reports how many claims
+    carry one rather than reading silence as no overlap.
+    """
     with locked(jp):
         records = ensure_seeded(jp)
         wid = next_sub_id(WORKERS, sub, records) if sub else next_id(WORKERS, records)
@@ -139,6 +148,8 @@ def claim(jp, slug, task=None, sub=None):
                "slug": (slug or "").strip()[:60]}
         if task:
             rec["task"] = task.strip()[:200]
+        if requirement:
+            rec["requirement"] = requirement.strip()[:120]
         if sub:
             rec["parent"] = WORKERS.canon(sub)
         append_journal(jp, rec)

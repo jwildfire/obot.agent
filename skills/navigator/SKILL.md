@@ -183,6 +183,29 @@ Then append one line with
 A worker that correctly stopped to ask him something is `none`, not a failure: only a
 pull request advances a requirement, and that is right rather than a gap.
 
+**If the verdict judges the work against something HE said, cite it.** Add
+`--against K0003` from `constraint-log list`, and the citation resolves to his words, the
+date and the exception that came with them. This is not ceremony: on 2026-08-18 four
+verdicts objected that audio episodes ran over his five-minute maximum, and he had granted
+the exception in the same sentence that set the number — *"5 minutes or less is the
+guideline, though you can go over on critical items"*. All four were withdrawn by `n0220`.
+The constraints in force are rendered in this session's own state file every five minutes,
+under **Constraints in force**, so the sentence is in front of you at the moment you judge.
+
+Three rules follow from that night, and the third is the important one:
+
+- If nothing in the record backs the objection, `--against none` records that you looked
+  and found nothing. It is a first-class answer, it goes on the line, and the audit stops
+  asking.
+- If he stated a bound and nobody wrote it down, write it down —
+  `constraint-log add --kind bound --scope <what it binds> --said '<his words>'
+  --exception '<the other half, if there was one>'` — and then cite it.
+- **Do not resolve the discomfort by saying nothing.** An objection that turned out wrong
+  twice is exactly the pressure that teaches a judge to stop objecting, and a silent judge
+  and a satisfied one are indistinguishable from outside. The mechanism exists so the
+  objection can be checked, not so it can be avoided
+  ([obot.roadmap#267](https://github.com/jwildfire/obot.roadmap/issues/267)).
+
 When the roadmap did not move, fix the roadmap and never the work. Attach the issue to
 the requirement it belonged to, amend the requirement, or file the missing one.
 

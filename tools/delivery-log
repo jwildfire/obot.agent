@@ -7,10 +7,16 @@ on his behalf leaves a line, and every call that changes the plan leaves a
 permanent id he can quote when he wants it reversed.
 
     delivery-log verdict --worker W0007 --produced obot.agent#132 \
-                         --requirement hub#194 --verdict confirmed [--note '...']
+                         --requirement hub#194 --verdict confirmed [--note '...'] \
+                         [--against K0003 | --against none]
     delivery-log call --kind requirement-filed --summary 'filed hub#199'
     delivery-log render                    the ## Delivery section the sweep folds in
     delivery-log --audit                   read-only; exit 1 on a finding
+
+`--against` is the constraint the judgment was made against (jwildfire/obot.roadmap#267).
+Cite the id from `constraint-log list`, or `--against none` to say on the record that no
+bound of his backs this - a judge that cannot cite must still be able to speak, and
+declining out loud is the opposite of a judge that has quietly stopped objecting.
 
 `call` prints the bare id and nothing else, because it is consumed as
 `CID=$(delivery-log call ...)`. Everything conversational goes to stderr.
@@ -70,14 +76,14 @@ def main(argv):
     cmd, argv = argv[0], argv[1:]
 
     if cmd == "verdict":
-        f = flags(argv, {"worker", "produced", "requirement", "verdict", "note"})
+        f = flags(argv, {"worker", "produced", "requirement", "verdict", "note", "against"})
         for need in ("worker", "produced", "requirement", "verdict"):
             if not f.get(need):
                 print("delivery-log: verdict needs --%s" % need, file=sys.stderr)
                 return 1
         try:
             line = write_verdict(WS, f["worker"], f["produced"], f["requirement"],
-                                 f["verdict"], f.get("note"))
+                                 f["verdict"], f.get("note"), f.get("against"))
         except PermissionError as e:
             # The refusal is correct and is not a bug to work around. Exit 2 rather
             # than 1 so a caller can tell "you may not do this" from "you got the
@@ -85,7 +91,11 @@ def main(argv):
             print("delivery-log: %s" % e, file=sys.stderr)
             return 2
         except ValueError as e:
-            print("delivery-log: %s (got %r)" % (e, f["verdict"]), file=sys.stderr)
+            # The verdict word gets echoed back only when the verdict word is what was
+            # wrong. An unresolvable citation is a different failure and echoing "(got
+            # 'drift')" after it points the reader at the one field that was fine.
+            detail = " (got %r)" % f["verdict"] if str(e).startswith("verdict must be") else ""
+            print("delivery-log: %s%s" % (e, detail), file=sys.stderr)
             return 1
         print("delivery-log: recorded — %s" % line[2:], file=sys.stderr)
         return 0

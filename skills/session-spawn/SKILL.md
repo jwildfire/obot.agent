@@ -68,7 +68,7 @@ sends anything that leaves an artifact behind to a sibling.
 ### 0. Claim the worker's id — before the briefing, before the name
 
 ```bash
-WID=$(obot.agent/tools/worker-id claim --slug <slug> --task '<one line: what it will do>')
+WID=$(obot.agent/tools/worker-id claim --slug <slug> --task '<one line: what it will do>' --requirement hub#267)
 ```
 
 It prints the bare id (`W0042`) and nothing else, so it is safe to capture. Every worker
@@ -89,6 +89,16 @@ Navigator sweep surfaces it every five minutes. That check exists because the al
 this convention shipping and quietly never being used — would be indistinguishable from it
 working. ([obot.roadmap#194](https://github.com/jwildfire/obot.roadmap/issues/194))
 
+**`--requirement` is what makes a collision visible, and it is the dispatcher's to state.**
+Three times in the week of 2026-08-18 two workers were sent at overlapping work and neither
+was told the other existed; twice they built the same thing, and once a staged-file sweep
+put a false attribution on `main` that cannot be rewritten
+([obot.agent#289](https://github.com/jwildfire/obot.agent/issues/289)). That fact — *someone
+else is already doing this* — is knowable at dispatch and known by exactly one party. With
+the flag, the next brief names the sibling and the sweep reports two workers under one
+requirement. Without it the sweep says overlap could not be checked, which is not the same
+as none ([obot.roadmap#267](https://github.com/jwildfire/obot.roadmap/issues/267)).
+
 ### 1. Write the briefing
 
 Fill in [`templates/sibling-briefing.md`](../../templates/sibling-briefing.md):
@@ -108,6 +118,18 @@ prompt ahead of the `TASK:` line.
 
 Put the id from step 0 into every `{W-id}` placeholder — the template's
 `## Your identity` block tells the sibling what its id is and where to stamp it.
+
+**Fill `{constraints and siblings}` from the tool, not from memory** — one command, and its
+output is pasted whole:
+
+```bash
+obot.agent/tools/constraint-log brief --worker $WID --scope hub#267
+```
+
+It prints the bounds @jwildfire actually stated for that scope, each with the exception that
+arrived in the same sentence, plus who else is in flight and under what. A bound relayed
+from memory is how "5 minutes or less is the guideline" reached a judge without "though you
+can go over on critical items" and produced two wrong verdicts in one night.
 The `## Context` block is the only part composed per spawn — cwd and key paths
 already touched, findings/decisions/constraints established here, recent errors
 or state worth knowing, what has already been tried and ruled out. One line each,

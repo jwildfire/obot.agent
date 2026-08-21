@@ -1,0 +1,186 @@
+#!/usr/bin/env node
+// constraint-log — record what @jwildfire said, where the judging happens.
+//
+//   constraint-log add --kind bound --scope hub#242 --heard chat \
+//       --said '5 minutes or less is the guideline' \
+//       --exception 'though you can go over on critical items'
+//   constraint-log list [--scope hub#242]     what is in force, whole
+//   constraint-log show K0003                 one record, resolved — this is what a citation checks
+//   constraint-log brief --worker W0099 --scope hub#267
+//                                             the block a dispatcher pastes into a brief:
+//                                             constraints in force, plus who else is in flight
+//   constraint-log --audit                    read-only; exit 1 on a finding
+//
+// `add` prints the bare id on stdout, because it is consumed as
+// `KID=$(constraint-log add ...)`. Everything conversational goes to stderr.
+//
+// THE AUDIT'S EXIT CODE IS THE VERDICT — 0 when the record and the judging agree, 1 on a
+// finding — and the verdict is the FIRST line, because callers summarise by first line and
+// a check whose headline is swallowed reports nothing while looking healthy
+// (obot.agent#129).
+//
+// What is writable is deliberately three things: a bound he set, an exception he granted,
+// something he forbade. Nothing else from his conversation is a constraint, and a channel
+// that carries everything carries nothing (jwildfire/obot.roadmap#267).
+//
+// Implements jwildfire/obot.agent#293 under jwildfire/obot.roadmap#267.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { ConstraintRefused, KINDS, addConstraint, auditConstraints, findings, inForce, lastCited, readConstraints, recordPath, renderLine } from './lib/constraints.mjs';
+import { adjacentWorkers, dispatchOverlap } from './lib/dispatch.mjs';
+
+const WS = process.env.OBOT_WORKSPACE || path.join(os.homedir(), 'Documents/obot2');
+const JOBS = process.env.OBOT_JOBS_DIR || path.join(os.homedir(), '.claude/jobs');
+const DELIVERY = path.join(WS, '.claude/session-hub/delivery.md');
+
+const usage = (code = 0) => {
+  const doc = fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n')
+    .filter((l) => l.startsWith('//')).map((l) => l.replace(/^\/\/ ?/, '')).join('\n');
+  (code ? process.stderr : process.stdout).write(`${doc}\n`);
+  process.exit(code);
+};
+
+function flags(argv, allowed) {
+  const out = {}; const rest = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (!a.startsWith('--')) { rest.push(a); continue; }
+    const key = a.slice(2);
+    if (!allowed.has(key)) { process.stderr.write(`constraint-log: unknown argument: ${a}\n`); process.exit(1); }
+    if (i + 1 >= argv.length) { process.stderr.write(`constraint-log: ${a} needs a value\n`); process.exit(1); }
+    out[key] = argv[i + 1]; i += 1;
+  }
+  return { out, rest };
+}
+
+const readDelivery = () => { try { return fs.readFileSync(DELIVERY, 'utf8'); } catch { return ''; } };
+
+function main(argv) {
+  if (!argv.length || argv[0] === '-h' || argv[0] === '--help') usage(argv.length ? 0 : 1);
+  const cmd = argv[0]; const rest = argv.slice(1);
+
+  if (cmd === 'add') {
+    const { out: f } = flags(rest, new Set(['said', 'exception', 'scope', 'kind', 'heard', 'on', 'note']));
+    try {
+      const rec = addConstraint(WS, f);
+      process.stdout.write(`${rec.id}\n`);
+      process.stderr.write(`constraint-log: recorded ${rec.id} — ${renderLine(rec).slice(2)}\n`);
+      return 0;
+    } catch (e) {
+      if (e instanceof ConstraintRefused) { process.stderr.write(`constraint-log: ${e.message}\n`); return 2; }
+      throw e;
+    }
+  }
+
+  if (cmd === 'list') {
+    const { out: f } = flags(rest, new Set(['scope']));
+    const c = readConstraints(WS);
+    if (!c.read) { process.stdout.write(`constraint-log: CONSTRAINT RECORD UNREADABLE — ${c.why}\n  Unknown, not clean: nothing here says a bound of his is or is not in force.\n`); return 1; }
+    if (!c.armed) { process.stdout.write(`constraint-log: not armed — no constraint recorded yet at ${recordPath(WS)}.\n  This is not the same as "he has set no bounds"; it means nothing has been written down.\n`); return 0; }
+    const list = f.scope ? inForce(c.constraints, f.scope) : c.constraints;
+    const cited = lastCited(list, readDelivery());
+    process.stdout.write(`constraint-log: ${list.length} constraint(s)${f.scope ? ` in force for ${f.scope}` : ''}\n`);
+    for (const r of list) process.stdout.write(`${renderLine(r)} · last cited ${cited[r.id] ?? 'never'}\n`);
+    return 0;
+  }
+
+  if (cmd === 'show') {
+    const { rest: args } = flags(rest, new Set([]));
+    const id = (args[0] || '').toUpperCase();
+    const c = readConstraints(WS);
+    if (!c.read) { process.stdout.write(`constraint-log: CONSTRAINT RECORD UNREADABLE — ${c.why}\n`); return 1; }
+    const rec = c.constraints.find((r) => r.id === id);
+    if (!rec) { process.stdout.write(`constraint-log: ${id || '(no id given)'} does not resolve — there is no such constraint in the record. A citation that does not resolve is worse than none, because it reads as checked.\n`); return 1; }
+    process.stdout.write(`${renderLine(rec)}\n`);
+    return 0;
+  }
+
+  if (cmd === 'brief') {
+    const { out: f } = flags(rest, new Set(['worker', 'scope']));
+    process.stdout.write(briefBlock({ worker: f.worker, scope: f.scope }));
+    return 0;
+  }
+
+  if (cmd === '--audit') {
+    const { out: f } = flags(rest, new Set(['since']));
+    const c = readConstraints(WS);
+    const a = auditConstraints({ constraints: c.constraints, deliveryText: readDelivery(), since: f.since, read: c.read, armed: c.armed });
+    for (const line of report(a, c)) process.stdout.write(`${line}\n`);
+    return findings(a) ? 1 : 0;
+  }
+
+  process.stderr.write(`constraint-log: unknown command: ${cmd}\n`);
+  return 1;
+}
+
+/** Verdict first, then detail (obot.agent#129). */
+export function report(a, c) {
+  if (!a.read) {
+    return [`constraint-log: CONSTRAINT RECORD UNREADABLE — ${c.why}`,
+      '  No judgment was checked against anything he said. Unknown, not clean.'];
+  }
+  if (!a.armed) {
+    return [`constraint-log: not armed — no constraint recorded yet at ${recordPath(WS)}.`,
+      '  Every judgment made from here on is made against constraints nobody wrote down.'];
+  }
+  const lines = [];
+  if (!findings(a)) {
+    lines.push(`constraint-log: clean — ${a.count} constraint(s) recorded, every citation resolves, nothing judged against an unrecorded bound since ${a.epoch}`);
+    return lines;
+  }
+  const parts = [];
+  if (a.uncited.length) parts.push(`${a.uncited.length} judgment(s) against an unrecorded bound`);
+  if (a.unresolved.length) parts.push(`${a.unresolved.length} citation(s) that do not resolve`);
+  if (a.half.length) parts.push(`${a.half.length} half-recorded constraint(s)`);
+  lines.push(`constraint-log: CONSTRAINT FINDING — ${parts.join('; ')} (since ${a.epoch})`);
+  for (const u of a.uncited) lines.push(`  ${u.day} ${u.who} judged against something he said and cited nothing: ${u.rest.slice(0, 140)}`);
+  for (const u of a.unresolved) lines.push(`  ${u.day} ${u.who} cites ${u.id}, which is not in the record`);
+  for (const h of a.half) lines.push(`  ${h.id} hedges ("${(h.said.match(/\b(though|unless|except)\b/i) || [''])[0]}") with no exception recorded — half a sentence`);
+  return lines;
+}
+
+/**
+ * The block a dispatcher pastes into a worker's brief.
+ *
+ * Both halves of #267 in one place, because they are the same gap pointed two ways: the
+ * constraints this work is under, whole, and the workers already in flight beside it. The
+ * constraint a worker most needs is often not a rule but a fact — someone else is already
+ * doing this — and on 2026-08-18 that fact was knowable at dispatch, known by exactly one
+ * party, and carried by nothing.
+ */
+export function briefBlock({ worker = null, scope = null, ws = WS, jobs = JOBS, now = new Date() } = {}) {
+  const c = readConstraints(ws);
+  const out = ['## What you are working under', ''];
+  if (!c.read) {
+    out.push(`**CONSTRAINT RECORD UNREADABLE** — ${c.why}. Nothing here says what bounds this work; treat that as unknown rather than as none, and ask before you judge anything against a number.`);
+  } else if (!c.armed) {
+    out.push('- No constraint has been recorded on this machine yet. That is not the same as "there are none" — it means nothing has been written down, so ask rather than assume.');
+  } else {
+    const list = inForce(c.constraints, scope ?? '');
+    if (!list.length) out.push(`- No recorded constraint is in force for ${scope || 'this scope'}. Constraints with global scope would appear here; there are none.`);
+    for (const r of list) {
+      out.push(`- ${r.id} (${r.on}, ${r.kind}, heard: ${r.heard}): "${r.said}"${r.exception ? ` — AND, in the same breath: "${r.exception}"` : ''}`);
+    }
+    out.push('', 'These are his words, recorded whole. Where a bound carries an exception the two are one record on purpose: half of that sentence was worse than neither half.');
+  }
+  out.push('', '## Siblings working beside you', '');
+  const adj = adjacentWorkers({ ws, jobs, exclude: worker, now });
+  if (!adj.read) {
+    out.push(`**DISPATCH RECORD UNREADABLE** — ${adj.why}. Nothing here says whether anyone else is on this; assume they might be and say so in your close-out.`);
+  } else if (!adj.workers.length) {
+    out.push('- Nobody else is in flight right now.');
+  } else {
+    for (const w of adj.workers) {
+      const overlap = w.requirements.some((r) => String(scope || '').toLowerCase() === r.toLowerCase());
+      out.push(`- ${w.id} ${w.slug}${w.task ? ` — ${w.task}` : ''}${w.requirements.length ? ` · under ${w.requirements.join(', ')}` : ' · no requirement recorded'}${overlap ? ' · **OVERLAPS YOURS**' : ''}`);
+    }
+    out.push('', 'If one of these overlaps your brief, say so before you build the same thing twice. Two workers wrote a correction on the same page on 2026-08-18 and it cost one of them an hour.');
+  }
+  return `${out.join('\n')}\n`;
+}
+
+export { dispatchOverlap };
+
+if (import.meta.url === `file://${process.argv[1]}`) process.exit(main(process.argv.slice(2)));

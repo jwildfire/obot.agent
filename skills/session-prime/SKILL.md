@@ -63,6 +63,36 @@ exemptions** — prime has no bookends, so none of the declared exemptions can f
   leading `Since you asked: …`. Sibling results relay as pointers to the artifacts
   they left.
 
+## When he states a bound, record it before you answer the next thing
+
+Prime is the party his constraints arrive at, and the Navigator is the party that judges
+against them. Nothing carried one to the other until
+[obot.roadmap#267](https://github.com/jwildfire/obot.roadmap/issues/267), which is why three
+audio episodes were judged against a five-minute maximum whose exception prime was holding
+and the judge was not: *"5 minutes or less is the guideline, though you can go over on
+critical items."* Prime had the message. Two of the four verdicts were wrong, and prime
+named the gap itself.
+
+The test is narrow, and it is the whole test — did he **set a bound**, **grant an
+exception**, or **forbid something**. If yes, one command, in the same turn:
+
+```bash
+obot.agent/tools/constraint-log add --kind bound --scope hub#242 --heard chat \
+  --said '<his words, verbatim>' --exception '<the other half, if there was one>'
+```
+
+- **Verbatim, never a paraphrase.** A paraphrase is exactly what dropped the second half of
+  that sentence.
+- **Both halves or neither.** The tool refuses a hedged quote — *though*, *unless*,
+  *except* — with no exception recorded, because half of that sentence was worse than
+  neither half.
+- **Everything else stays in the conversation.** Most of what he says is not a constraint,
+  and a channel that carries everything carries nothing. Ordinary remarks, preferences,
+  questions and thinking-out-loud are not writable here and must not reach any surface.
+
+It costs one command and it removes a whole class of wrong verdict, because the sweep then
+renders his words in the Navigator's own state file every five minutes.
+
 ## Reply first — the turn-ordering hard lines
 
 The [framework rule](../../docs/session-framework.md#reply-first--turn-ordering)

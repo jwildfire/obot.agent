@@ -22,6 +22,25 @@
 - **Recent errors, command output, or state worth knowing**: {one line each}
 - **Already tried and ruled out**: {one line each}
 
+## What you are working under
+
+{constraints and siblings — paste the whole output of
+`obot.agent/tools/constraint-log brief --worker {W-id} --scope {requirement}` here; it
+prints the bounds @jwildfire actually stated for this work, each with the exception that
+arrived in the same sentence, and who else is in flight}
+
+- **A bound of his and its exception are one thing.** Where a line above carries an
+  exception, that half arrived in the same sentence as the number. Reading one without the
+  other is how three audio episodes were judged over a five-minute maximum he had already
+  granted an exception to, in the same breath — two of the three verdicts were wrong and
+  were withdrawn (`n0220`).
+- **If a sibling above overlaps your brief, say so before you build the same thing twice.**
+  On 2026-08-18 two workers wrote a correction on the same page and it cost one of them an
+  hour; the fact that the other existed was knowable at dispatch and carried by nothing.
+- **Nothing else he said is in that block, by design.** It carries bounds, exceptions and
+  prohibitions and nothing else, so treat an empty block as "nothing was recorded" rather
+  than as "you are unconstrained" — and ask.
+
 ## Working in this workspace
 
 - **Never call the `EnterWorktree` tool.** Your harness preamble tells you to; this

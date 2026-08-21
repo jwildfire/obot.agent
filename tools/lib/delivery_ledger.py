@@ -30,6 +30,7 @@ from no decision, which is the risk inside the delegation grant.
 
 import datetime
 import pathlib
+import subprocess
 
 from id_ledger import (Scheme, actor, allocated, append_journal, locked, next_id,
                        now, read_journal, sha)
@@ -112,14 +113,61 @@ def append_line(ws, line):
         fh.write(line + "\n")
 
 
-def verdict_line(worker, produced, requirement, verdict, note=None):
+def verdict_line(worker, produced, requirement, verdict, note=None, against=None):
     bits = ["- %s %s %s" % (_today(), _hhmm(), worker),
             "produced %s" % produced,
             "requirement %s" % requirement,
             verdict]
+    if against:
+        bits.append("against %s" % against)
     if note:
         bits.append(note)
     return " · ".join(bits)
+
+
+# ---- the constraint a verdict was made against -------------------------------
+#
+# jwildfire/obot.roadmap#267: "A judgment can cite the constraint it was made against,
+# and that citation is checkable."
+#
+# The failure is measured. On 2026-08-18 four verdicts objected that audio episodes ran
+# over @jwildfire's five-minute maximum, and he had granted the exception in the same
+# sentence that set the number - "5 minutes or less is the guideline, though you can go
+# over on critical items". All four were withdrawn (n0220). A verdict that could cite
+# where its number came from would have resolved to the whole sentence.
+#
+# `--against none` is a first-class answer and not a loophole. A judge that cannot find a
+# constraint behind its own objection has to be able to say so and still record the
+# judgment; the alternative is a tool that refuses, and a judge with no way to speak is
+# the silent judge this requirement is most afraid of. It is written on the line, so
+# declining to cite is visible rather than indistinguishable from agreement.
+
+CONSTRAINT_TOOL = pathlib.Path(__file__).resolve().parent.parent / "constraint-log"
+
+
+def resolve_constraint(cid):
+    """True when the id is in the record, False when it is definitely not, None when
+    this machine could not check.
+
+    The split matters. A definite negative is refused here, because a citation that does
+    not resolve reads as checked and is worse than none. An INDEFINITE answer - the tool
+    missing, node absent, anything else - is not refused: the Navigator sweep re-checks
+    every citation in this record every five minutes, so nothing is lost by writing it,
+    and blocking the delivery record on an unrelated broken tool would cost the one
+    thing this file exists to keep.
+    """
+    if not str(cid).lower().startswith("k"):
+        return None
+    try:
+        r = subprocess.run([str(CONSTRAINT_TOOL), "show", str(cid)],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode == 0:
+        return True
+    if "does not resolve" in (r.stdout or "") + (r.stderr or ""):
+        return False
+    return None
 
 
 def named_actor(who):
@@ -145,7 +193,7 @@ def call_line(cid, kind, summary, who=None):
         _today(), _hhmm(), cid, cid, ("%s · " % stamp) if stamp else "", kind, summary)
 
 
-def write_verdict(ws, worker, produced, requirement, verdict, note=None):
+def write_verdict(ws, worker, produced, requirement, verdict, note=None, against=None):
     who = actor()
     if is_call_only(who):
         raise PermissionError(
@@ -154,13 +202,24 @@ def write_verdict(ws, worker, produced, requirement, verdict, note=None):
             "Report the closeout gap instead; do not route around this." % who)
     if verdict not in VERDICTS:
         raise ValueError("verdict must be one of %s" % ", ".join(VERDICTS))
-    line = verdict_line(worker, produced, requirement, verdict, note)
+    cite = str(against).strip() if against else None
+    if cite and cite.lower() != "none":
+        cite = cite.upper()
+        if resolve_constraint(cite) is False:
+            raise ValueError(
+                "%s does not resolve - there is no such constraint in the record. A "
+                "citation that does not resolve is worse than none, because it reads as "
+                "checked. `constraint-log list` shows what is recorded; record the bound "
+                "he set before citing it" % cite)
+    elif cite:
+        cite = "none"
+    line = verdict_line(worker, produced, requirement, verdict, note, cite)
     jp = journal_for(ws)
     with locked(jp):
         append_journal(jp, {"op": "verdict", "at": now(), "actor": actor(),
                             "worker": worker, "produced": produced,
                             "requirement": requirement, "verdict": verdict,
-                            "note": note or "", "digest": sha(line)})
+                            "against": cite or "", "note": note or "", "digest": sha(line)})
         append_line(ws, line)
     return line
 
