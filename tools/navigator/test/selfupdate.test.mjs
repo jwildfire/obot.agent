@@ -19,6 +19,7 @@ import {
   CONSUMER_POLICY, QUIET_MS, buildStamp, fastForward, lastLookMs, planFastForward,
   planRestart, previousProcess, readCheckout, recordPath, renderSelfUpdate, restartDashboard,
   restartEnv, selfUpdate, takeLock, checkoutPosition, brokenRecord, DEFERRAL_LIMIT,
+  planCloneUpdate, updateClones,
 } from '../selfupdate.mjs'
 import { ALARM_RE, parseNavigatorState } from '../../ops-dashboard/lib/navigator.mjs'
 
@@ -865,4 +866,266 @@ test('every headline this section can emit matches the alarm vocabulary it is ch
   const headlines = emitted.match(/\*\*[^*]+\*\*/g) ?? []
   assert.ok(headlines.length >= 3, 'the three failure headlines must all be reachable')
   for (const h of headlines) assert.match(h, ALARM_RE, `${h} would render as ordinary grey text`)
+})
+
+// ── Every clone, not just this one (obot.agent#291) ───────────────────────────────
+//
+// The updater above covers one directory. This machine reads from seven, and on
+// 2026-08-21 five of them were out of step with their remote — `gsm.safety`, a
+// clinical repository, by thirty-one commits. The guards below are the same seven the
+// fast-forward already had; what is new is the two ways a clone can be ineligible that
+// a single-repo updater never had to have an opinion about, and they are both here:
+// no remote whose URL names the repository, and a branch holding no role in policy.
+
+/** An origin whose PATH names `owner/repo`, so `resolveRemote` can recognise it. */
+const namedPair = (owner, name) => {
+  const root = tmp()
+  const origin = path.join(root, owner, name)
+  fs.mkdirSync(origin, { recursive: true })
+  git(origin, 'init', '-q', '-b', 'main')
+  fs.writeFileSync(path.join(origin, 'code.txt'), 'one\n')
+  git(origin, 'add', '-A')
+  git(origin, 'commit', '-qm', 'one')
+  const ws = path.join(root, 'ws')
+  fs.mkdirSync(ws, { recursive: true })
+  const clone = path.join(ws, name)
+  git(root, 'clone', '-q', origin, clone)
+  return { root, origin, ws, clone }
+}
+
+test('a clone with no remote naming the repository is refused — every position would be measured against a different one', () => {
+  const r = planCloneUpdate({ repo: 'jwildfire/gsm.safety', remote: null, branch: 'main', roles: ['dev', 'main'] })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'no-remote')
+  assert.match(r.reason, /jwildfire\/gsm\.safety/)
+})
+
+test('a detached clone is refused — there is no branch to fast-forward', () => {
+  const r = planCloneUpdate({ repo: 'jwildfire/safety.viz', remote: 'origin', branch: null, roles: ['dev', 'main'] })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'detached')
+})
+
+test('a clone parked on a feature branch is left alone — that is somebody working in the main checkout', () => {
+  const r = planCloneUpdate({ repo: 'jwildfire/safety.viz', remote: 'origin', branch: 'w0098-allclones', roles: ['dev', 'main'] })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'not-a-role-branch')
+  assert.match(r.reason, /w0098-allclones/)
+})
+
+test('both roles are eligible — a clone sitting on its release branch is still the code an agent reads', () => {
+  // safety.viz and gsm.safety are both checked out on `main`, their release branch,
+  // and it is what every agent on this machine reads out of those directories.
+  assert.equal(planCloneUpdate({ repo: 'r', remote: 'origin', branch: 'main', roles: ['dev', 'main'] }).ok, true)
+  assert.equal(planCloneUpdate({ repo: 'r', remote: 'origin', branch: 'dev', roles: ['dev', 'main'] }).ok, true)
+})
+
+test('the fast-forward can be told the refs are already fresh, and then never touches the network', () => {
+  // The hourly fetch is localwatch's, made once for the machine. A second one per repo
+  // per sweep is the cadence cost the TTL exists to avoid.
+  const { origin, clone } = pair()
+  advance(origin, 'two\n')
+  git(clone, 'fetch', '-q', 'origin')
+  // The remote is now unreachable. With `fetch: false` that must not matter: the ref
+  // is already on disk, and a fast-forward onto a ref you already have is free.
+  git(clone, 'remote', 'set-url', 'origin', path.join(tmp(), 'gone'))
+  const r = fastForward(clone, { fetch: false })
+  assert.equal(r.ok, true)
+  assert.equal(r.moved, true, 'a ref already on disk is enough to move the checkout')
+  assert.equal(fs.readFileSync(path.join(clone, 'code.txt'), 'utf8'), 'two\n')
+})
+
+test('a clone is fast-forwarded against the remote whose URL names it, never whichever one is called origin', () => {
+  // This is open.gismo exactly: `origin` is Gilead-BioStats/open.gismo, which is
+  // upstream and a different repository, and the one we work in is called `fork`.
+  const { origin, ws, clone } = namedPair('jwildfire', 'open.gismo')
+  const upstream = path.join(tmp(), 'Gilead-BioStats', 'open.gismo')
+  fs.mkdirSync(upstream, { recursive: true })
+  git(path.dirname(upstream), 'clone', '-q', origin, upstream)
+  git(clone, 'remote', 'rename', 'origin', 'fork')
+  git(clone, 'remote', 'add', 'origin', upstream)
+  advance(origin, 'two\n')
+  git(clone, 'fetch', '-q', '--all')
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/open.gismo', integration: 'main', release: [] }],
+    cacheFile: path.join(ws, 'cache.json'), fetchDue: false,
+  })
+  assert.equal(out.clones.length, 1)
+  assert.equal(out.clones[0].remote, 'fork', 'the remote is chosen by URL, not by name')
+  assert.equal(out.clones[0].moved, true)
+  assert.equal(fs.readFileSync(path.join(clone, 'code.txt'), 'utf8'), 'two\n')
+})
+
+test('a dirty clone refuses and says so — nothing is stashed, reset or forced', () => {
+  const { origin, ws, clone } = namedPair('jwildfire', 'gsm.safety')
+  advance(origin, 'two\n')
+  git(clone, 'fetch', '-q', 'origin')
+  fs.writeFileSync(path.join(clone, 'code.txt'), 'a worker was here\n')
+  const head = git(clone, 'rev-parse', 'HEAD')
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/gsm.safety', integration: 'main', release: [] }],
+    cacheFile: path.join(ws, 'cache.json'), fetchDue: false,
+  })
+  assert.equal(out.clones[0].ok, false)
+  assert.equal(out.clones[0].code, 'dirty')
+  assert.equal(git(clone, 'rev-parse', 'HEAD'), head, 'HEAD must not move')
+  assert.equal(fs.readFileSync(path.join(clone, 'code.txt'), 'utf8'), 'a worker was here\n')
+})
+
+test('a diverged clone is reported rather than resolved — behind is safe to fast-forward and diverged is not', () => {
+  const { origin, ws, clone } = namedPair('jwildfire', 'open.csr')
+  advance(origin, 'two\n')
+  fs.writeFileSync(path.join(clone, 'mine.txt'), 'a local commit nobody pushed\n')
+  git(clone, 'add', '-A')
+  git(clone, 'commit', '-qm', 'mine')
+  git(clone, 'fetch', '-q', 'origin')
+  const head = git(clone, 'rev-parse', 'HEAD')
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/open.csr', integration: 'main', release: [] }],
+    cacheFile: path.join(ws, 'cache.json'), fetchDue: false,
+  })
+  assert.equal(out.clones[0].code, 'diverged')
+  assert.equal(git(clone, 'rev-parse', 'HEAD'), head)
+})
+
+test('a refused clone still reports how far behind it actually is — the update and the position are separate facts', () => {
+  const { origin, ws, clone } = namedPair('jwildfire', 'gsm.safety')
+  advance(origin, 'two\n')
+  advance(origin, 'three\n')
+  git(clone, 'fetch', '-q', 'origin')
+  fs.writeFileSync(path.join(clone, 'code.txt'), 'a worker was here\n')
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/gsm.safety', integration: 'main', release: [] }],
+    cacheFile: path.join(ws, 'cache.json'), fetchDue: false,
+  })
+  assert.equal(out.clones[0].ok, false)
+  assert.equal(out.clones[0].position.known, true)
+  assert.equal(out.clones[0].position.behind, 2, 'a refused update on a stale clone must not read as current')
+})
+
+test('this checkout is not updated twice — the self-update already fetches it every sweep', () => {
+  const { ws } = namedPair('jwildfire', 'obot.agent')
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/obot.agent', integration: 'main', release: [] }],
+    cacheFile: path.join(ws, 'cache.json'), fetchDue: false,
+  })
+  assert.equal(out.clones.length, 0, 'obot.agent is the checkout the section above already reports')
+})
+
+test('a repo with no clone on this machine is absent, not a finding — it was never cloned here', () => {
+  const { ws } = namedPair('jwildfire', 'safety.viz')
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/safety.viz', integration: 'main', release: [] },
+                { repo: 'jwildfire/never.cloned', integration: 'main', release: [] }],
+    cacheFile: path.join(ws, 'cache.json'), fetchDue: false,
+  })
+  assert.equal(out.clones.length, 1)
+  assert.equal(out.clones[0].repo, 'jwildfire/safety.viz')
+})
+
+test('a refused clone reaches the page as an alarm, not as grey text', () => {
+  const out = renderSelfUpdate({
+    sweep: { short: 'abc1234', startedAt: new Date().toISOString() },
+    checkout: { ok: true, code: 'current', branch: 'main', to: 'deadbeef', reason: 'already at `origin/main`' },
+    consumers: [],
+    clones: { fetchedAt: new Date().toISOString(), fetchFailed: [], clones: [
+      { repo: 'jwildfire/gsm.safety', branch: 'main', remote: 'jwildfire', ok: false, code: 'dirty', moved: false,
+        reason: 'the checkout has uncommitted changes to 1 tracked file — nothing is stashed, reset or forced',
+        position: { known: true, behind: 31, ahead: 0, short: '41a0a9c', branch: 'main', ref: 'jwildfire/main' } },
+    ] },
+  })
+  const { sections } = parseNavigatorState(`## swept: now · cadence 5m\n\n${out}`)
+  const sec = sections.find((s) => s.title.startsWith('Checkout'))
+  assert.ok(sec, 'the section must parse')
+  assert.ok(sec.items.some((i) => i.alarm), 'a clone that could not be updated must fire an alarm')
+  const headlines = out.match(/\*\*[^*]+\*\*/g) ?? []
+  assert.ok(headlines.length >= 1)
+  for (const h of headlines) assert.match(h, ALARM_RE, `${h} would render as ordinary grey text`)
+})
+
+test('a healthy clone run still prints — a check that only speaks on failure looks like one that stopped', () => {
+  const out = renderSelfUpdate({
+    sweep: { short: 'abc1234', startedAt: new Date().toISOString() },
+    checkout: { ok: true, code: 'current', branch: 'main', to: 'deadbeef', reason: 'already at `origin/main`' },
+    consumers: [],
+    clones: { fetchedAt: new Date().toISOString(), fetchFailed: [], clones: [
+      { repo: 'jwildfire/safety.viz', branch: 'main', remote: 'origin', ok: true, code: 'current', moved: false,
+        reason: 'already at `origin/main`', position: { known: true, behind: 0, ahead: 0, short: 'abc1234', branch: 'main', ref: 'origin/main' } },
+    ] },
+  })
+  assert.match(out, /clones:/)
+  assert.doesNotMatch(out, /FAILED|BROKEN|GAP/, 'nothing was wrong, so nothing may render as an alarm')
+})
+
+test('a fetch that failed travels with the freshness — a stale position behind a fresh-looking stamp is the defect itself', () => {
+  const out = renderSelfUpdate({
+    sweep: { short: 'abc1234', startedAt: new Date().toISOString() },
+    checkout: { ok: true, code: 'current', branch: 'main', to: 'deadbeef', reason: 'already at `origin/main`' },
+    consumers: [],
+    clones: { fetchedAt: new Date().toISOString(), fetchFailed: ['gsm.safety'], clones: [] },
+  })
+  assert.match(out, /gsm\.safety/)
+  const headlines = out.match(/\*\*[^*]+\*\*/g) ?? []
+  for (const h of headlines) assert.match(h, ALARM_RE)
+})
+
+test('a clone the update did NOT refuse but that is still behind is a finding too', () => {
+  // The failure this guards is a widening that reports what it attempted instead of
+  // what is true: counting refusals alone would print "6 of 6 level" over a machine
+  // six commits stale, which is this requirement's own defect in a new place.
+  const out = renderSelfUpdate({
+    sweep: { short: 'abc1234', startedAt: new Date().toISOString() },
+    checkout: { ok: true, code: 'current', branch: 'main', to: 'deadbeef', reason: 'already at `origin/main`' },
+    consumers: [],
+    clones: { fetchedAt: new Date().toISOString(), fetchFailed: [], clones: [
+      { repo: 'jwildfire/gsm.safety', branch: 'main', remote: 'jwildfire', ok: true, code: 'current', moved: false,
+        reason: 'already at `jwildfire/main`',
+        position: { known: true, behind: 31, ahead: 0, short: '41a0a9c', branch: 'main', ref: 'jwildfire/main' } },
+    ] },
+  })
+  assert.match(out, /\*\*CLONE UPDATE FAILED\*\*/)
+  assert.match(out, /still 31 behind/, 'the label must name the position, not the code word that claimed success')
+})
+
+test('the fetch runs on the shared cadence and its cache file, never on one invented here', () => {
+  // Two cadences would double the sweep's wall clock for the same refs and give the
+  // page two ages to reconcile. This asserts the call goes out with the caller's cache
+  // file and the roots that have a resolvable remote, and nothing else.
+  const { ws } = namedPair('jwildfire', 'safety.viz')
+  const calls = []
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/safety.viz', integration: 'main', release: [] }],
+    cacheFile: '/the/shared/cache.json',
+    fetch: (targets, opts) => { calls.push({ targets: targets.map((t) => t.repo), opts }); return { fetchedAt: '2026-08-21T01:00:00.000Z', failed: [] } },
+    ff: () => ({ ok: true, code: 'current', moved: false, reason: 'already level' }),
+  })
+  assert.equal(calls.length, 1, 'exactly one fetch call for the machine')
+  assert.deepEqual(calls[0].targets, ['jwildfire/safety.viz'])
+  assert.equal(calls[0].opts.cacheFile, '/the/shared/cache.json')
+  assert.equal(out.fetchedAt, '2026-08-21T01:00:00.000Z')
+})
+
+test('a caller that has already fetched does not fetch again, and still reports the shared freshness', () => {
+  const { ws } = namedPair('jwildfire', 'safety.viz')
+  const cacheFile = path.join(ws, 'cache.json')
+  fs.writeFileSync(cacheFile, JSON.stringify({ fetchedAt: '2026-08-21T01:49:28.537Z', failed: ['open.csr'] }))
+  let called = 0
+  const out = updateClones({
+    ws, repos: [{ repo: 'jwildfire/safety.viz', integration: 'main', release: [] }],
+    cacheFile, fetchDue: false, fetch: () => { called += 1; return { fetchedAt: null, failed: [] } },
+  })
+  assert.equal(called, 0, 'fetchDue: false must never reach the network')
+  assert.equal(out.fetchedAt, '2026-08-21T01:49:28.537Z', 'and the age still comes off the shared cache')
+  assert.deepEqual(out.fetchFailed, ['open.csr'], 'a failed fetch travels with the freshness')
+})
+
+test('an unreadable policy is reported, never read as a machine with no other clones', () => {
+  const out = renderSelfUpdate({
+    sweep: { short: 'abc1234', startedAt: new Date().toISOString() },
+    checkout: { ok: true, code: 'current', branch: 'main', to: 'deadbeef', reason: 'already at `origin/main`' },
+    consumers: [],
+    clones: { fetchedAt: null, fetchFailed: [], clones: [], policyError: 'Unexpected token } in JSON' },
+  })
+  assert.match(out, /\*\*CLONE UPDATE BROKEN\*\*/)
+  for (const h of out.match(/\*\*[^*]+\*\*/g) ?? []) assert.match(h, ALARM_RE)
 })

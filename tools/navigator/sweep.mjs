@@ -73,7 +73,7 @@ import { brokenRecord, buildStamp, renderSelfUpdate, selfUpdate } from './selfup
 // all found by accident. This is the reading that runs on the machine where that work
 // actually is; see localwatch.mjs for why age plus absence of an owner, and never
 // dirtiness, is what makes it a finding.
-import { collectLocal, localSection } from './localwatch.mjs'
+import { collectLocal, fetchCachePath, localSection } from './localwatch.mjs'
 // Claim currency (obot.agent#262, under jwildfire/obot.roadmap#264 and #266). Every
 // other reading above asks whether something happened; this asks whether something
 // still written down is still true. Two artifact classes state claims — the config
@@ -129,7 +129,10 @@ const METRICS_TTL_MIN = 60
 // connection, for a number that moves by two or three commits an hour. It refreshes on
 // the same hourly ride the metrics take, and every position it prints says how old it
 // is, which is the call selfupdate.mjs already made for the checkout position.
-const LOCALWATCH_CACHE = join(WS, '.claude/session-hub/cache/localwatch.json')
+// ONE spelling, since obot.agent#291 put the clone update on the same cadence: it runs
+// first, fetches when the TTL is up, and this section reads the same cache as already
+// refreshed. Two literals for one path is how that becomes two fetches an hour.
+const LOCALWATCH_CACHE = fetchCachePath(WS)
 // How far back the commit-identity scan reads. Bounded so a five-minute job never walks
 // months of history; the backlog it does not cover is the 301 commits already counted on
 // obot.agent#241, which is a cleanup question rather than a detection one.
