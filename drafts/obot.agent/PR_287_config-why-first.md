@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-20 -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/287 on 2026-08-20 -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0, Assignee: @me -->
 
 Every config item now opens by telling you what problem it fixes, instead of what to type.
