@@ -331,11 +331,27 @@ command); three other things were wrong, largest first:
 2. **No expected result, no verification.** Success and silent failure looked identical.
 3. **No pass/fail record.** Checking the box was self-attestation.
 
-So an entry now carries `Do` / `Expect` / `Verify` / `Unblocks` / `Source`, plus optional
+So an entry now carries `Why it matters` / `Do` / `Expect` / `Verify` / `Source`, plus optional
 `Blocks` and `Why` (last — an item that opens with the mechanism was written agent-to-agent).
-The first three are **required and enforced at capture** by [`tools/blocker-log`](../blocker-log),
+All four of the first are **required and enforced at capture** by [`tools/blocker-log`](../blocker-log),
 not patched up here: a tool that accepts a free-text one-liner gets fed free-text one-liners
 forever. Clicking a config row opens the whole thing in the main area with copy buttons.
+
+`Why it matters` leads, on the entry and on the card (@jwildfire, 2026-08-20: *"I need the
+config summarys to start with the 'why'. Why is this important? What problem does it fix?"*).
+Note what it is **not**: it is not `Why`. Promoting the mechanism would satisfy the letter of
+that sentence and produce exactly the agent-to-agent opening `Why` is kept last to prevent.
+It is the *stakes* — which is what `Unblocks` already meant, so this is that field renamed and
+promoted rather than a second one beside it; `Unblocks:` is still read as an alias so no
+existing entry stops parsing, and the card's old "Buys you" strip item was dropped because it
+was the same fact written twice, in the copy that could drift.
+
+It is checked, not merely required. A line opening with a command, a path, a flag, a bare
+mechanism (*"the classifier …"*), or a *"because …"*, or too short to be a sentence, is refused
+with **every** reason at once — one at a time turns a rewrite into a guessing game. What the
+bar cannot catch is a grammatical sentence that says nothing; a pass is not a compliment. Use
+`blocker-log --set-matters cNNNN --text '…'` to write or replace one on an existing entry —
+journaled and under the same lock, because a hand edit moves the digest the ledger watches.
 
 **The verify contract: the command must exit 0 exactly when the item is done.** `Check` runs
 it and appends a real result to `.claude/ops/checks.jsonl`. Only single, read-only commands

@@ -688,7 +688,8 @@ test('the capture tool claims the next id, and never an id the file has seen', (
 
   // The IQ flags, not the retired `--fix` one-liner: since obot.agent#122 the
   // capture tool refuses an entry with no expected result and no proof.
-  const iq = (n) => ['--do', `type ${n}`, '--expect', `${n} is there`,
+  const iq = (n) => ['--matters', 'Work he cares about stops until somebody types this one thing.',
+    '--do', `type ${n}`, '--expect', `${n} is there`,
     '--verify', `test -f /tmp/${n} -> the file exists`, '--source', 'a session'];
   file('first item', ...iq('one'));
   file('second item', ...iq('two'));

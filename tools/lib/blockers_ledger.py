@@ -181,3 +181,89 @@ def report(a, md_path):
         out.append("blocker-log: note - %s changed outside this tool since it was last written (%s, by %s)."
                    % (md_path, a["last_write"], a["last_actor"] or "?"))
     return out
+
+
+# ---------------------------------------------------------------------------
+# The `Why it matters` bar.
+#
+# @jwildfire, 2026-08-20: "I need the config summarys to start with the 'why'.
+# Why is this important? What problem does it fix?"
+#
+# The trap in that sentence is that this list already HAS a `Why`, and his own
+# earlier rule puts it last because "an item that opens with the mechanism is
+# written agent-to-agent, and he triages by skimming". Moving `Why` to the top
+# would satisfy the words and produce exactly the opening that rule exists to
+# stop. What he is asking for is the STAKES, which is what `Unblocks` already
+# held. So `Unblocks` was renamed and promoted, and this is its bar.
+#
+# Enforced HERE, at capture, for the same reason `--do`/`--expect`/`--verify`
+# are: a tool that accepts a free-text one-liner gets fed free-text one-liners
+# forever. Every finding is a whole sentence, because it is printed back at the
+# agent that wrote the bad line and "invalid" teaches nobody what to write.
+#
+# What this bar CANNOT do is notice a grammatical sentence that says nothing.
+# It catches the shapes that are mechanically wrong — a command, a path, a flag,
+# a fragment — and the rest is the writer's judgement. Said plainly here so
+# nobody reads a pass as a compliment.
+
+MATTERS_MIN_CHARS = 40
+MATTERS_MIN_WORDS = 8
+
+# First words that mean the line opened with a mechanism rather than a stake.
+_COMMANDISH = (
+    "gh", "git", "cd", "bash", "sh", "sudo", "npm", "npx", "node", "python3",
+    "grep", "sed", "awk", "cat", "ls", "test", "open", "run", "curl", "brew",
+    "launchctl", "pmset", "osascript", "security", "defaults", "rm", "mkdir",
+    "printf", "echo", "chmod", "ssh", "scp", "rsync", "docker", "make",
+)
+
+
+def matters_findings(text):
+    """Every reason this line is not a statement of why the item matters.
+
+    An empty list means it clears the bar.
+    """
+    s = str(text or "").strip()
+    if not s:
+        return ["there is no 'why it matters' at all - an item that cannot say what "
+                "problem it fixes is a candidate for not being needed, which is the "
+                "other half of what this field is for"]
+
+    out = []
+    words = [w for w in re.split(r"\s+", s) if w]
+    first = re.sub(r"[^A-Za-z0-9_.-]", "", words[0]).lower() if words else ""
+
+    if len(s) < MATTERS_MIN_CHARS:
+        out.append("it is %d characters; saying what breaks if he never does it takes "
+                   "at least %d" % (len(s), MATTERS_MIN_CHARS))
+    if len(words) < MATTERS_MIN_WORDS:
+        out.append("it is %d words; the bar is %d, because fewer is a label rather "
+                   "than a reason" % (len(words), MATTERS_MIN_WORDS))
+    if re.match(r"^\s*[`~./]|^\s*/Users/|^\s*\$", s):
+        out.append("it opens with a path or a shell token; the stakes are what the "
+                   "path is FOR, and the path itself belongs in --do")
+    if first in _COMMANDISH:
+        out.append("it opens with the command \"%s\"; that is --do. This field is what "
+                   "goes on being broken until that command is run" % words[0])
+    if re.match(r"^\s*--?[A-Za-z]", s):
+        out.append("it opens with a flag; a flag is a mechanism and he triages by "
+                   "skimming this line first")
+    if re.match(r"^\s*(because|since|so that|due to|the reason)\b", s, re.I):
+        out.append("it opens with \"%s\", which answers \"why does this happen\" rather "
+                   "than \"why does this matter\" - the first is --why, and it goes "
+                   "last" % words[0].rstrip(","))
+    mech = re.match(r"^\s*(?:the\s+)?(hook|guard|classifier|allowlist|wrapper|parser|"
+                    r"launchd|plist|token|regex|script|daemon|sweep)\b", s, re.I)
+    if mech:
+        out.append("it opens by naming a mechanism (\"%s\"); that is the shape of a "
+                   "line written agent-to-agent, and this one is written to him"
+                   % mech.group(1))
+    return out
+
+
+def check_matters(text):
+    """Return the line unchanged, or raise with every reason it failed."""
+    f = matters_findings(text)
+    if f:
+        raise ValueError("that is not a statement of why it matters: " + "; ".join(f))
+    return str(text).strip()

@@ -27,6 +27,7 @@ const item = (over = {}) => ({
   verified: '2026-08-18', criticalClaim: 'blocks jwildfire/obot.agent#197',
   blocks: [{ ref: 'jwildfire/obot.agent#197', verified: true }],
   iq: {
+    matters: { text: 'Every hub edit an agent makes goes through a shell workaround that mangles content.', code: [] },
     do: { text: 'run it', code: [] },
     verify: { text: 'gh pr view 198 --json state', command: 'gh pr view 198 --json state', expect: 'prints MERGED', manual: false },
     source: { text: 'https://github.com/jwildfire/obot.agent/pull/198', code: [] },
@@ -164,10 +165,22 @@ test('the summary stands alone: it renders before any step and needs none of the
   const steps = page.indexOf('Step by step');
   assert.ok(sum > 0 && steps > sum, 'the summary must come first');
   const summarySection = page.slice(sum, steps);
-  for (const fact of ['Takes', 'Do it now?', 'Buys you', 'If you skip it']) {
+  for (const fact of ['Takes', 'Do it now?', 'If you skip it']) {
     assert.ok(summarySection.includes(fact), `the decision strip is missing ${fact}`);
   }
   assert.ok(summarySection.includes('One paragraph he can decide from'));
+  // "Buys you" left the strip when `Why it matters` took the top of the page. It was
+  // the prose file's own answer to the same question, and the entry's is enforced at
+  // capture and cannot drift — keeping both would have been two records of one fact.
+  assert.equal(summarySection.includes('Buys you'), false);
+});
+
+test('the why leads the page, above everything he would read to decide', () => {
+  const page = html();
+  const why = page.indexOf('Why this matters');
+  assert.ok(why > 0, 'the page opens with why it matters');
+  assert.ok(why < page.indexOf('The short version'), 'and it comes before the summary');
+  assert.match(page, /class="lead">Every hub edit/);
 });
 
 test('the summary travels as plain text, because loopback does not reach a phone', () => {

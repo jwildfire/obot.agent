@@ -58,6 +58,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { LABEL as FIELD_LABEL } from './iq.mjs';
 import { opsDir, SENTINEL } from './store.mjs';
 
 /** Where cards live. Inside the ops store, which is local-only by construction. */
@@ -133,7 +134,12 @@ export function writeCard(workspace, id, content, ext = 'html') {
 // ------------------------------------------------------------------ the prose
 
 /** Front-matter keys the card renders. Anything else is reported, never guessed at. */
-export const FRONT_KEYS = ['time', 'now', 'unblocks', 'skip', 'deadline'];
+// `unblocks` left this strip on 2026-08-20. It was the prose file's own answer to
+// "what does this buy me", and the entry's `Why it matters` now says the same thing
+// forty pixels higher up — from the list, where the capture bar enforces it. Two
+// fields meaning the same thing drift apart, and the hand-written one is the one
+// that goes stale. What is left in the strip is genuinely different information.
+export const FRONT_KEYS = ['time', 'now', 'skip', 'deadline'];
 
 /**
  * Section headings, and what each is called when someone writes it the way it reads
@@ -263,6 +269,11 @@ export function buildCard(item, source = { missing: true }, { generatedAt = new 
     blocks: (item?.blocks ?? []).filter((b) => b?.verified).map((b) => b.ref),
     sourceUrl: firstUrl(iq.source?.text),
     front: source.front ?? {},
+    // Read from the list, never from the prose file. @jwildfire, 2026-08-20: "I need
+    // the config summarys to start with the 'why'." Sourcing it here rather than from
+    // `cNNNN.md` means the line he reads first is the one the capture bar enforced,
+    // and it cannot drift from the entry the way hand-written prose can.
+    matters: iq.matters?.text ?? '',
     summary: source.summary ?? '',
     background: source.background ?? '',
     steps: source.steps ?? [],
@@ -285,7 +296,7 @@ export function buildCard(item, source = { missing: true }, { generatedAt = new 
 
 const firstUrl = (s) => String(s ?? '').match(/https?:\/\/\S+/)?.[0] ?? null;
 
-const rawFields = (iq) => ['do', 'expect', 'verify', 'unblocks', 'source', 'blocks', 'why']
+const rawFields = (iq) => ['matters', 'do', 'expect', 'verify', 'source', 'blocks', 'why']
   .map((f) => (iq[f] ? { name: f, text: iq[f].text ?? '', code: iq[f].code ?? [] } : null))
   .filter(Boolean);
 
@@ -306,7 +317,10 @@ export function summaryText(card) {
   // reads this without a dashboard beside it, so a card that says how old its claim is
   // only on screen has said it to the wrong reader.
   if (card.currency?.phrase) out.push(card.currency.phrase, '');
-  const body = card.summary || card.raw?.find((f) => f.name === 'do')?.text || '';
+  // The phone lane leads with the same line the page does. He reads this one in a
+  // notification, where there is even less room to bury the reason.
+  const body = [card.matters, card.summary || card.raw?.find((f) => f.name === 'do')?.text || '']
+    .filter(Boolean).join('\n\n');
   if (body) out.push(plain(body));
   return `${out.join('\n').trim()}\n`;
 }
@@ -422,7 +436,7 @@ export function renderCard(card) {
 
   const rawBody = card.raw ? `
     <div class="note">No card has been written for ${esc(card.id ?? 'this item')} yet, so this is the list entry as it stands. It is the same text the dashboard panel shows.</div>
-    ${card.raw.map((f) => `<div class="rawf"><span class="lab">${esc(f.name)}</span><div>${blocks([f.text, ...f.code.map((c) => `    ${c}`)].join('\n'))}</div></div>`).join('')}` : '';
+    ${card.raw.map((f) => `<div class="rawf"><span class="lab">${esc(FIELD_LABEL[f.name] ?? f.name)}</span><div>${blocks([f.text, ...f.code.map((c) => `    ${c}`)].join('\n'))}</div></div>`).join('')}` : '';
 
   return `<!doctype html>
 <!-- ${SENTINEL}. A config item, rendered for @jwildfire on his own machine.
@@ -445,6 +459,11 @@ export function renderCard(card) {
   </header>
 
   ${card.unreadable ? `<p class="alarm">This item's card could not be read: ${esc(card.unreadable)}. What follows is the list entry, not the card.</p>` : ''}
+
+  ${card.matters ? `<section class="why">
+    <h2>Why this matters</h2>
+    <p class="lead">${esc(card.matters)}</p>
+  </section>` : ''}
 
   <section class="sum">
     <h2>The short version</h2>
@@ -564,6 +583,13 @@ const CARD_CSS = `
             border-radius:8px; overflow-x:auto; font-family:var(--mono); font-size:0.74rem; line-height:1.5;
             color:var(--muted); }
 
+  /* The why, first thing under the title. Bordered rather than boxed: it should read
+     as the opening sentence of the page, not as a callout he can skip past. */
+  section.why { margin:1.2rem 0 0; }
+  section.why h2 { margin-top:0; }
+  .lead { font-size:1.02rem; line-height:1.45; margin:0 0 0.2rem; color:var(--ink);
+          border-left:3px solid var(--accent); padding:0.05rem 0 0.05rem 0.7rem; }
+
   .see { border-left:2px solid var(--good); padding:0.1rem 0 0.1rem 0.6rem; font-size:0.88rem; color:var(--ink); }
   .see .lab { display:block; font-size:0.6rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); }
   .proof { border:1px solid var(--line); border-radius:10px; padding:0.2rem 0.85rem 0.85rem; margin-top:1.6rem;
@@ -573,7 +599,11 @@ const CARD_CSS = `
           border-radius:8px; padding:0.5rem 0.6rem; margin:0 0 0.8rem; }
   .alarm { font-size:0.85rem; color:var(--ink); background:var(--accent-soft); border:1px solid var(--accent);
            border-radius:8px; padding:0.5rem 0.6rem; overflow-wrap:anywhere; }
-  .rawf { margin:0 0 0.7rem; }
+  /* A raw field's value is a Verify line as often as it is prose, and those carry
+     absolute paths with no break opportunity in them. Without this the longest path
+     on the card sets the page width and he gets a sideways scroll at 390px — the
+     c0003 card measured 532px wide in a 390px viewport before this rule. */
+  .rawf { margin:0 0 0.7rem; min-width:0; overflow-wrap:anywhere; }
   .rawf > .lab { font-size:0.6rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--faint); }
   footer { margin-top:2rem; border-top:1px solid var(--line); padding-top:0.7rem; font-size:0.75rem; color:var(--muted); }
   footer .gen { font-family:var(--mono); font-size:0.68rem; color:var(--faint); }
