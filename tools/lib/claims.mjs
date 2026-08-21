@@ -200,6 +200,14 @@ export function tokenize(cmd) {
  *   `-> prints 2`        the output is exactly `2`, whatever the exit code
  *   `-> not u/3680095`   exit 0 and the output does not contain that
  *
+ * `prints` compares the WHOLE expectation and not its first word. It read a single
+ * token until 2026-08-21, so a multi-word expectation fell through to the exit code —
+ * which for a `gh ... --jq` read is 0 whatever it printed. D0020's live premise expects
+ * `prints Goal: increased autonomy in obot.agent`, and would therefore have reported
+ * `holds` after the rename it exists to notice (obot.agent#302). A claim that cannot
+ * break is not a claim, and one that reports a verdict on a question nobody asked is
+ * the same manufactured measurement `unknown` exists to prevent.
+ *
  * `prints` deliberately outranks the exit code: the claim has stated exactly what true
  * looks like, and several perfectly good proofs answer correctly while exiting
  * non-zero — `grep -c x file` prints `0` and exits 1 when the answer is "none, which is
@@ -211,8 +219,8 @@ export function tokenize(cmd) {
 export function judge(exitCode, stdout, expect) {
   const e = String(expect ?? '').trim();
   const out = String(stdout ?? '').trim();
-  const eq = /^prints\s+(\S+)$/i.exec(e);
-  if (eq) return out === eq[1] ? 'pass' : 'fail';
+  const eq = /^prints\s+(\S[\s\S]*)$/i.exec(e);
+  if (eq) return out === eq[1].trim() ? 'pass' : 'fail';
   if (exitCode !== 0) return 'fail';
   const not = /^not\s+(\S+)/i.exec(e);
   if (not) return out.includes(not[1]) ? 'fail' : 'pass';
@@ -250,7 +258,7 @@ export function judge(exitCode, stdout, expect) {
  */
 export function noAnswer(exitCode, stdout, expect, stderr = '') {
   if (exitCode === 0) return null;
-  if (!/^prints\s+\S+$/i.test(String(expect ?? '').trim())) return null;
+  if (!/^prints\s+\S/i.test(String(expect ?? '').trim())) return null;
   if (!String(stdout ?? '').trim()) return 'exited non-zero and printed nothing, so there was no output to compare with what the claim expects';
   if (String(stderr ?? '').trim()) return 'exited non-zero and reported an error, so what it printed is the failure rather than the answer';
   return null;
