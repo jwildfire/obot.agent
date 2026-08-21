@@ -335,7 +335,15 @@ So an entry now carries `Do` / `Expect` / `Verify` / `Unblocks` / `Source`, plus
 `Blocks` and `Why` (last — an item that opens with the mechanism was written agent-to-agent).
 The first three are **required and enforced at capture** by [`tools/blocker-log`](../blocker-log),
 not patched up here: a tool that accepts a free-text one-liner gets fed free-text one-liners
-forever. Clicking a config row opens the whole thing in the main area with copy buttons.
+forever.
+
+Clicking a config row opens the item's own HTML card — the page `/config/<id>` already
+serves — in the main area, the same treatment a decision artifact gets. @jwildfire,
+2026-08-20: *"show the html artifacts by default - just like the decisions."* The main pane
+used to rebuild the same item as a form and offer the card as a link into a new tab; that
+was a second version of one item that could disagree with the first. What could not move
+into a static card is the check, because only this server can run a command and write the
+result down, so it lives in the sidebar beside the triage buttons.
 
 **The verify contract: the command must exit 0 exactly when the item is done.** `Check` runs
 it and appends a real result to `.claude/ops/checks.jsonl`. Only single, read-only commands
@@ -439,6 +447,22 @@ obot.agent/tools/config-count             # write it
 obot.agent/tools/config-count --dry-run   # print it, write nothing
 obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
 ```
+
+## How the page is dressed
+
+The palette, the type and the document components come from the repository's shared
+stylesheet, [`assets/obot.css`](../../assets/obot.css) — the decision artifacts' visual
+language, extracted once (jwildfire/obot.agent#15) and inlined by every view this server
+renders. @jwildfire, 2026-08-20: *"match the css of the decision docs."* Two surfaces that
+he moves between all evening now read as one product, and the dashboard gained the dark
+theme the artifacts never had.
+
+What stayed here is this page's layout, which the shared sheet deliberately does not carry,
+and an alias block at the top of `SHELL_CSS` pointing the dashboard's own token names
+(`--card`, `--accent`, `--crit`, …) at the sheet's. The aliases are a bridge, not a second
+palette: each resolves to a token defined once, so the theme follows. Roles decide the
+mapping — accent is the link blue, config is bronze, critical is the flag red, settled is
+green. See [`docs/shared-stylesheet.md`](../../docs/shared-stylesheet.md).
 
 ## A config item as a card
 
