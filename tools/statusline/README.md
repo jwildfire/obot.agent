@@ -100,7 +100,7 @@ writing a script.
 ## Tests
 
 ```bash
-node --test tools/statusline/test/*.test.mjs
+obot.agent/scripts/obot-test suite statusline
 ```
 
 The tests drive `statusline.sh` with mock stdin payloads over a temporary

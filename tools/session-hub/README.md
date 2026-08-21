@@ -275,5 +275,5 @@ is the effort metric (design §2 note).
 ## Tests
 
 ```bash
-cd obot.agent/tools/session-hub && node --test
+obot.agent/scripts/obot-test suite session-hub
 ```

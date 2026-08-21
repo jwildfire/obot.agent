@@ -17,8 +17,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # One shape, not two. This step used to be ten hand-written globs of
+      # `node --test tools/…/*.test.mjs …`, and because CI is the most reasonable place
+      # a worker copies a test command from, that spelling propagated everywhere — while
+      # matching no permission rule, so every copy of it dropped through to the auto-mode
+      # classifier. Three workers stalled on it in the week of 2026-08-18, for eighteen,
+      # nineteen and fifty-nine minutes, all three holding a briefing that warned them
+      # (obot.agent#315). The wrapper is now the thing to copy, so copying CI is safe.
+      #
+      # It also removes the drift the globs carried: the file list is discovered, so a new
+      # tools/<x>/test directory is covered the day it appears rather than the day someone
+      # remembers an eleventh glob. scripts/test/obot-test.test.mjs asserts both properties,
+      # including that this step keeps invoking the wrapper rather than growing a second
+      # spelling of the same command.
       - name: Test suite
-        run: node --test tools/session-hub/test/*.test.mjs tools/ops-dashboard/test/*.test.mjs tools/statusline/test/*.test.mjs tools/navigator/test/*.test.mjs tools/style/test/*.test.mjs tools/fold/test/*.test.mjs tools/voice/test/*.test.mjs tools/rankviz/test/*.test.mjs tools/session-init/test/*.test.mjs scripts/test/*.test.mjs
+        run: scripts/obot-test suite
       # The done-gate of jwildfire/obot.roadmap#289 — "a check fails if any surface
       # reintroduces its own copy" — wired to something that runs (obot.agent#311).
       # The census existed from #295 and was honest about what it could not read from

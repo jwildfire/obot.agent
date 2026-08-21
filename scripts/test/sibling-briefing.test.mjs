@@ -31,8 +31,8 @@ const RULES = [
     needs: [/single command/i, /\|\s*tail|pipe/i, /sub-command/i],
   },
   {
-    what: "CI's own test invocation matches no rule, so a worker copying it is rolling dice",
-    needs: [/node --test/, /workflows\/test\.yml/],
+    what: 'the tests are run by calling the wrapper, not by composing a node --test line',
+    needs: [/obot\.agent\/scripts\/obot-test/, /node --test/],
   },
   {
     what: 'blocked is a report, not a wait, and never handed to another session',
@@ -85,20 +85,24 @@ test('the briefing opens on a heading, so nothing else lands in the job detail',
 });
 
 /**
- * The claim the briefing makes about CI has to stay true of CI. If the workflow's
- * test command ever becomes something a permission rule matches, the warning in the
- * briefing is telling workers to expect a coin flip that no longer exists.
+ * The claim the briefing makes about CI has to stay true of CI. The briefing now tells
+ * workers that calling the wrapper and copying CI are the same act (obot.agent#315); if
+ * the workflow grew a second spelling of the test command, that sentence would be false
+ * and a worker copying CI would be back to composing a ten-glob line by hand.
  */
-test("the repository's own test command really does match no permission rule", () => {
+test('the briefing and CI name the same command, so copying CI is copying the wrapper', () => {
   const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/test.yml'), 'utf8');
-  const line = wf.split('\n').find((l) => l.includes('node --test'));
-  assert.ok(line, 'the workflow still runs node --test');
+  assert.match(BRIEF, /obot\.agent\/scripts\/obot-test/, 'the briefing no longer names the wrapper');
+  assert.match(wf, /scripts\/obot-test/, "CI no longer runs the wrapper the briefing points at");
 
-  const ALLOWED = ['scripts/obot-merge ', 'obot.agent/scripts/obot-merge ', 'git worktree ',
-    'scripts/obot-gh ', 'obot.agent/scripts/obot-gh ', 'gh run list '];
-  const cmd = line.slice(line.indexOf('node --test')).trim();
-  assert.ok(
-    !ALLOWED.some((p) => cmd.startsWith(p)),
-    'CI\'s test command now matches an allowlist prefix — the briefing\'s warning is stale',
-  );
+  const line = wf.split('\n').find((l) => l.includes('run:') && l.includes('obot-test'));
+  assert.ok(line, 'no run: step invokes the wrapper');
+  const cmd = line.slice(line.indexOf('run:') + 4).trim();
+  for (const bad of ['|', '&&', '||', ';', '*']) {
+    assert.ok(
+      !cmd.includes(bad),
+      `CI's test command contains ${bad}, so it is no longer the single undecorated ` +
+        `command the briefing tells workers to type (obot.agent#162). Command was: ${cmd}`,
+    );
+  }
 });
