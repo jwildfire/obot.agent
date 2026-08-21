@@ -909,22 +909,26 @@ const safeCurrency = async () => {
 }
 
 /**
- * Refresh what the published decision artifacts carry, and say if they are behind.
+ * How far the published artifact pages are behind what this sweep just measured.
  *
- * The measurement above happens here, on this machine, five minutes apart. The pages
- * that state these premises are static files on GitHub Pages, so they cannot ask; they
- * carry the last reading and its age (jwildfire/obot.roadmap#266, #301). This writes
- * that reading into the hub checkout — never commits, never pushes — and reports the
- * gap between what was measured and what the public pages actually say.
+ * The measurement above happens here, five minutes apart. The pages that state these
+ * premises are static files on GitHub Pages, so they cannot ask; they carry the last
+ * reading and its age (jwildfire/obot.roadmap#266, #301). A reading reaches a reader
+ * only through a commit and a deploy, so what matters is the distance between what was
+ * measured and what is COMMITTED — and reporting that distance is all this does.
  *
- * The write is not the interesting half: a file sitting current in a local checkout
- * publishes nothing. What matters is the comparison against the COMMITTED copy, because
- * that is the one the deploy fans out to every artifact page.
+ * IT WRITES NOTHING, and the reason is not caution. `data/premise-status.json` is a
+ * tracked file in a clone this same sweep fast-forwards every five minutes, and the
+ * fast-forward refuses on a dirty tree — correctly, since nothing here may stash or
+ * reset. A sweep that rewrote that file every few hours would therefore have quietly
+ * stopped updating the hub checkout as a side effect of reporting on it
+ * (jwildfire/obot.roadmap#243). So the tool runs `--dry-run` and the comparison happens
+ * in memory; landing it stays an act, by an agent, that ends in a commit.
  *
  * It alarms on two things and deliberately not on a third:
  *
- *   a verdict differs     a premise has changed state and the pages do not know. The
- *                         pages are answering a question with an answer that has moved.
+ *   a verdict differs     a premise has changed state and the pages do not know. They
+ *                         are answering with an answer that has moved.
  *   the copy is stale     older than the strip's own bar, so every artifact page has
  *                         stopped asserting its premises and says so. Honest, and still
  *                         a gap: the machine knows and the reader cannot see it.
@@ -933,48 +937,51 @@ const safeCurrency = async () => {
  *                         surface teaches people to skim past its red lines.
  */
 function premisePublish() {
-  const r = spawnSync(join(REPO_ROOT, 'tools', 'premise-status'), ['--workspace', WS, '--hub', HUB],
-    { encoding: 'utf8', timeout: 20000 })
+  const r = spawnSync(join(REPO_ROOT, 'tools', 'premise-status'),
+    ['--workspace', WS, '--hub', HUB, '--dry-run'], { encoding: 'utf8', timeout: 20000 })
   if (r.error || typeof r.status !== 'number') {
-    return `**PREMISE PUBLISHING BROKEN** — the reading the artifact pages carry could not be written: ${String(r.error?.message ?? 'no exit status').slice(0, 120)}. What every artifact says about its own premises is whatever was last published, at whatever age.`
+    return `**PREMISE PUBLISHING BROKEN** — what the artifact pages should be carrying could not be measured: ${String(r.error?.message ?? 'no exit status').slice(0, 120)}. Every artifact is showing whatever was last published, at whatever age.`
   }
   if (r.status !== 0) {
-    return `**PREMISE PUBLISHING BROKEN** — ${String(r.stderr ?? '').trim().split('\n')[0].slice(0, 160)}. The last published readings stand; nothing here refreshed them.`
+    return `**PREMISE PUBLISHING BROKEN** — ${String(r.stderr ?? '').trim().split('\n')[0].slice(0, 160)}. Nothing here compared the pages against a fresh reading.`
   }
-  const said = String(r.stdout ?? '').trim().split('\n')[0].replace(/^premise-status:\s*/, '');
 
-  // What the pages will actually be built from: the committed copy, not the working
-  // one. A reading only reaches a reader through a commit and a deploy.
-  const read = (argv) => {
-    const g = spawnSync('git', ['-C', HUB, ...argv], { encoding: 'utf8', timeout: 10000 })
-    return g.status === 0 ? String(g.stdout ?? '') : null
-  }
   const parse = (text) => { try { return JSON.parse(text) } catch { return null } }
   const material = (doc) => JSON.stringify((doc?.readings ?? []).map((x) => [x.id, x.sha, x.state, x.why]))
+  const tally = (doc) => {
+    const c = { holds: 0, fails: 0, unknown: 0 }
+    for (const x of doc?.readings ?? []) c[x.state] += 1
+    return `${(doc?.readings ?? []).length} premises · ${c.holds} hold · ${c.fails} expired · ${c.unknown} unmeasured`
+  }
 
-  const head = parse(read(['show', 'HEAD:data/premise-status.json']) ?? '')
-  const now = parse(readFileSync(join(HUB, 'data', 'premise-status.json'), 'utf8'))
-  if (!now) return `**PREMISE PUBLISHING BROKEN** — nothing readable at obot.roadmap/data/premise-status.json after the write, so what the artifact pages will carry is unknown.`
+  const now = parse(r.stdout)
+  if (!now) return '**PREMISE PUBLISHING BROKEN** — the fresh reading did not come back as a payload, so what the artifact pages ought to say is unknown.'
+
+  // What the pages will actually be built from: the committed copy, read out of git
+  // rather than off disk, because a working copy nobody has committed publishes nothing.
+  const g = spawnSync('git', ['-C', HUB, 'show', 'HEAD:data/premise-status.json'], { encoding: 'utf8', timeout: 10000 })
+  const head = g.status === 0 ? parse(String(g.stdout ?? '')) : null
+  const land = '  land it: `obot.agent/tools/premise-status`, then commit `data/premise-status.json` on the hub\'s `main` — the deploy fans it out to every artifact page in about twenty minutes.'
   if (!head) {
-    return `**PREMISE PUBLISHING GAP** — nothing is committed at obot.roadmap/data/premise-status.json, so every artifact page says no reading has reached it. ${said}\n  land it: commit \`data/premise-status.json\` on the hub's \`main\`; the deploy fans it out to every artifact page in about twenty minutes.`
+    return `**PREMISE PUBLISHING GAP** — nothing is committed at obot.roadmap/data/premise-status.json, so every artifact page is saying no reading has reached it. Measured now: ${tally(now)}.\n${land}`
   }
 
   const drifted = material(head) !== material(now)
   const ageH = head.asOf ? (Date.now() - Date.parse(head.asOf)) / 3600000 : Infinity
-  // The strip stops asserting a verdict past a day; the same number, so the surface and
-  // the page agree about when a reading has stopped being an answer.
-  const STRIP_STALE_H = 24
-  if (!drifted && ageH < STRIP_STALE_H) {
-    return `premise publishing: the artifact pages carry these readings, published ${ageH.toFixed(1)}h ago. ${said}`
+  const age = ageH === Infinity ? 'at an unknown time' : `${ageH.toFixed(1)}h ago`
+  // The strip stops asserting a verdict past a day; the same number here, so the surface
+  // and the page agree about when a reading has stopped being an answer.
+  if (!drifted && ageH < 24) {
+    return `premise publishing: the artifact pages carry what this sweep measures, published ${age}. ${tally(now)}.`
   }
   return [
     drifted
-      ? `**PREMISE PUBLISHING GAP** — a premise has changed state and the published artifact pages do not know: they are still showing the readings committed ${ageH === Infinity ? 'at an unknown time' : `${ageH.toFixed(1)}h ago`}.`
-      : `**PREMISE PUBLISHING GAP** — the readings the artifact pages carry are ${ageH.toFixed(1)}h old, past the point where every one of those pages stops asserting its premises. Nothing is wrong with the premises; the pages simply cannot say so.`,
-    `  ${said}`,
-    "  land it: commit `data/premise-status.json` on the hub's `main`; the deploy fans it out to every artifact page in about twenty minutes.",
+      ? `**PREMISE PUBLISHING GAP** — a premise has changed state and the published artifact pages do not know: they are still showing the readings committed ${age}. Measured now: ${tally(now)}.`
+      : `**PREMISE PUBLISHING GAP** — the readings the artifact pages carry were published ${age}, past the point where every one of those pages stops asserting its premises. Nothing is wrong with the premises; the pages simply cannot say so.`,
+    land,
   ].join('\n')
 }
+
 
 
 // The spend reading (jwildfire/obot.roadmap#275). It shells out to the usage

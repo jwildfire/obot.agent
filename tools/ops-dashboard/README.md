@@ -482,8 +482,13 @@ written in the hub repository, already public — so this channel never has to c
 order to render prose. That is what lets the hub's reader refuse every payload that is not a
 number, a date, hex, or a member of a closed set.
 
-The sweep runs it every pass and never commits: what is committed is what the pages get, so
-the Navigator surface reports the gap between the two rather than closing it unattended.
+The sweep runs it `--dry-run` every pass and writes nothing at all. That is load-bearing:
+`data/premise-status.json` is a tracked file in a clone the same sweep fast-forwards every
+five minutes, and the fast-forward refuses on a dirty tree — so a sweep that rewrote it every
+few hours would have quietly stopped updating the hub checkout as a side effect of reporting
+on it ([jwildfire/obot.roadmap#243](https://github.com/jwildfire/obot.roadmap/issues/243)).
+The comparison happens in memory, against the copy committed on `main`, because that is the
+one the pages are built from. Landing a new reading stays an act that ends in a commit.
 
 ```bash
 obot.agent/tools/premise-status             # write it
