@@ -16,7 +16,7 @@
 // text instead, which is why it is printed in all three forms rather than one.
 //
 // Task jwildfire/obot.agent#295. What it enforces and why lives in tools/style/census.mjs.
-import { census, findings, unmeasured, verdict } from './style/census.mjs';
+import { MD_HEADING, census, findings, unmeasured, verdict } from './style/census.mjs';
 import { ALLOWED } from './style/surfaces.mjs';
 
 const argv = process.argv.slice(2);
@@ -29,7 +29,7 @@ if (argv.includes('--md')) {
   // The Navigator alarm-tests unindented plain lines and preamble notes only — a
   // `- ` bullet can never go red (obot.roadmap#241). So the verdict is its own plain
   // line under the heading and the rows stay bullets.
-  console.log('## Style census');
+  console.log(MD_HEADING);
   console.log('');
   // `unknown` is deliberately NOT in the alarm vocabulary (ALARM_RE wants GAP,
   // FINDING, BREACHED, FAILED, DOWN or BROKEN). An absent clone is a fact about the

@@ -122,10 +122,18 @@ function withFile(rel, content, fn) {
   }
 }
 
+// Asserted as a DELTA rather than against a clean workspace (obot.agent#311). This is
+// the test that proves the check can fail, and it used to require `findings()` to be
+// empty first — so a real finding anywhere in the workspace disabled the proof, at
+// exactly the moment somebody would want to trust it. One arrived on 2026-08-21 in
+// obot.roadmap and took this test out with it. What the test is actually about is
+// whether reintroducing a copy is DETECTED and whether removing it clears; ambient
+// drift elsewhere is the subject of the test above, which is still absolute and is
+// still red about it.
 test('reintroducing a palette into an adopted surface turns the census red', () => {
   const rel = 'obot.agent/tools/style/test/__reintroduced.mjs';
-  const clean = findings();
-  assert.deepEqual(clean, [], 'precondition: the census is green before the copy is reintroduced');
+  assert.deepEqual(findings().filter((p) => p.file === rel), [],
+    'precondition: this surface is not already a finding before the copy is reintroduced');
 
   const problems = withFile(rel, [
     'export const CSS = `',
@@ -139,7 +147,8 @@ test('reintroducing a palette into an adopted surface turns the census red', () 
   assert.equal(hit.kind, 'unregistered palette');
   assert.match(hit.detail, /surfaces\.mjs/, 'and the finding must say what to do about it');
 
-  assert.deepEqual(findings(), [], 'and the census is green again once the copy is gone');
+  assert.deepEqual(findings().filter((p) => p.file === rel), [],
+    'and the census is green about it again once the copy is gone');
 });
 
 test('a surface that adopts the shared sheet instead does not trip it', () => {

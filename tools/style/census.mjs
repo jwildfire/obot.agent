@@ -67,6 +67,16 @@ export const REPO = path.join(HERE, '..', '..');
 /** A rule declaring this many colour-valued custom properties is a palette. See the header. */
 export const PALETTE_MIN = 4;
 
+/**
+ * The heading the `--md` form prints under, exported because it now has two readers.
+ *
+ * The Navigator sweep renders this census into `navigator-state.md` and has to be able
+ * to render a heading for a run that did not happen at all — and if those two headings
+ * ever differ, the Operations Dashboard shows two tabs for one reading, one of which is
+ * always empty. Task jwildfire/obot.agent#311.
+ */
+export const MD_HEADING = '## Style census';
+
 const SCAN_EXT = new Set(['.css', '.html', '.mjs', '.js']);
 const SKIP_DIR = new Set(['node_modules', '.git', 'worktrees', '_build', 'dist', 'coverage']);
 // A test is not a surface: it renders nothing anybody reads, and the fixtures in

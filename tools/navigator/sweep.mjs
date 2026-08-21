@@ -88,6 +88,12 @@ import { readCurrency } from './currency.mjs'
 // the other. Its second half asks the same question sideways: two workers in flight under
 // one requirement, which happened three times in the week this was written.
 import { collectConstraints, constraintsBroken, constraintsSection } from './constraints.mjs'
+
+// The style census, which had no caller at all until #311 — see tools/navigator/style.mjs.
+// This sweep is the only vantage point on this machine where all nine declared roots
+// exist at once, so it is the only thing that can see a public site reintroduce a
+// palette. CI gates the pull request and sees one clone; the two are not redundant.
+import { collectStyle, styleBroken, styleSection } from './style.mjs'
 // What the fleet spends, before it spends it (jwildfire/obot.roadmap#275). Every
 // reading above is about work; this one is about the budget the work runs on. The
 // measurement already existed — `build_usage_data.py` has priced this machine's
@@ -245,7 +251,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null, constraints = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null, constraints = null, style = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -379,6 +385,17 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push((constraints && constraints.trim())
     ? constraints.trimEnd()
     : constraintsBroken('no constraint reading ran this sweep'), '')
+
+  // Where every surface's colours come from (obot.agent#311, under obot.roadmap#289).
+  // It follows the two sections above because it asks their question of a third thing:
+  // claim currency asks whether what an ARTIFACT states is still true, constraints ask
+  // whether what HE stated is visible to the party judging against it, and this asks
+  // whether the surfaces he reads still agree with each other. Rendered every sweep,
+  // clean or not, and loud when the reading did not happen — a census nothing calls is
+  // exactly what this section exists to stop being true again.
+  lines.push((style && style.trim())
+    ? style.trimEnd()
+    : styleBroken('no census reading ran this sweep'), '')
 
   // What comes next, once his queue is empty (jwildfire/obot.roadmap#278). It sits
   // directly above the RC queue because it is the same question one step later: that
@@ -841,6 +858,22 @@ const safeConstraints = () => {
   try { return constraintsSection(collectConstraints({ ws: WS, jobs: JOBS_DIR })) }
   catch (e) { return constraintsBroken(String(e.message).slice(0, 160)) }
 }
+// The style census (obot.agent#311). Spawned with a hard timeout rather than imported,
+// so a pathological walk costs this section and never the five-minute cadence; wrapped
+// anyway, because a section that throws would take the whole state file with it and a
+// missing section reads as a page with nothing to report.
+const safeStyle = () => {
+  try {
+    const got = collectStyle()
+    // The note goes in the sweep's own log line as well as the page. A census with no
+    // caller is what this section exists to stop being true again, and the log is the
+    // only record that would show it having quietly stopped: a page can be stale and
+    // look current, a log line cannot be there and absent at the same time.
+    return { section: styleSection(got), note: got.read ? `${got.state} (${got.ms}ms)` : 'NO READING' }
+  } catch (e) {
+    return { section: styleBroken(String(e.message).slice(0, 160)), note: 'NO READING' }
+  }
+}
 const safeChecks = (repos, jobs) => { try { return runChecks(repos, jobs) } catch { return null } }
 // `null` when the job ledger is not on this machine at all — distinct from `[]`,
 // which means it was read and no agent has run. `readJobs` (wake.mjs) flattens both
@@ -1186,7 +1219,7 @@ async function main() {
       // local store, they need no policy file, and an answer of his that nothing has
       // applied is exactly as undelivered when the RC sweep is broken.
       unapplied: unappliedDetections(safePending()) })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: safeStyle().section }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -1339,7 +1372,8 @@ async function main() {
   const currency = await safeCurrency()
   const rankhead = safeRankhead()
   const spend = safeSpend()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints() }))
+  const style = safeStyle()
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: style.section }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
@@ -1356,7 +1390,7 @@ async function main() {
   if (wake.delivered.length) {
     scratchpad(`WAKE x${wake.delivered.length} delivered — ${wake.delivered.map(d => `${d.worker} ${d.kind}`).join(', ')}`)
   }
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over, ${wake.answers?.length ?? 0} woken) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · metrics: ${metricsNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over, ${wake.answers?.length ?? 0} woken) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · style: ${style.note} · metrics: ${metricsNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 // `main` awaits the claim-currency pass, so it returns a promise. A rejection here has
