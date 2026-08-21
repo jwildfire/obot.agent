@@ -104,15 +104,19 @@ const writeUnrouted = (workspace, item) => {
 export function readUnrouted(workspace, { all = false } = {}) {
   let names;
   try { names = fs.readdirSync(unroutedDir(workspace)).filter((n) => n.endsWith('.json')); } catch (e) {
-    if (e?.code === 'ENOENT') return { items: [], read: true, why: '' };
-    return { items: [], read: false, why: `the unrouted store could not be read (${e.code ?? e.message})` };
+    // ENOENT is a successful reading of "not there", and it is carried separately: a
+    // store nobody has written and a store holding nothing both produce `items: []`,
+    // and only one of them supports a sentence about what he has dictated
+    // (jwildfire/obot.roadmap#223).
+    if (e?.code === 'ENOENT') return { items: [], read: true, absent: true, why: '' };
+    return { items: [], read: false, absent: false, why: `the unrouted store could not be read (${e.code ?? e.message})` };
   }
   const items = names
     .map((n) => { try { return JSON.parse(fs.readFileSync(path.join(unroutedDir(workspace), n), 'utf8')); } catch { return null; } })
     .filter(Boolean)
     .filter((i) => all || i.status === 'open')
     .sort((a, b) => (b.at || '').localeCompare(a.at || ''));
-  return { items, read: true, why: '' };
+  return { items, read: true, absent: false, why: '' };
 }
 
 /** He said it again and it landed, or an agent worked out what he meant. Kept, not removed. */
@@ -237,7 +241,7 @@ const ago = (min) => (min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${String(m
  * failure he cannot act on without seeing what was heard — so it is on the row,
  * clipped, in a file that lives under `.claude/` and is never committed.
  */
-export function unroutedSection(items = [], { now = new Date(), lane = null, read = true, why = '' } = {}) {
+export function unroutedSection(items = [], { now = new Date(), lane = null, read = true, absent = false, why = '' } = {}) {
   const lines = ['## Voice answers that reached no decision — his words, kept whole', ''];
 
   // A store that could not be opened is not a store with nothing in it. This section
@@ -299,7 +303,13 @@ export function unroutedSection(items = [], { now = new Date(), lane = null, rea
   }
 
   if (!items.length) {
-    lines.push('voice: none unrouted — every sentence dictated into the lane reached a decision or was an idea');
+    // A store that was never written carries no sentences, so it cannot support a
+    // claim about where his sentences went. On the empty machine this line printed
+    // directly under "the car lane is NOT ARMED on this machine", which is the
+    // dashboard's old "All answered" beside "Decisions unavailable" (obot.roadmap#223).
+    lines.push(absent
+      ? 'voice: nothing has been dictated into this lane on this machine yet, so nothing has been routed and nothing has been missed. That is an unwritten record rather than a clean one.'
+      : 'voice: none unrouted — every sentence dictated into the lane reached a decision or was an idea');
     return `${lines.join('\n')}\n`;
   }
   const late = items.filter((i) => ageMin(i.at, now) > UNROUTED_OVERDUE_MIN);

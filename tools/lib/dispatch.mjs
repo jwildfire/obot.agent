@@ -64,7 +64,13 @@ export function readClaims(ws, { read = fs.readFileSync } = {}) {
   let text;
   try { text = read(p, 'utf8'); } catch (e) {
     const f = readFailure(e, p);
-    return { read: !f.absent ? false : true, armed: false, claims: [], why: f.absent ? null : f.why };
+    // `absent` is carried separately from `armed` on purpose. A journal that is not on
+    // this machine and a journal holding no live claim both produce an empty list, and
+    // every honest sentence downstream turns on which one it was: on the new laptop the
+    // file does not travel with any clone, and both readers said "nobody else is in
+    // flight" about a file they never opened (jwildfire/obot.roadmap#223).
+    return { read: !f.absent ? false : true, absent: f.absent, armed: false, claims: [],
+             why: f.absent ? `no worker ledger on this machine yet at ${p}` : f.why };
   }
   const claims = [];
   for (const line of String(text).split('\n')) {
@@ -76,7 +82,7 @@ export function readClaims(ws, { read = fs.readFileSync } = {}) {
       parent: r.parent || null, ts: r.ts || null, actor: r.actor || null,
     });
   }
-  return { read: true, armed: Boolean(claims.length), claims, why: null };
+  return { read: true, absent: false, armed: Boolean(claims.length), claims, why: null };
 }
 
 /**
@@ -104,7 +110,7 @@ export function requirementsOf(claim) {
  */
 export function adjacentWorkers({ ws, jobs, exclude = null, now = new Date(), jobList = null } = {}) {
   const c = readClaims(ws);
-  if (!c.read) return { read: false, why: c.why, workers: [], coverage: null };
+  if (!c.read) return { read: false, absent: false, why: c.why, workers: [], coverage: null };
   let rows = jobList;
   if (!rows) { try { rows = readJobs(jobs); } catch { rows = []; } }
   const byId = new Map();
@@ -131,7 +137,10 @@ export function adjacentWorkers({ ws, jobs, exclude = null, now = new Date(), jo
   workers.reverse();
   return {
     read: true,
-    why: null,
+    // Threaded rather than re-derived: by the time a renderer holds `workers: []` it can
+    // no longer tell an absent ledger from an armed one that nobody is working under.
+    absent: c.absent === true,
+    why: c.absent ? c.why : null,
     workers,
     coverage: { inFlight: workers.length, placed: workers.filter((w) => w.requirements.length).length },
   };
@@ -147,7 +156,7 @@ export function adjacentWorkers({ ws, jobs, exclude = null, now = new Date(), jo
  */
 export function dispatchOverlap(args = {}) {
   const a = adjacentWorkers({ ...args, exclude: null });
-  if (!a.read) return { read: false, why: a.why, groups: [], coverage: null };
+  if (!a.read) return { read: false, absent: false, why: a.why, groups: [], coverage: null };
   const groups = new Map();
   for (const w of a.workers) {
     for (const r of w.requirements) {
@@ -157,7 +166,8 @@ export function dispatchOverlap(args = {}) {
   }
   return {
     read: true,
-    why: null,
+    absent: a.absent === true,
+    why: a.why,
     coverage: a.coverage,
     groups: [...groups.entries()].filter(([, ws2]) => ws2.length > 1)
       .map(([requirement, ws2]) => ({ requirement, workers: ws2 }))

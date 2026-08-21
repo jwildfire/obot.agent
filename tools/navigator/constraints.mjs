@@ -116,6 +116,15 @@ export function constraintsSection(state) {
     out.push(`${ALARM_READING} — the dispatch record could not be read this sweep${dispatch?.why ? `: ${dispatch.why}` : ''}. Nothing here says whether two workers are on the same requirement.`);
     return `${out.join('\n')}\n`;
   }
+  // No ledger on this machine is not a fleet of nobody. It is local-only and no clone
+  // brings it, so on a new laptop this is the state every reader meets first — and the
+  // line below used to be a verdict on overlap read off a file nobody opened. Not an
+  // alarm: a machine nobody has dispatched on yet is not a fault (obot.roadmap#223).
+  if (dispatch.absent) {
+    out.push('dispatch: no worker ledger on this machine yet, so nothing here has looked at who is in flight or what they are under. '
+      + 'Overlap cannot be checked at all until one exists — treat it as unknown rather than as none. `worker-id init` writes the first.');
+    return `${out.join('\n')}\n`;
+  }
   const cov = dispatch.coverage ?? { inFlight: 0, placed: 0 };
   if (dispatch.groups.length) {
     out.push(`${ALARM_OVERLAP} — ${dispatch.groups.length} requirement(s) have more than one worker in flight. Sometimes that is a split; three times in one week it was a collision nobody could see.`);

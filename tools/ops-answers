@@ -37,7 +37,7 @@ import process from 'node:process';
 
 import {
   currentAnswers, pendingAnswers, deliverAnswers, markApplied, resolveAnswerRef,
-  answersSection, ageMin, ago, OVERDUE_MIN,
+  answersSection, ageMin, ago, OVERDUE_MIN, STORELESS,
 } from './ops-dashboard/lib/answers.mjs';
 
 const WS = path.resolve(process.env.OBOT_WORKSPACE || path.join(process.env.HOME ?? '', 'Documents/obot2'));
@@ -78,12 +78,24 @@ function main() {
     if (flag('--json')) {
       process.stdout.write(`${JSON.stringify({ workspace: WS, hub: HUB, pending: items }, null, 2)}\n`);
     } else if (!items.length) {
-      process.stdout.write('nothing pending — every answer he has recorded has been applied.\n');
+      // A store that is not on this machine is not a store whose answers were all
+      // applied. `.claude/ops/answers/` is local-only and no clone brings it, so on the
+      // new laptop this printed a verdict on a directory nobody opened — into the
+      // bundle 🎩🤖 prime reads on every cold turn to decide whether @jwildfire is
+      // waiting on anything. The mark already existed and the sweep already read it;
+      // this reader did not (jwildfire/obot.roadmap#223).
+      process.stdout.write(items[STORELESS]
+        ? 'no answer store on this machine yet — nothing has been recorded here, so nothing can be pending. It appears the first time you answer a decision on the dashboard.\n'
+        : 'nothing pending — every answer he has recorded has been applied.\n');
     } else {
       process.stdout.write(`${items.length} answer(s) he has recorded and nobody has applied:\n\n${items.map(line).join('\n\n')}\n\nApply one, then: ops-answers apply <id> --evidence <url> --by <who>\n  <id> is any id above — the decision id on the first line, the slug, or the record id.\n`);
     }
     if (flag('--exit-code')) {
       const overdue = items.some((a) => ageMin(a.at) > OVERDUE_MIN);
+      // 0 is what a caller branches on to mean "nothing is waiting on him", and a
+      // storeless read has not established that. 3 rather than 1 so a caller can still
+      // tell "he is waiting" from "nobody looked".
+      if (!items.length && items[STORELESS]) process.exit(3);
       process.exit(overdue ? 2 : (items.length ? 1 : 0));
     }
     return;

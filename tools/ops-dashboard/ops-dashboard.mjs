@@ -63,7 +63,7 @@ import { runVerify, readChecks } from './lib/iq.mjs';
 // same check in three different ways.
 import { configCurrency } from '../navigator/currency.mjs';
 import { buildCard, readCardSource, renderCard, CARD_ID_RE } from './lib/config-card.mjs';
-import { collectConfig } from './lib/collect.mjs';
+import { collectConfig, configFile } from './lib/collect.mjs';
 import { criticalClaim } from './lib/rank.mjs';
 import { triage } from './lib/triage.mjs';
 import { collectRoster } from './lib/roster.mjs';
@@ -475,6 +475,17 @@ export function serve(args) {
         // Saying "no such item" over a read failure is the same lie the queue
         // stopped telling in jwildfire/obot.agent#206.
         if (list.error && !list.absent) return send(500, 'text/plain', `the config list could not be read: ${list.error}`);
+        // And a list that is not on this machine is not a list without this item on it
+        // either. `.claude/blockers.md` is local-only and no clone brings it, so on a
+        // new machine every card URL answered "is not an open item on the config list"
+        // — absence rendered as emptiness, one door down from #206
+        // (jwildfire/obot.roadmap#223).
+        if (list.absent) {
+          return send(404, 'text/plain',
+            `No config list on this machine yet, so nothing can say whether ${cardId} is on it. `
+            + `The list lives at ${configFile(args.workspace)}, is local to a machine and does not travel between them. `
+            + 'Capture this machine\'s first setup step with obot.agent/tools/blocker-log.');
+        }
         const item = list.items.find((it) => String(it.id ?? '').toLowerCase() === cardId);
         if (!item) return send(404, 'text/plain', `${cardId} is not an open item on the config list`);
         const card = buildCard({ ...item, criticalClaim: criticalClaim(item) }, readCardSource(args.workspace, cardId),

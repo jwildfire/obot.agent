@@ -1050,6 +1050,7 @@ const safeVoice = () => {
     const store = readUnrouted(WS)
     return unroutedSection(store.items, {
       read: store.read,
+      absent: store.absent,
       why: store.why,
       lane: {
         armed,
