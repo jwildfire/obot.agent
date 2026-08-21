@@ -46,7 +46,7 @@ export const rankFile = (repoRoot) => join(repoRoot, ...RANK_PATH)
 export const RANK_REL = RANK_PATH.join('/')
 
 /** What a store that could not be read still hands back, so no caller has to null-check. */
-const EMPTY = { repo: null, label: null, bench: null, boundary: null, rank: [] }
+const EMPTY = { repo: null, label: null, bench: null, boundary: null, basis: null, rank: [] }
 
 /**
  * Parse the declaration.
@@ -90,6 +90,9 @@ export function parseRank(text, file = RANK_REL) {
       label: raw.label ?? null,
       bench: raw.bench ?? null,
       boundary: typeof raw.boundary === 'string' ? raw.boundary : null,
+      // Why the head looks the way it does when it was replaced wholesale rather than
+      // re-ranked. Read so the guard can tell his redirection from an agent drifting.
+      basis: typeof raw.basis === 'string' ? raw.basis : null,
       rank,
     },
   }
