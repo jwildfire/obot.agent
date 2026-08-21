@@ -7,11 +7,17 @@ authored by `obotclaw[bot]` and nothing can say which of the 33 workers that ran
 in a night created which issue.
 
     worker-id init                                 arm the ledger, stamping the epoch
-    worker-id claim --slug <slug> [--task '<what it is doing>']
+    worker-id claim --slug <slug> [--task '<what it is doing>'] [--requirement hub#267]
     worker-id claim --sub W0042 --slug <slug>     a subagent, under its parent
     worker-id name W0042 <slug> [--tag 🦾🤖]      the spawn name, one definition
     worker-id list                                 the roster, rendered from the journal
     worker-id --audit                              read-only; exit 1 on a finding
+
+`--requirement` is what the worker was dispatched under, and it is the field that makes
+a dispatch collision visible before it happens (jwildfire/obot.roadmap#267). Pass it and
+`constraint-log brief` can tell the next worker who is already on this; leave it off and
+the Navigator sweep reports that overlap could not be checked, which is not the same as
+none.
 
 `claim` prints the bare id and nothing else, because it is consumed as
 `WID=$(worker-id claim --slug foo)` and a stray word would end up inside a session
@@ -125,7 +131,7 @@ def main(argv):
     jp = journal_for(WS)
 
     if cmd == "claim":
-        f, _ = flags(argv, {"slug", "task", "sub"})
+        f, _ = flags(argv, {"slug", "task", "sub", "requirement"})
         if not f.get("slug"):
             print("worker-id: claim needs --slug (the short name the worker is known by)",
                   file=sys.stderr)
@@ -146,7 +152,7 @@ def main(argv):
             print("worker-id: no id issued and nothing spawned. This is the cap @jwildfire "
                   "set on 2026-08-18; see obot.agent/config/spend.json.", file=sys.stderr)
             return 2
-        wid = claim(jp, f["slug"], f.get("task"), f.get("sub"))
+        wid = claim(jp, f["slug"], f.get("task"), f.get("sub"), f.get("requirement"))
         print(wid)  # stdout: the id, alone, for $(...)
         print("worker-id: claimed %s for %s — put it in the session name: %s"
               % (wid, f["slug"], display_name(wid, f["slug"])), file=sys.stderr)

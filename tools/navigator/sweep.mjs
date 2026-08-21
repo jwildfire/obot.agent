@@ -80,6 +80,14 @@ import { collectLocal, fetchCachePath, localSection } from './localwatch.mjs'
 // list and the decision artifacts — and until now nothing re-checked either after the
 // day it was written. One mechanism, because #266 asked for one by name.
 import { readCurrency } from './currency.mjs'
+// The constraints he actually stated, beside the judging that uses them
+// (obot.agent#293, under jwildfire/obot.roadmap#267). The Navigator objected twice, on
+// the record, that three audio episodes ran over his five-minute maximum — and he had
+// granted the exception in the same sentence that set the number. The constraint arrives
+// in chat, the work arrives in the queue, and until this section nothing carried one to
+// the other. Its second half asks the same question sideways: two workers in flight under
+// one requirement, which happened three times in the week this was written.
+import { collectConstraints, constraintsBroken, constraintsSection } from './constraints.mjs'
 // What the fleet spends, before it spends it (jwildfire/obot.roadmap#275). Every
 // reading above is about work; this one is about the budget the work runs on. The
 // measurement already existed — `build_usage_data.py` has priced this machine's
@@ -237,7 +245,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null, constraints = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -359,6 +367,18 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
   lines.push((currency && currency.trim())
     ? currency.trimEnd()
     : '## Claim currency — what has been re-checked, and when\n\n**CLAIM CHECK BROKEN** — no claim was re-checked this sweep, so nothing here says a config item is still outstanding or that a decision page still frames a live question. Unknown, not clean.', '')
+
+  // What he actually said, beside the judging that uses it (obot.agent#293, under
+  // jwildfire/obot.roadmap#267). It sits directly under claim currency because they ask
+  // the same question of different material: that section asks whether what an ARTIFACT
+  // states is still true, this one asks whether what HE stated is even visible to the
+  // party judging against it. Rendered every sweep, clean or not — a section that appears
+  // only when something is wrong is indistinguishable from one that has stopped running,
+  // and a judge that has quietly stopped objecting is the failure this requirement names
+  // as the dangerous one.
+  lines.push((constraints && constraints.trim())
+    ? constraints.trimEnd()
+    : constraintsBroken('no constraint reading ran this sweep'), '')
 
   // What comes next, once his queue is empty (jwildfire/obot.roadmap#278). It sits
   // directly above the RC queue because it is the same question one step later: that
@@ -813,6 +833,14 @@ const safePending = () => { try { return pendingAnswers(WS, { hub: HUB }) } catc
 const safeLedger = () => { try { return auditLedger() } catch { return null } }
 const safeWorkers = () => { try { return auditWorkers() } catch { return null } }
 const safeDelivery = () => { try { return readDelivery() } catch { return null } }
+// The constraint reading (obot.agent#293). Pure file reads — the constraint journal, the
+// delivery record, the worker journal and the job ledger — so it cannot stall the sweep;
+// it is wrapped anyway, because a section that throws would take the whole state file with
+// it and a missing section reads as a page with nothing to report.
+const safeConstraints = () => {
+  try { return constraintsSection(collectConstraints({ ws: WS, jobs: JOBS_DIR })) }
+  catch (e) { return constraintsBroken(String(e.message).slice(0, 160)) }
+}
 const safeChecks = (repos, jobs) => { try { return runChecks(repos, jobs) } catch { return null } }
 // `null` when the job ledger is not on this machine at all — distinct from `[]`,
 // which means it was read and no agent has run. `readJobs` (wake.mjs) flattens both
@@ -1079,7 +1107,7 @@ async function main() {
       // local store, they need no policy file, and an answer of his that nothing has
       // applied is exactly as undelivered when the RC sweep is broken.
       unapplied: unappliedDetections(safePending()) })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes() }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints() }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -1232,7 +1260,7 @@ async function main() {
   const currency = await safeCurrency()
   const rankhead = safeRankhead()
   const spend = safeSpend()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes() }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints() }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
