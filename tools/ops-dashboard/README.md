@@ -1030,5 +1030,5 @@ here — that belongs to whichever surface wants it. ([roadmap #205](https://git
 ## Tests
 
 ```bash
-node --test obot.agent/tools/ops-dashboard/test/*.test.mjs
+obot.agent/scripts/obot-test suite ops-dashboard
 ```

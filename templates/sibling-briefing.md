@@ -70,11 +70,22 @@ git worktree add .claude/worktrees/{branch} -b {branch} origin/{base}
   `gh pr view|list|diff|checks`, `gh api …`, `gh search …`, `gh run list …`. Those `gh`
   entries are reads only — an attributed write leads with `GH_TOKEN=`, which puts it in
   front of every rule and therefore outside all of them.
-- **Everything else is a coin flip, this repository's own CI commands included.** The
-  test suite in `.github/workflows/test.yml` is a single six-glob
-  `node --test tools/…/*.test.mjs …` line matching no rule — the most reasonable place
-  a worker would copy a test command from, and it cost one eighteen minutes on
-  2026-08-18. Copy it anyway; just know a stall there is the classifier, not your typing.
+- **To run the tests, call the wrapper. Never compose a `node --test` line.** It runs what
+  CI runs, discovers the files itself, and is what `.github/workflows/test.yml` invokes —
+  so copying CI and calling this are now the same act, and there is no second spelling to
+  get right:
+
+```bash
+obot.agent/scripts/obot-test suite
+```
+
+  Narrow it with a filter (`obot-test suite navigator`), drop `suite` to run everything CI
+  runs, or pass `--list` to see the files and run nothing. Three workers stalled for
+  eighteen, nineteen and fifty-nine minutes composing CI's old ten-glob command, each
+  holding an earlier version of this bullet that explained the permission rule instead of
+  naming a command (obot.agent#315).
+- **Everything else is a coin flip.** An unmatched command is not refused; it falls to the
+  classifier, which is why a stall reads as bad luck rather than as a shape you chose.
 - **Blocked is a report, not a wait.** A prompt that has not cleared in a couple of
   minutes goes back to whoever dispatched the work — in your close-out, in the
   scratchpad, and as `needs input:` if you end there. Two workers that same night sat on

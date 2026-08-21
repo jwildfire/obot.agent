@@ -152,7 +152,7 @@ narrative paragraph, and it is deliberately the only piece held behind A2.
 
 ## Tests
 
-`node --test tools/fold/test/*.test.mjs`
+`obot.agent/scripts/obot-test suite fold`
 
 The acceptance is on the filesystem, not on the tool's own report: after a quiet
 run, nothing has changed except the run log and the ledger. Two of the tests are

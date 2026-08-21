@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# obot-test — run what CI runs, as ONE command a worker can call without knowing
+# the permission-rule shape.
+#
+# Why this exists (obot.agent#315). A permission rule is a prefix match that holds
+# only when every sub-command matches. This repository's CI test line was ten globs
+# of `node --test tools/…/*.test.mjs …`, which matches no rule, so every worker that
+# copied it — and CI is the most reasonable place to copy a test command from —
+# dropped through to the auto-mode classifier. Three did that in the week of
+# 2026-08-18 and sat on the prompt for eighteen, nineteen and fifty-nine minutes.
+# All three were carrying a briefing that told them so. The instruction was read and
+# not acted on, so this is the same move obot-merge made for merging: one call site
+# instead of a rule to remember.
+#
+# Two properties are load-bearing and scripts/test/obot-test.test.mjs asserts both:
+#
+#   1. The file list is COMPUTED, never hand-maintained. The ten globs it replaces
+#      had no mechanism keeping them in step with `tools/`, so a new tools/<x>/test
+#      directory was untested until somebody remembered to add an eleventh glob.
+#   2. CI invokes this script. If CI kept its own spelling, this would be a fourth
+#      shape rather than the one shape, and a worker copying CI would still stall.
+#
+# Usage:
+#   obot.agent/scripts/obot-test                     everything CI runs
+#   obot.agent/scripts/obot-test suite               the node test suite only
+#   obot.agent/scripts/obot-test suite navigator     only test files whose path matches
+#   obot.agent/scripts/obot-test census              the style census
+#   obot.agent/scripts/obot-test policy              obot-policy validate + the verdict sweep
+#   obot.agent/scripts/obot-test --list              print the test files, run nothing
+#
+# Type it undecorated and as a single command: no `bash` prefix, no `./`, no
+# `cd … &&`, no `| tail -20`. Each of those costs the prefix match.
+
+set -o pipefail
+
+REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P) || exit 2
+cd "$REPO" || exit 2
+
+usage() {
+  sed -n '/^# Usage:/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+# Every test file in the repository, discovered rather than listed. Untracked files
+# are included on purpose: a worker writing a test before its implementation has one,
+# and a runner that could not see it would defeat the point of writing it first.
+discover() {
+  find tools scripts -type f -name '*.test.mjs' -not -path '*/node_modules/*' 2>/dev/null | sort
+}
+
+LIST=0
+STAGE=""
+FILTERS=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --list) LIST=1 ;;
+    -h|--help) usage; exit 0 ;;
+    all|suite|census|policy)
+      if [ -z "$STAGE" ]; then STAGE="$arg"; else FILTERS[${#FILTERS[@]}]="$arg"; fi ;;
+    -*)
+      echo "obot-test: unknown option '$arg'" >&2; usage >&2; exit 2 ;;
+    *)
+      if [ -z "$STAGE" ]; then
+        echo "obot-test: unknown stage '$arg' — expected one of: all, suite, census, policy." >&2
+        echo "obot-test: to filter the suite, name the stage first: obot-test suite $arg" >&2
+        exit 2
+      fi
+      FILTERS[${#FILTERS[@]}]="$arg" ;;
+  esac
+done
+[ -z "$STAGE" ] && STAGE="all"
+
+# The files this run covers, after any filters.
+FILES=()
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  if [ ${#FILTERS[@]} -eq 0 ]; then
+    FILES[${#FILES[@]}]="$f"
+  else
+    for pat in "${FILTERS[@]}"; do
+      case "$f" in *"$pat"*) FILES[${#FILES[@]}]="$f"; break ;; esac
+    done
+  fi
+done <<EOF
+$(discover)
+EOF
+
+if [ "$LIST" -eq 1 ]; then
+  # Paths and nothing else, so the output is machine-readable.
+  for f in ${FILES[@]+"${FILES[@]}"}; do echo "$f"; done
+  exit 0
+fi
+
+FAILED=()
+PASSED=()
+
+record() { # record <stage> <exit code>
+  if [ "$2" -eq 0 ]; then PASSED[${#PASSED[@]}]="$1"; else FAILED[${#FAILED[@]}]="$1"; fi
+}
+
+run_suite() {
+  if [ ${#FILES[@]} -eq 0 ]; then
+    # A filter that matches nothing is a red, not a green. An empty run reporting
+    # success is the defect this repository keeps finding in its own checks.
+    echo "obot-test: no test file matched ${FILTERS[*]:-(no filter)} — nothing was run" >&2
+    return 1
+  fi
+  echo "obot-test: suite — ${#FILES[@]} test files"
+  node --test "${FILES[@]}"
+}
+
+run_census() {
+  echo "obot-test: census"
+  # The same pipeline CI runs, and the same reason its exit code has to survive the
+  # pipe: without pipefail a red census exits with tee's status and reads as green.
+  tools/style-census --md | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+}
+
+run_policy() {
+  echo "obot-test: policy"
+  scripts/obot-policy validate || return 1
+  scripts/test/policy-sweep
+}
+
+case "$STAGE" in
+  suite)  run_suite;  record suite  $? ;;
+  census) run_census; record census $? ;;
+  policy) run_policy; record policy $? ;;
+  all)
+    run_suite;  record suite  $?
+    run_census; record census $?
+    run_policy; record policy $?
+    ;;
+esac
+
+# The verdict goes last and on its own line, because that is the part that survives
+# being summarised out of a long run.
+if [ ${#FAILED[@]} -eq 0 ]; then
+  echo "obot-test: PASS — ${PASSED[*]}"
+  exit 0
+fi
+echo "obot-test: FAIL — ${FAILED[*]}${PASSED:+ (passed: ${PASSED[*]})}"
+exit 1
