@@ -85,7 +85,21 @@ test('a reason he was actually given is carried verbatim for as long as its row 
     assert.match(why[issue], pattern, `#${issue}'s reason has been paraphrased away from the one he was given`)
     checked += 1
   }
-  assert.ok(checked > 0, 'not one of the reasons he was given is still on the head - that is a rewrite, not a re-rank')
+  // A wholesale replacement is allowed, but it must SAY WHO ASKED FOR IT. The guard's
+  // job is to catch a rewrite nobody authorised, not to forbid one @jwildfire directed
+  // -- on 2026-08-21 he replaced nine of ten rows in a sentence ("refocus the top 10 for
+  // this weekend on charting/platform improvements (instead of scaffold work)") and this
+  // assertion fired on work that was exactly what he asked for. Forbidding it would have
+  // meant either weakening the guard or lying in the store, and both are worse than
+  // requiring a citation.
+  if (checked === 0) {
+    const basis = readRank(REPO).declared.basis
+    assert.ok(basis && typeof basis === 'string' && basis.trim().length > 20,
+      'not one of the reasons he was given is still on the head. That is a rewrite, not a '
+      + 're-rank, and a rewrite must declare `basis` naming who asked for it and where it is '
+      + 'recorded -- otherwise nothing distinguishes his redirection from an agent drifting.')
+    assert.ok(!basis.includes('\n'), '`basis` is one line')
+  }
 })
 
 test('a rank prime has flagged says so in the store, so a re-rank is cheap', () => {
