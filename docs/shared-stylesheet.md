@@ -103,7 +103,7 @@ Never from memory — run `obot.agent/tools/style-census` and it will tell you, 
 | hub decisions landing (`obot.roadmap/scripts/build_decisions.mjs`) | adopted 2026-08-21, via the vendored copy. |
 | hub briefing (`obot.roadmap/scripts/roadmap/briefing.mjs`) | adopted 2026-08-21, via the vendored copy. |
 | `tools/session-hub` (the session dashboard) | registered exemption. Six of its tokens are agent-identity colours the sheet has no name for — [#296](https://github.com/jwildfire/obot.agent/issues/296). Its theme contract was fixed in place while it waits. |
-| decision artifacts, requirement design docs | frozen, not converted. A dated report is a record of what was said that day, and restyling it is rewriting it. 93 reports and 18 design docs carry their own palette; the census fails if either count grows. |
+| decision artifacts, requirement design docs | frozen, not converted. A dated report is a record of what was said that day, and restyling it is rewriting it. 94 reports and 18 design docs carry their own palette; the census fails if either count grows. |
 
 ## The other theme
 
@@ -123,7 +123,7 @@ Whether the two languages should converge is @jwildfire's call, not an agent's.
 
 ```
 obot.agent/tools/style-census            # every surface, and where its colours come from
-obot.agent/tools/style-census --findings # just the problems; exit 1 if any
+obot.agent/tools/style-census --findings # the problems and the gaps; exit 1 on a problem
 obot.agent/tools/style-census --md       # the Navigator's alarm form
 ```
 
@@ -135,6 +135,26 @@ What it refuses:
 - A dated archive that grew. You cannot fix the past; you may not add to it.
 - A vendored copy whose bytes differ from the canonical sheet.
 - A theme-contract fault on any surface: an unguarded `prefers-color-scheme` block with nothing later restating the light palette, or a dark theme with no explicit toggle. Three surfaces had one on 2026-08-21, all three reviewed by somebody.
+
+### What it cannot see, and says so
+
+Three states, not two. `clean` is a surface that was read; `drifted` is a surface that was read and carries a palette nobody registered; `unknown` is a surface that was not reachable at all.
+
+The census resolves `obot.agent` against its own checkout and every other repository against the workspace root, so on the CI runner — and on a laptop before the clones land — most of what it certifies is simply not there. Every skip for an absent clone is deliberate and stays deliberate: an absent clone is not a defect anybody on that machine can fix, and a check that is red for an unfixable reason is a check somebody switches off.
+
+What changed on 2026-08-21 ([#309](https://github.com/jwildfire/obot.agent/issues/309)) is that the skipping is no longer silent. Measured before the fix: `--findings` and `--md` printed byte-identical output whether or not `safety.viz`, `open.gismo` and `open.csr` were on the machine, and `--md` restated all five register entries as current including the three whose files it had never opened. On the runner, fifteen things went unexamined under the word `clean` — four roots, four registered exemptions, two archive ratchets and both vendored copies.
+
+Now every form names them, in the same run that reports what it could read:
+
+```
+UNKNOWN  safety.viz/site
+         root: safety.viz is not on this machine, so nothing under safety.viz/site was
+         walked — a surface there carrying its own palette would not be seen
+
+census: clean for what could be read — 15 things above went unexamined. Unknown, not clean.
+```
+
+An unknown does not exit 1 and does not use the alarm vocabulary, for the reason above. A declared root that is missing from a clone that IS present is the opposite case and is a finding: the surface moved and took its palette out of the census's sight, or the register is describing a shape the repository no longer has.
 
 Two spellings satisfy the guard, and refusing the second would be the check crying wolf at correct code. Either guard the media block as `:root:not([data-theme="light"])`, or restate the light palette in a later `:root[data-theme="light"]` block — the selectors have equal specificity, so the later wins. `open.csr` uses the second.
 

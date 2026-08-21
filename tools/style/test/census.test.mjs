@@ -14,7 +14,9 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-import { census, findings, palettes, consumesShared, isCssSelector, themeFaults, vendorDrift, resolve, workspaceRoot, PALETTE_MIN, REPO } from '../census.mjs';
+import os from 'node:os';
+
+import { census, findings, palettes, consumesShared, isCssSelector, themeFaults, vendorDrift, vendorReach, unmeasured, verdict, resolve, workspaceRoot, PALETTE_MIN, REPO } from '../census.mjs';
 import { ALLOWED, ARCHIVES, ROOTS, SHARED_SHEETS, VENDORED } from '../surfaces.mjs';
 import { ALARM_RE } from '../../ops-dashboard/lib/navigator.mjs';
 
@@ -297,21 +299,147 @@ test('a root that is not on this machine is reported, not counted clean', (t) =>
   assert.ok(r.surfaces.some((s) => s.file.startsWith('obot.agent/')), 'this repo is always measurable');
 });
 
-test('a workspace with only this repo in it is clean, not red', () => {
-  // The shape CI actually runs in: obot.agent checked out alone. Every guard that
-  // treats an absent clone as absence rather than as a defect is asserted here in one
-  // place, because getting any of them wrong turns main red for a clone the runner was
-  // never going to have — and a check that is red for a reason nobody can fix is a
-  // check somebody deletes.
-  const out = execFileSync(process.execPath, [path.join(REPO, 'tools', 'style-census'), '--findings'], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      OBOT_STYLE_DEST: ['obot.roadmap', 'safety.viz', 'open.gismo', 'open.csr']
-        .map((r) => `${r}:${path.join(REPO, 'tools', 'style', 'test', '__absent', r)}`).join(','),
-    },
-  });
-  assert.match(out, /census: clean/, out);
+// ------------------------------------------- the third state: what it did NOT read
+//
+// jwildfire/obot.agent#309. Every test below is written against the run rather than
+// against a surface, because that is where the hole was: each skip for an absent clone
+// was deliberate and right, and each one was silent, so `--findings` and `--md` printed
+// byte-identical output with safety.viz, open.gismo and open.csr cloned and without
+// them. A check that says the same thing about eight surfaces and about five is not
+// measuring the three.
+
+/** A constructed machine: every repo but this one pointed somewhere we built. */
+function onMachine(dests, argv = ['--findings']) {
+  const env = { ...process.env, OBOT_STYLE_DEST: Object.entries(dests).map(([r, d]) => `${r}:${d}`).join(',') };
+  const args = [path.join(REPO, 'tools', 'style-census'), ...argv];
+  try {
+    return { out: execFileSync(process.execPath, args, { encoding: 'utf8', env }), code: 0 };
+  } catch (err) {
+    return { out: String(err.stdout ?? ''), code: err.status ?? 1 };
+  }
+}
+
+const PALETTE = ':root { --paper:#F4F1EC; --card:#FDFCFA; --ink:#26211B; --accent:#B4470E; --rule:#E3DDD4; }\n';
+
+/**
+ * A machine with safety.viz on it, and the same machine without it — differing in
+ * nothing else. Every other repo is pinned at an absent path in both, so the run is
+ * identical on the CI runner and on his laptop and any difference is attributable.
+ */
+function twoMachines(t, { drifted = false } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'style-census-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const gone = (repo) => path.join(tmp, 'nothing-here', repo);
+  const sv = path.join(tmp, 'safety.viz');
+  fs.mkdirSync(path.join(sv, 'site'), { recursive: true });
+  // The registered path has to exist and carry a palette, or the run is measuring a
+  // stale exemption rather than a present-and-clean clone.
+  fs.writeFileSync(path.join(sv, 'site', 'site.css'), PALETTE);
+  if (drifted) fs.writeFileSync(path.join(sv, 'site', 'newpage.css'), PALETTE);
+  const others = { 'obot.roadmap': gone('obot.roadmap'), 'open.gismo': gone('open.gismo'), 'open.csr': gone('open.csr') };
+  return {
+    present: (argv) => onMachine({ ...others, 'safety.viz': sv }, argv),
+    absent: (argv) => onMachine({ ...others, 'safety.viz': gone('safety.viz') }, argv),
+  };
+}
+
+test('the verdict forms tell a clone that is absent from one that is present and clean', (t) => {
+  // The defect, watched. Before #309 both of these printed the same bytes, so nothing
+  // a reader could see distinguished "safety.viz is clean" from "safety.viz was never
+  // opened". The default register form always differed; the two that carry a verdict
+  // did not, and those are the ones the gate and the Navigator read.
+  const m = twoMachines(t);
+  for (const argv of [['--findings'], ['--md']]) {
+    const present = m.present(argv);
+    const absent = m.absent(argv);
+    assert.notEqual(present.out, absent.out, `${argv[0]} says the same thing whether or not safety.viz is on the machine`);
+    assert.match(absent.out, /safety\.viz\/site/, `${argv[0]} must name what it could not reach`);
+    assert.match(absent.out, /[Uu]nknown, not clean|UNKNOWN/, `${argv[0]} must say unknown rather than leave it out`);
+  }
+});
+
+test('a public site that drifts turns the census red, and goes unknown when its clone is absent', (t) => {
+  // The same drift on disk, twice: reachable, and not. One is a finding; the other is
+  // an explicit statement that nothing there was looked at. What it must never be is
+  // the word `clean`.
+  const m = twoMachines(t, { drifted: true });
+
+  const present = m.present();
+  assert.equal(present.code, 1, present.out);
+  assert.match(present.out, /FINDING {2}safety\.viz\/site\/newpage\.css/, present.out);
+
+  const absent = m.absent();
+  assert.equal(absent.code, 0, 'an absent clone is not a defect anybody on this machine can fix');
+  assert.doesNotMatch(absent.out, /newpage/, 'it cannot report a file it never opened');
+  assert.match(absent.out, /UNKNOWN {2}safety\.viz\/site\n {9}root:/, absent.out);
+  assert.doesNotMatch(absent.out, /census: clean —/, 'clean is a claim about surfaces that were read');
+});
+
+test('a registered exemption is not restated as current by a run that never opened it', (t) => {
+  const m = twoMachines(t);
+  const absent = m.absent(['--md']);
+  assert.match(absent.out, /safety\.viz\/site\/site\.css — NOT EXAMINED/, absent.out);
+  assert.doesNotMatch(absent.out, /registered exemptions outstanding/, 'the register count is a claim too');
+  const present = m.present(['--md']);
+  assert.match(present.out, /safety\.viz\/site\/site\.css — registered \d{4}-\d{2}-\d{2}/, present.out);
+});
+
+test('a workspace with only this repo in it is unknown, not clean, and still not red', () => {
+  // The shape CI actually runs in: obot.agent checked out alone. It must not be red —
+  // a check that fails for a clone the runner was never going to have is a check
+  // somebody deletes — and it must not say `clean` either, which is what it used to
+  // say about fifteen things it had not looked at. This test asserted that sentence
+  // until #309; the defect was written down here as the expected behaviour.
+  const gone = path.join(REPO, 'tools', 'style', 'test', '__absent');
+  const { out, code } = onMachine(Object.fromEntries(
+    ['obot.roadmap', 'safety.viz', 'open.gismo', 'open.csr'].map((r) => [r, path.join(gone, r)])));
+  assert.equal(code, 0, out);
+  assert.match(out, /census: clean for what could be read — \d+ things above went unexamined\. Unknown, not clean\./, out);
+  assert.doesNotMatch(out, /census: clean —/, out);
+  for (const repo of ['obot.roadmap', 'safety.viz', 'open.gismo', 'open.csr']) {
+    assert.ok(out.includes(`${repo} is not on this machine`), `${repo} went unmeasured and the run has to say so`);
+  }
+});
+
+test('a declared root gone from a clone that IS present is a finding, not an absence', (t) => {
+  // The distinction vendorDrift() already draws one level down. A surface that moved
+  // and took its palette out of the census\'s sight reads exactly like a laptop that
+  // never had the clone, unless somebody checks the clone directory first.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'style-census-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const sv = path.join(tmp, 'safety.viz');
+  fs.mkdirSync(path.join(sv, 'docs'), { recursive: true }); // the clone is here; site/ is not
+  const { out, code } = onMachine({ 'safety.viz': sv });
+  assert.equal(code, 1, out);
+  assert.match(out, /FINDING {2}safety\.viz\/site\n {9}root missing:/, out);
+  assert.doesNotMatch(out, /UNKNOWN {2}safety\.viz\/site\n/, 'a clone that is here has not gone missing');
+  assert.doesNotMatch(out, /stale exemption: .*\n/, 'the vanished root is the cause; "remove the entry" is the wrong advice for it');
+});
+
+test('the skips nobody could see are each named', () => {
+  // Three silent skips beyond the three public sites, all live at once on the runner:
+  // an exemption not re-checked, an archive ratchet not counted, and a vendored copy
+  // never compared to its canonical bytes.
+  const gone = path.join(REPO, 'tools', 'style', 'test', '__absent');
+  const r = census({ root: gone });
+  const kinds = new Set(unmeasured(r).map((u) => u.kind));
+  for (const kind of ['root', 'registered exemption', 'archive ratchet', 'vendored copy']) {
+    assert.ok(kinds.has(kind), `${kind} is skipped when its clone is absent, and the skip has to be visible`);
+  }
+  assert.equal(vendorReach({ root: gone }).checked.length, 0, 'nothing was compared');
+  assert.equal(vendorReach({ root: gone }).unchecked.length, VENDORED.length, 'and every pair says so');
+});
+
+test('unknown, clean and drifted are three states, and only one of them exits 1', () => {
+  assert.equal(verdict([], []).state, 'clean');
+  assert.equal(verdict([], [{ kind: 'root' }]).state, 'unknown');
+  assert.equal(verdict([{ file: 'x' }], []).state, 'drifted');
+  assert.match(verdict([], [{ kind: 'root' }]).line, /unknown, not clean/);
+  assert.doesNotMatch(verdict([], [{ kind: 'root' }]).line, /^Every declared surface/);
+  // The alarm vocabulary is for drift. An absent clone is a fact about the machine,
+  // not something wrong with the work, and every other honest-absence line this
+  // program prints stays out of ALARM_RE for the same reason.
+  assert.ok(!ALARM_RE.test(verdict([], [{ kind: 'root' }]).line));
 });
 
 test('every surface this repo generates actually parses', async () => {

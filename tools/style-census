@@ -5,13 +5,25 @@
 //   obot.agent/tools/style-census --findings # just the problems; exit 1 if any
 //   obot.agent/tools/style-census --md       # the Navigator's alarm form
 //
+// Every form says what it could not reach, in the same run that says what it could.
+// Before 2026-08-21 only the first form did, and the two that carry a verdict printed
+// byte-identical output whether or not safety.viz, open.gismo and open.csr were on the
+// machine — which made `clean` a claim about files nothing had opened
+// (jwildfire/obot.agent#309).
+//
+// Exit codes: 1 when something drifted, 0 otherwise. An unknown does not exit 1 on
+// purpose — see unmeasured() in tools/style/census.mjs — so it has to be legible in the
+// text instead, which is why it is printed in all three forms rather than one.
+//
 // Task jwildfire/obot.agent#295. What it enforces and why lives in tools/style/census.mjs.
-import { census, findings } from './style/census.mjs';
+import { census, findings, unmeasured, verdict } from './style/census.mjs';
 import { ALLOWED } from './style/surfaces.mjs';
 
 const argv = process.argv.slice(2);
 const result = census();
 const problems = findings(result);
+const unknowns = unmeasured(result);
+const said = verdict(problems, unknowns);
 
 if (argv.includes('--md')) {
   // The Navigator alarm-tests unindented plain lines and preamble notes only — a
@@ -19,12 +31,32 @@ if (argv.includes('--md')) {
   // line under the heading and the rows stay bullets.
   console.log('## Style census');
   console.log('');
-  console.log(problems.length
-    ? `**STYLE CENSUS GAP** — ${problems.length} surface${problems.length === 1 ? '' : 's'} not accounted for`
-    : `Every surface accounts for its colours. ${ALLOWED.length} registered exemption${ALLOWED.length === 1 ? '' : 's'} outstanding.`);
+  // `unknown` is deliberately NOT in the alarm vocabulary (ALARM_RE wants GAP,
+  // FINDING, BREACHED, FAILED, DOWN or BROKEN). An absent clone is a fact about the
+  // machine rather than something wrong with the work, and the same call was made for
+  // every other honest-absence line the sweep prints. A root that has vanished from a
+  // clone that IS present is a finding, and alarms with the rest.
+  console.log(said.state === 'drifted' ? `**STYLE CENSUS GAP** — ${said.line}` : said.line);
+  // The register's own count is a claim too. Saying "5 outstanding" on a machine that
+  // opened two of them is the same defect one line up, in smaller type.
+  const unseen = unknowns.filter((u) => u.kind === 'registered exemption').length;
+  console.log('');
+  console.log(unseen
+    ? `${ALLOWED.length} registered exemption${ALLOWED.length === 1 ? '' : 's'} on the register, ${unseen} of which were not examined this run.`
+    : `${ALLOWED.length} registered exemption${ALLOWED.length === 1 ? '' : 's'} outstanding.`);
   console.log('');
   for (const p of problems) console.log(`- ${p.file} — ${p.kind}: ${p.detail}`);
-  for (const a of ALLOWED) console.log(`- ${a.file} — registered ${a.since}, removed by ${a.issue}`);
+  for (const a of ALLOWED) {
+    // A register entry the run never opened is not restated as though it had been.
+    const unknown = unknowns.find((u) => u.kind === 'registered exemption' && u.what === a.file);
+    console.log(unknown
+      ? `- ${a.file} — NOT EXAMINED: ${unknown.why}. Unknown, not clean.`
+      : `- ${a.file} — registered ${a.since}, removed by ${a.issue}`);
+  }
+  for (const u of unknowns) {
+    if (u.kind === 'registered exemption') continue;
+    console.log(`- ${u.what} — not examined (${u.kind}): ${u.why}. Unknown, not clean.`);
+  }
   process.exit(problems.length ? 1 : 0);
 }
 
@@ -46,6 +78,14 @@ if (!argv.includes('--findings')) {
   console.log('');
 }
 
-if (!problems.length) { console.log('census: clean — no surface carries an unregistered palette.'); process.exit(0); }
+for (const u of unknowns) console.log(`UNKNOWN  ${u.what}\n         ${u.kind}: ${u.why}`);
+if (unknowns.length) console.log('');
+
+if (!problems.length) {
+  console.log(said.state === 'unknown'
+    ? `census: clean for what could be read — ${unknowns.length} thing${unknowns.length === 1 ? '' : 's'} above went unexamined. Unknown, not clean.`
+    : 'census: clean — every declared surface was read, and none carries an unregistered palette.');
+  process.exit(0);
+}
 for (const p of problems) console.log(`FINDING  ${p.file}\n         ${p.kind}: ${p.detail}`);
 process.exit(1);

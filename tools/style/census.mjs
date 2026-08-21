@@ -38,6 +38,23 @@
 // record of what was said on a day, and repainting it would be rewriting it. So the
 // count is frozen at what it was, and the census goes red if it GROWS. You cannot fix
 // the past, and you are not allowed to add to it.
+//
+// ## And three states for the RUN, which is a different axis and was missing
+//
+// The verdicts above classify a surface that was read. A run also has to say what it
+// did NOT read, and until 2026-08-21 it did not: every skip for an absent clone was
+// deliberate and right, and every one of them was silent. The result was a check that
+// printed the same bytes on a machine with eight surfaces to measure and on a machine
+// with five — `census: clean` either way, and the Navigator's alarm form restating all
+// five register entries as current including the three whose files it never opened.
+//
+//   clean    read, and its colours come from a shared sheet or a dated register entry.
+//   drifted  read, and carries a palette nobody registered. Exit 1.
+//   unknown  not reachable. Never reported as clean. Not red either — nobody on a
+//            machine without a clone can fix its absence, and a check that is red for
+//            an unfixable reason is a check somebody switches off.
+//
+// See unmeasured() and verdict() below. Task jwildfire/obot.agent#309.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -216,6 +233,7 @@ export function census({ root = workspaceRoot() } = {}) {
   const surfaces = [];
   const archives = [];
   const missingRoots = [];
+  const vanishedRoots = [];
   const unreadable = [];
 
   const sharedAbs = new Set(SHARED_SHEETS.map((p) => resolve(root, p)).filter(Boolean));
@@ -226,7 +244,20 @@ export function census({ root = workspaceRoot() } = {}) {
 
   for (const rootSpec of ROOTS) {
     const abs = resolve(root, rootSpec.dir);
-    if (!abs || !fs.existsSync(abs)) { missingRoots.push(rootSpec.dir); continue; }
+    if (!abs) { missingRoots.push(rootSpec.dir); continue; }
+    if (!fs.existsSync(abs)) {
+      // A clone that is not on this machine is absent. A declared root that has gone
+      // from a clone that IS here is drift, and the two must not share a sentence:
+      // one is a fact about this laptop, the other is a surface that moved and took
+      // its palette somewhere nobody is looking. This is the same distinction
+      // vendorDrift() already draws one level down, where a missing FILE inside a
+      // present clone is real drift and reads as absence only if nobody checks the
+      // clone first.
+      const repoDir = resolve(root, rootSpec.dir.split('/')[0]);
+      if (repoDir && fs.existsSync(repoDir)) vanishedRoots.push(rootSpec.dir);
+      else missingRoots.push(rootSpec.dir);
+      continue;
+    }
     for (const file of walk(abs)) {
       if (isTest(file)) continue;
       const rel = path.join(rootSpec.dir, path.relative(abs, file));
@@ -259,28 +290,47 @@ export function census({ root = workspaceRoot() } = {}) {
 
   surfaces.sort((a, b) => a.file.localeCompare(b.file));
   archives.sort((a, b) => a.file.localeCompare(b.file));
-  return { root, surfaces, archives, missingRoots, unreadable };
+  return { root, surfaces, archives, missingRoots, vanishedRoots, unreadable };
+}
+
+/**
+ * Which vendored pairs this machine can actually compare, and which it cannot.
+ *
+ * The hub's deploy checks out only itself, so a cross-repo import is impossible and
+ * vendoring is the only mechanism left. A vendored copy is only honest with the
+ * byte-for-byte check behind it — which means a run that could not perform that check
+ * has to say so rather than fall through to the same word as a run that did.
+ */
+export function vendorReach({ root = workspaceRoot() } = {}) {
+  const checked = [];
+  const unchecked = [];
+  for (const v of VENDORED) {
+    // A destination repo that is not on this machine is absent, not drifted —
+    // inventing a finding here would make CI red for a clone it was never going to
+    // have. But the pair still went unchecked, and that is the half this used to
+    // swallow: `continue` said nothing, so a bare runner checked neither vendored
+    // sheet and the run still printed `clean`. Checking the repo DIRECTORY rather
+    // than the file is the point: a missing file inside a present clone is real
+    // drift, and must still be caught.
+    const repoDir = resolve(root, v.to.split('/')[0]);
+    if (!resolve(root, v.to) || !repoDir || !fs.existsSync(repoDir)) {
+      unchecked.push({ ...v, why: `${v.to.split('/')[0]} is not on this machine, so the copy was never compared to ${v.from}` });
+      continue;
+    }
+    checked.push(v);
+  }
+  return { checked, unchecked };
 }
 
 /**
  * A vendored sheet must be the canonical bytes. This is what makes a copy that cannot
- * drift a different thing from a copy nobody is looking at — the hub's deploy checks
- * out only itself, so a cross-repo import is impossible and vendoring is the only
- * mechanism left. It is only honest with this check behind it.
+ * drift a different thing from a copy nobody is looking at.
  */
 export function vendorDrift({ root = workspaceRoot() } = {}) {
   const out = [];
-  for (const v of VENDORED) {
+  for (const v of vendorReach({ root }).checked) {
     const src = resolve(root, v.from);
     const dst = resolve(root, v.to);
-    // A destination repo that is not on this machine is absent, not drifted. The
-    // caller reports it as a missing root; inventing a finding here would make CI red
-    // for a clone it was never going to have. Checking the repo directory rather than
-    // the file is the point: a missing FILE inside a present clone is real drift, and
-    // must still be caught.
-    if (!dst) continue;
-    const repoDir = resolve(root, v.to.split('/')[0]);
-    if (!repoDir || !fs.existsSync(repoDir)) continue;
     if (!fs.existsSync(src)) { out.push({ file: v.from, why: 'canonical sheet missing' }); continue; }
     if (!fs.existsSync(dst)) { out.push({ file: v.to, why: 'vendored copy missing' }); continue; }
     const a = fs.readFileSync(src, 'utf8');
@@ -339,6 +389,82 @@ export function themeFaults(surface) {
   return out;
 }
 
+/**
+ * The third state: what this run could not look at, and therefore cannot speak for.
+ *
+ * Everything below was already being skipped, each skip deliberate and each one right
+ * — an absent clone must not turn CI red for a checkout the runner was never going to
+ * have. What was wrong is that the skipping was silent, so a run that examined three
+ * surfaces and a run that examined eight both ended on the word `clean`. Measured on
+ * 2026-08-21: `--findings` and `--md` printed byte-identical output with `safety.viz`,
+ * `open.gismo` and `open.csr` cloned and without them, and `--md` restated all five
+ * register entries as current including the three whose files it never opened.
+ *
+ * This is the rule `tools/ops-dashboard/lib/absent.mjs` already states for every other
+ * surface here — a surface may print a figure only when it read the file the figure
+ * comes from — applied to a verdict rather than to a figure. Unknown is not clean and
+ * it is not red: nobody on a machine without a clone can fix its absence, and a check
+ * that is red for an unfixable reason is a check somebody switches off.
+ *
+ * Four kinds, because they hide different things:
+ *
+ *   root                  nothing under it was walked, so a NEW surface carrying its
+ *                         own palette there is invisible. The biggest of the four.
+ *   registered exemption  the dated entry was not re-checked, so it cannot be found
+ *                         stale and its claim is this file's word rather than a
+ *                         measurement.
+ *   archive ratchet       the frozen count was not counted, so the ratchet did not
+ *                         hold this run.
+ *   vendored copy         the copy was never compared to its canonical bytes.
+ */
+export function unmeasured(result = census()) {
+  const out = [];
+  const missing = result.missingRoots ?? [];
+  const under = (rel) => missing.find((dir) => rel.startsWith(dir));
+
+  for (const dir of missing) {
+    const repo = dir.split('/')[0];
+    out.push({ what: dir, kind: 'root', why: `${repo} is not on this machine, so nothing under ${dir} was walked — a surface there carrying its own palette would not be seen` });
+  }
+  for (const a of ALLOWED) {
+    const dir = under(a.file);
+    if (dir) out.push({ what: a.file, kind: 'registered exemption', why: `registered ${a.since} and not re-checked this run — ${dir} is not on this machine` });
+  }
+  for (const arc of ARCHIVES) {
+    const dir = under(arc.dir);
+    if (dir) out.push({ what: arc.dir, kind: 'archive ratchet', why: `frozen at ${arc.frozen} on ${arc.since} and not counted this run — ${dir} is not on this machine` });
+  }
+  for (const v of vendorReach({ root: result.root }).unchecked) {
+    out.push({ what: v.to, kind: 'vendored copy', why: v.why });
+  }
+  return out;
+}
+
+/**
+ * The one-line verdict, in three states, single-sourced.
+ *
+ * Both verdict-carrying forms said the same thing in their own words, and both said
+ * `clean` about surfaces they never opened. One sentence, one place — which is the
+ * argument of this whole requirement, applied to the check rather than to a palette.
+ *
+ * `drifted` is the only state that exits non-zero. `unknown` deliberately does not:
+ * see unmeasured() above.
+ */
+export function verdict(problems, unknowns = []) {
+  const roots = unknowns.filter((u) => u.kind === 'root').length;
+  const claims = unknowns.length - roots;
+  const gap = roots || claims
+    ? ` ${roots} declared root${roots === 1 ? '' : 's'} and ${claims} registered claim${claims === 1 ? '' : 's'} were not on this machine and went unexamined — unknown, not clean.`
+    : '';
+  if (problems.length) {
+    return { state: 'drifted', line: `${problems.length} surface${problems.length === 1 ? '' : 's'} not accounted for.${gap}` };
+  }
+  if (unknowns.length) {
+    return { state: 'unknown', line: `Clean for what could be read.${gap}` };
+  }
+  return { state: 'clean', line: 'Every declared surface was read, and every one accounts for its colours.' };
+}
+
 /** Every problem the census found, as one list. Empty means the roll-out is still whole. */
 export function findings(result = census()) {
   const out = [];
@@ -356,6 +482,10 @@ export function findings(result = census()) {
     // only obot.agent, so without this every entry for another repo would read as
     // "no longer needed" and turn the run red for a clone it was never going to have.
     if (result.missingRoots.some((dir) => a.file.startsWith(dir))) continue;
+    // A root that vanished from a present clone is already reported below, and it is
+    // the true cause. Repeating it here as "remove the entry" would be advice that
+    // makes the register agree with a directory that should not be gone.
+    if ((result.vanishedRoots ?? []).some((dir) => a.file.startsWith(dir))) continue;
     if (!result.surfaces.some((s) => s.file === a.file)) {
       out.push({ file: a.file, kind: 'stale exemption', detail: 'registered as carrying its own palette, but the census no longer finds one — remove the entry' });
     }
@@ -367,6 +497,12 @@ export function findings(result = census()) {
     if (n > arc.frozen) {
       out.push({ file: arc.dir, kind: 'archive grew', detail: `${n} pages carry their own palette, frozen at ${arc.frozen} on ${arc.since} — a new page must consume a shared sheet` });
     }
+  }
+  for (const dir of result.vanishedRoots ?? []) {
+    // Not an absence: the clone is here and the declared root is not. Either the
+    // surface moved and took its palette out of the census's sight, or surfaces.mjs
+    // is describing a shape this repository no longer has. Both want a person.
+    out.push({ file: dir, kind: 'root missing', detail: `declared in tools/style/surfaces.mjs, and ${dir.split('/')[0]} IS on this machine, but the directory is not there — the surface moved, or the register is describing a shape this repo no longer has` });
   }
   for (const d of vendorDrift({ root: result.root })) {
     out.push({ file: d.file, kind: 'vendor drift', detail: d.why });
