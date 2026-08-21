@@ -9,10 +9,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  DEATH, IDLE_MIN, MAX_WAKES_PER_RUN, REWAKE_MIN, STALL_MIN, TRIGGERED_QUIET_MIN,
+  DEATH, IDLE_MIN, MAX_WAKES_PER_RUN, RESOLVED_NAMES, RETIRES, RETIRE_MIN, REWAKE_MIN, STALL_MIN,
+  TRIGGERED_QUIET_MIN,
   WAKE_WINDOW_HOURS, classify, deliverable, hostWasAway, idleDetection, isBoilerplateDetail,
-  judgedWorkers, listenerState, misreadHolds, outsideWindow, parseWakeLog, pending, readJobs,
-  scrubDetail, verdictKeys, wakeLine, wakeSection, workerIdOf, WAITING_SETTLE_MIN,
+  judgedAt, judgedSince, judgedWorkers, listenerState, misreadHolds, outsideWindow,
+  parseWakeLog, pending, readJobs,
+  scrubDetail, triage, TIMED_VERDICT, unactionable, verdictKeys, wakeLine, wakeSection, workerIdOf,
+  WAITING_SETTLE_MIN,
 } from '../wake.mjs'
 
 const NOW = new Date('2026-08-17T06:00:00Z')
@@ -161,13 +164,19 @@ test('a suspended host suppresses the elapsed-time reading for a manager too', (
     'a detector cannot run on a sleeping host, so elapsed time proves nothing')
 })
 
-test('the whole fleet at once: the admiral is seen, the standing roles are not', () => {
-  const found = pending([
+test('the whole fleet at once: the admiral is seen, the resting roles are not', () => {
+  const found = triage([
     manager({ updatedAt: agoMin(612) }),
     standing('\u{1F3A9}\u{1F916}', { id: 'p1' }),
     standing('\u{1F9ED}\u{1F916}', { id: 'n1' }),
   ], { now: NOW })
-  assert.deepEqual(found.map((d) => d.key), ['dead:64a7980b'])
+  // The admiral is the only one read at all — that is what this has always asserted.
+  // Since obot.agent#157 a dead reading is reported once and then stands rather than
+  // repeating, so it lands in `standing` rather than in `live`; what must not change
+  // is that prime and the Navigator produce no reading of any kind.
+  assert.deepEqual([...found.live, ...found.standing].map((d) => d.job), ['64a7980b'])
+  assert.deepEqual(found.standing.map((d) => d.kind), ['dead'])
+  assert.deepEqual(found.live, [])
 })
 
 // ---- suppression: the delivery record is the ledger, not new state ----------
@@ -582,4 +591,230 @@ test('readJobs scrubs boilerplate at the read boundary, so no consumer has to re
   }
   const [j] = readJobs('/jobs', { read, list: () => ['b4c16f12'] })
   assert.equal(j.detail, '', 'the Agents tab renders this field as a task tag on a surface @jwildfire reads')
+})
+
+// ---- the list can only grow: three states, and none of them collapsed ------
+//
+// obot.agent#157. Nine minutes after this channel was armed it had woken the
+// Navigator three times for the same three workers, all of them already judged and
+// none of them able to change. The fixtures below are those three workers and the
+// two later ones that prove the fix did not overshoot.
+
+/** The 2026-08-17 05:21 batch, exactly as the job records held it. */
+const batch = () => [
+  job({ id: '5ccdd375', name: '👯🤖 W0007 2026-08-16 lastlook', state: 'working', tempo: 'blocked',
+    needs: 'approve Bash: gh pr create …', updatedAt: agoMin(1188) }),
+  job({ id: '03046e41', name: '👯🤖 W0008 2026-08-16 d0018', state: 'working', tempo: 'blocked',
+    needs: 'approve Write: drafts/…', updatedAt: agoMin(1180) }),
+  job({ id: 'cdd4df64', name: '👯🤖 W0009 2026-08-16 rmbuild', state: 'blocked', tempo: 'blocked',
+    detail: "API Error: Can't reach the API server", updatedAt: agoMin(1034) }),
+]
+
+const judgedAll = new Set(['W0007', 'W0008', 'W0009'])
+/** All three verdicts were written at 21:31 the evening before — after every onset. */
+const judgedThen = new Map([['W0007', NOW.getTime()], ['W0008', NOW.getTime()], ['W0009', NOW.getTime()]])
+
+test('the three that woke it three times in nine minutes wake nothing at all', () => {
+  const t = triage(batch(), { now: NOW, judged: judgedAll, judgedAt: judgedThen })
+  assert.deepEqual(t.live, [], 'nothing pending')
+  assert.deepEqual(t.standing, [], 'and nothing standing either — a verdict outranks a retirement')
+  assert.deepEqual(t.resolved.map((d) => d.worker).sort(), ['W0007', 'W0008', 'W0009'])
+  assert.equal(deliverable(t.live, [], NOW).deliver.length, 0, 'no wake goes out')
+})
+
+test('and each of the three is still findable, with what settled it', () => {
+  const t = triage(batch(), { now: NOW, judged: judgedAll, judgedAt: judgedThen })
+  const md = wakeSection({ pending: t.live, resolved: t.resolved, standing: t.standing, jobsRead: true })
+  for (const w of ['W0007', 'W0008', 'W0009']) assert.match(md, new RegExp(w), `${w} is named, not dropped`)
+  assert.match(md, /resolved: 3 stop-state/)
+  assert.match(md, /delivery record/, 'and the reader is told where the verdicts are')
+})
+
+test('a verdict recorded BEFORE the stop-state began settles nothing — the W0049 case', () => {
+  // Judged `confirmed` at 06:22 on 2026-08-18, went on working, found parked at
+  // 06:55. That wake was right, and it produced the `drift` verdict at 07:59.
+  const j = job({ id: '006fec4f', name: '👯🤖 W0049 2026-08-18 oa198conflict', state: 'working',
+    tempo: 'blocked', needs: 'approve Bash: gh api …', updatedAt: agoMin(33) })
+  const t = triage([j], { now: NOW, judged: new Set(['W0049']),
+    judgedAt: new Map([['W0049', NOW.getTime() - 60 * 60000]]) })
+  assert.deepEqual(t.live.map((d) => d.kind), ['waiting'], 'the later stop-state still wakes')
+  assert.deepEqual(t.resolved, [])
+})
+
+test('a caller with only the set of names keeps the old, untimed suppression', () => {
+  // The admiral and every test written before this pass a Set. A gate that switched
+  // itself off for a field they do not pass would be a silent widening.
+  const j = job({ state: 'done', firstTerminalAt: agoMin(30) })
+  assert.equal(triage([j], { now: NOW, judged: new Set(['W0007']) }).live.length, 0)
+  assert.equal(judgedSince(j, { at: j.firstTerminalAt }, new Set(['W0007'])).at, null)
+})
+
+// ---- standing: reported once, then never again, and never silently ----------
+
+test('a dead worker is unactionable the instant it is read — there is no hour that helps', () => {
+  const dead = job({ id: 'x1', state: 'blocked', tempo: 'blocked',
+    detail: 'API Error: Connection refused', updatedAt: agoMin(11) })
+  const t = triage([dead], { now: NOW })
+  assert.deepEqual(t.live, [])
+  assert.deepEqual(t.standing.map((d) => d.kind), ['dead'])
+  assert.match(t.standing[0].line, /record is terminal/)
+  assert.match(t.standing[0].line, /delivery-log/, 'and it says what it needs')
+})
+
+test('the dead worker woken seven times over sixteen hours is woken once', () => {
+  // dead:63b5b6fb — W0035 died at 07:39 on 2026-08-17 and the channel woke for it
+  // at 07:39, 12:36, 13:38, 14:38, 16:49, 22:10 and 23:40.
+  const dead = job({ id: '63b5b6fb', name: '👯🤖 W0035 2026-08-17 agenttime', state: 'blocked',
+    tempo: 'blocked', detail: "You've hit your session limit · API Error", updatedAt: agoMin(2) })
+  const first = triage([dead], { now: NOW }).standing
+  const { deliver } = deliverable(first, [], NOW)
+  assert.equal(deliver.length, 1, 'the death is reported')
+  // Sixteen hours later, on the same unchanged record.
+  const later = new Date(NOW.getTime() + 16 * 60 * 60000)
+  const log = parseWakeLog(wakeLine(deliver[0], NOW.toISOString()))
+  const again = deliverable(triage([dead], { now: later }).standing, log, later)
+  assert.equal(again.deliver.length, 0, 'and never again')
+  assert.match(again.held[0].why, /already delivered/)
+})
+
+test('a waiting worker keeps waking while anyone might still answer, then retires once', () => {
+  const stuck = (m) => job({ id: 'w1', tempo: 'blocked', needs: 'approve Bash: rm …', updatedAt: agoMin(m) })
+  // Inside the window nothing is retired: this is the channel working.
+  const early = triage([stuck(20)], { now: NOW })
+  assert.deepEqual(early.live.map((d) => d.kind), ['waiting'])
+  assert.deepEqual(early.standing, [])
+  // Past it, exactly once, and with the ask changed from "resolve this" to "stop it".
+  const late = triage([stuck(RETIRE_MIN + 1)], { now: NOW })
+  assert.deepEqual(late.live, [])
+  assert.equal(late.standing.length, 1)
+  assert.match(late.standing[0].line, /nobody else can answer/)
+  assert.match(late.standing[0].key, /^standing:waiting:/, 'its own key: the ask is a different ask')
+})
+
+test('a retirement is recorded in the append-only log, not implied by silence', () => {
+  const late = triage([job({ id: 'w1', tempo: 'blocked', needs: 'approve Bash: rm …',
+    updatedAt: agoMin(RETIRE_MIN + 1) })], { now: NOW }).standing
+  const line = wakeLine(deliverable(late, [], NOW).deliver[0], NOW.toISOString())
+  assert.match(line, /WAKE standing:waiting:w1/, 'greppable, timestamped, permanent')
+  assert.equal(parseWakeLog(line)[0].key, 'standing:waiting:w1')
+})
+
+test('a second episode of the same job is new, and the first retirement does not gag it', () => {
+  const key = 'standing:waiting:w1'
+  const old = parseWakeLog(`${agoMin(600)} WAKE ${key} — retired the first time`)
+  // It came back, worked, and got stuck again. Same job, same key, later onset.
+  const again = triage([job({ id: 'w1', tempo: 'blocked', needs: 'approve Bash: rm …',
+    updatedAt: agoMin(RETIRE_MIN + 1) })], { now: NOW }).standing
+  assert.equal(deliverable(again, old, NOW).deliver.length, 1, 'a later onset is a later episode')
+})
+
+// ---- and the bound that was already there, untouched ------------------------
+
+test('no closeout is ever retired: the two suppressions cover disjoint kinds', () => {
+  assert.ok(!RETIRES.has('stopped'), 'the closeout nag is what this channel is for')
+  const ancient = job({ state: 'done', tempo: 'idle', firstTerminalAt: agoMin(23 * 60),
+    updatedAt: agoMin(23 * 60) })
+  const t = triage([ancient], { now: NOW })
+  assert.deepEqual(t.live.map((d) => d.kind), ['stopped'],
+    'still nagging at 23h, however long it has not moved')
+  assert.equal(unactionable(t.live[0], ancient, NOW), null)
+})
+
+test('the window still bounds closeouts and only closeouts, at the number it always had', () => {
+  assert.equal(WAKE_WINDOW_HOURS, 24)
+  const old = job({ state: 'done', firstTerminalAt: agoMin(WAKE_WINDOW_HOURS * 60 + 60) })
+  assert.deepEqual(triage([old], { now: NOW }).live, [])
+  assert.deepEqual(triage([old], { now: NOW }).standing, [], 'counted by the bound, not by a retirement')
+  assert.equal(outsideWindow([old], { now: NOW }), 1)
+})
+
+// ---- what the reader sees ---------------------------------------------------
+
+test('a fleet with standing entries is never reported as clear', () => {
+  const t = triage([job({ id: 'x1', state: 'blocked', tempo: 'blocked',
+    detail: 'API Error: Connection refused', updatedAt: agoMin(11) })], { now: NOW })
+  const md = wakeSection({ pending: t.live, standing: t.standing, resolved: t.resolved, jobsRead: true })
+  assert.ok(!/wake: clear/.test(md), 'a list nobody can act on is not a clear one')
+  assert.match(md, /nothing anyone can act on/)
+  assert.match(md, /standing: 1 stop-state/)
+  assert.match(md, /### Standing/)
+})
+
+test('a genuinely new stop-state is the first row, not the fourth', () => {
+  const jobs = [
+    ...batch(),
+    job({ id: 'fresh', name: '👯🤖 W0114 2026-08-21 wakedrain', state: 'done', firstTerminalAt: agoMin(4) }),
+  ]
+  // The three from yesterday are unjudged this time, so nothing but the retirement
+  // keeps them out of the way — which is the case the issue is actually about.
+  const t = triage(jobs, { now: NOW })
+  const md = wakeSection({ pending: t.live, standing: t.standing, resolved: t.resolved, jobsRead: true })
+  const rows = md.split('\n').filter((l) => l.startsWith('- '))
+  assert.match(rows[0], /W0114/, 'the new one leads')
+  assert.equal(t.live.length, 1)
+  assert.equal(t.standing.length, 3, 'and the other three stand rather than repeat')
+})
+
+test('standing rows sit BELOW the pending list, never above it', () => {
+  const t = triage([...batch(), job({ id: 'fresh', name: '👯🤖 W0114 x', state: 'done',
+    firstTerminalAt: agoMin(4) })], { now: NOW })
+  const md = wakeSection({ pending: t.live, standing: t.standing, resolved: t.resolved, jobsRead: true })
+  assert.ok(md.indexOf('### Pending') < md.indexOf('### Standing'))
+})
+
+test('the counts the section prints are the counts it was given — nothing double-counted', () => {
+  const t = triage(batch(), { now: NOW, judged: new Set(['W0007']), judgedAt: judgedThen })
+  assert.equal(t.live.length + t.resolved.length + t.standing.length, 3,
+    'every detection lands in exactly one of the three')
+  assert.equal(t.resolved.length, 1)
+  assert.equal(t.standing.length, 2)
+})
+
+test('judgedAt takes the LAST verdict, because a correction is written as a new line', () => {
+  const m = judgedAt([
+    JSON.stringify({ op: 'verdict', worker: 'W0009', at: '2026-08-16T21:31:39+01:00' }),
+    JSON.stringify({ op: 'verdict', worker: 'W0009', at: '2026-08-16T21:34:22+01:00' }),
+    '{"op": "call", "id": "n0065", "at": "2026-08-16T21:00:00+01:00"}',
+    '{"op": "verdict", "worker": "W00',
+    JSON.stringify({ op: 'verdict', worker: 'W0013' }),  // no timestamp: unorderable
+  ].join('\n'))
+  assert.equal(m.get('W0009'), Date.parse('2026-08-16T21:34:22+01:00'))
+  assert.ok(!m.has('W0013'), 'a verdict with no clock cannot order anything, so it carries none')
+  assert.ok(!m.has('n0065'))
+})
+
+test('a closeout is judged untimed, because the watermark LAGS the verdict that judges it', () => {
+  // Learned from the machine, not reasoned out, and the fix would have shipped
+  // without it: 16 of the 118 closeouts on this machine that join to a verdict carry
+  // one recorded BEFORE `firstTerminalAt` — median lead 4 minutes, worst 23 hours —
+  // because the Navigator judges the close-out REPORT and the harness stamps the
+  // watermark when the process finally goes terminal. Timing this gate turned a live
+  // pending list of 0 into one of 4 and would have grown with every worker judged
+  // from then on: an already-judged closeout nagging for ever, which is the exact
+  // defect obot.agent#157 is about, arriving through its own fix.
+  const closed = job({ state: 'done', tempo: 'idle', firstTerminalAt: agoMin(30) })
+  const judgedNineMinutesEarlier = new Map([['W0007', NOW.getTime() - 39 * 60000]])
+  const t = triage([closed], { now: NOW, judged: new Set(['W0007']), judgedAt: judgedNineMinutesEarlier })
+  assert.deepEqual(t.live, [], 'still resolved: a worker has ONE closeout watermark and one verdict about it')
+  assert.equal(t.resolved.length, 1)
+  assert.ok(!TIMED_VERDICT.has('stopped'))
+})
+
+test('and the liveness kinds ARE timed, because their onset moves and a closeout\'s does not', () => {
+  for (const k of ['dead', 'waiting', 'stalled', 'wedged']) {
+    assert.ok(TIMED_VERDICT.has(k), `${k} reads from updatedAt, which moves every time the session does`)
+  }
+})
+
+test('the resolved line is bounded: it points at the record rather than becoming one', () => {
+  // Measured live on 2026-08-21: 31 resolved stop-states. Unbounded, that is a
+  // 31-name line growing by one per worker judged, sitting one line above the list
+  // it was meant to shorten.
+  const many = Array.from({ length: RESOLVED_NAMES + 25 }, (_, i) =>
+    ({ kind: 'stopped', worker: `W0${200 + i}`, key: `stopped:j${i}` }))
+  const md = wakeSection({ pending: [], resolved: many, jobsRead: true })
+  const line = md.split('\n').find((l) => l.startsWith('resolved:'))
+  assert.ok(line.includes('+25 more'), line)
+  assert.equal(line.match(/W0\d+/g).length, RESOLVED_NAMES)
+  assert.match(line, /delivery record/, 'and it says where the other 25 are')
 })

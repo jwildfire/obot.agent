@@ -116,8 +116,8 @@ import { collectRankHead, rankheadSection, readingBroken as rankheadBroken } fro
 // do was get the Navigator's attention, so workers stopped and then waited — twenty
 // minutes on 2026-08-16, six hours on 2026-08-17. Detection and delivery live in
 // wake.mjs; this file supplies the readings and appends the log the Navigator tails.
-import { hostWasAway, idleDetection, judgedWorkers, listenerState, outsideWindow,
-         deliverable, misreadHolds, parseWakeLog, pending as pendingWakes, readJobs,
+import { hostWasAway, idleDetection, judgedAt, judgedWorkers, listenerState, outsideWindow,
+         deliverable, misreadHolds, parseWakeLog, readJobs, triage,
          readyBacklog, wakeLine, wakeSection } from './wake.mjs'
 // The other half of the same lane, and the earlier one (obot.agent#317, under hub#212).
 // The wake above asks whether a worker STOPPED; this asks whether one is stuck at a
@@ -752,12 +752,25 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [],
   jobs = jobs ?? []
   const now = new Date()
   const away = hostWasAway(prevSweptIso, now)
-  const judged = judgedWorkers(safeRead(DELIVERY_JOURNAL))
+  const journal = safeRead(DELIVERY_JOURNAL)
+  const judged = judgedWorkers(journal)
+  // WHEN each verdict was recorded, not merely that one exists (obot.agent#157). A
+  // worker judged this morning and stuck this afternoon is a real detection, and an
+  // untimed gate would swallow it — that is W0049 on 2026-08-18, whose 06:55 wake
+  // produced the drift verdict at 07:59.
+  const when = judgedAt(journal)
   // `workspace` is what separates this workspace's roles from a session that merely
   // carries a role's name (obot.agent#188). Four fixture admirals in `mkdtemp`
   // workspaces produced four WAITING detections on this channel, which is exactly
   // the kind of noise that teaches a reader to stop reading it.
-  const detections = pendingWakes(jobs, { now, judged, hostWasAway: away, workspace: WS })
+  //
+  // Three ways, not one: what still wakes somebody, what a verdict has already
+  // settled, and what nothing can change. The last two are rendered rather than
+  // dropped — the whole failure being fixed is a channel that repeats what nobody
+  // can act on, and the failure NOT to trade it for is a channel that goes quiet
+  // without saying so.
+  const { live: detections, resolved, standing } =
+    triage(jobs, { now, judged, judgedAt: when, hostWasAway: away, workspace: WS })
   // What the gate refused to believe (obot.agent#176). Reported beside the pending
   // list and never delivered: a suppression that produces no output is
   // indistinguishable from a gate that never ran, which is this programme's own
@@ -768,7 +781,11 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [],
 
   const listener = listenerState(WAKE_BEAT, now)
   const log = parseLog()
-  const { deliver, held } = deliverable(all, log, now)
+  // Standing entries ride the SAME budget as the live ones and ride it BEHIND them.
+  // They are once-only, so the cap can only ever delay a retirement by one sweep,
+  // and a live detection must never lose its slot to a report about something
+  // nobody can act on — which is the whole complaint this closes.
+  const { deliver, held } = deliverable([...all, ...standing], log, now)
 
   // Completions ride the same channel and are budgeted SEPARATELY (hub#257). Sharing
   // the per-run cap would let a fleet with three unjudged closeouts starve the one
@@ -813,6 +830,8 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [],
     stallSection: stallSection(stallReading),
     section: wakeSection({
       pending: all,
+      resolved,
+      standing,
       delivered: deliver,
       held,
       listener,
@@ -827,7 +846,7 @@ function runWake(jobs, { backlog, backlogCapped, prevSweptIso, completions = [],
         ? `host was away — no sweep for ${Math.round((now - Date.parse(prevSweptIso)) / 60000)}m, so stalled/waiting/idle are suppressed this run; a detector cannot run on a suspended host`
         : null,
     }),
-    note: `${all.length} pending, ${deliver.length} delivered, ${shipped.length} completion(s) sent, ${answers.length} unapplied answer(s) sent, ${misread.length} misread suppressed, ${stallReading.read ? `${stallReading.stalls.length} parked at a prompt (${parked.length} sent)` : 'stall reading BROKEN'}, channel ${listener.armed ? 'armed' : 'DOWN'}`,
+    note: `${all.length} pending, ${resolved.length} resolved by a verdict, ${standing.length} standing, ${deliver.length} delivered, ${shipped.length} completion(s) sent, ${answers.length} unapplied answer(s) sent, ${misread.length} misread suppressed, ${stallReading.read ? `${stallReading.stalls.length} parked at a prompt (${parked.length} sent)` : 'stall reading BROKEN'}, channel ${listener.armed ? 'armed' : 'DOWN'}`,
   }
 }
 
