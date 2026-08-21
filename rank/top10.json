@@ -20,8 +20,8 @@
       "why": "the file with the most authority over every agent has no owner and no way to change it safely - and it currently names an active plan that does not exist on this machine"
     },
     {
-      "issue": 267,
-      "why": "two workers have now collided on the same fix in one week - the Navigator's and mine, four hours apart on the deploy incident - and each collision spends fleet capacity twice on work that was already done"
+      "issue": 223,
+      "why": "the machine he rebuilds this weekend has no history, and a surface with nothing to show is the one most likely to show something plausible instead - this is rank 1 with the failure it invites"
     },
     {
       "issue": 289,
