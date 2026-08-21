@@ -574,8 +574,18 @@ const CSS = `
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   }
+  /* Three states, not two. The guard and the [data-theme] block below were added on
+     2026-08-21 (jwildfire/obot.agent#295): this block used to be a bare
+     prefers-color-scheme rule, which meant an explicit light choice lost to the system
+     and an explicit dark choice did nothing whatever. The two dark blocks are identical
+     on purpose — a toggle that renders a third theme is a theme nobody designed.
+
+     This page still declares its own palette rather than taking assets/obot.css, and
+     that is a registered exemption in tools/style/surfaces.mjs, not an oversight: six of
+     these tokens are agent-identity colours the shared sheet has no name for yet
+     (jwildfire/obot.agent#296). Fixing the contract while it waits costs one guard. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --ground:#191712; --panel:#211e18; --panel-2:#2a2620; --ink:#ece7dd; --ink-2:#b3aa9b;
       --ink-3:#7d7568; --line:#363129; --accent:#f08c3e; --accent-ink:#f3a163; --accent-tint:#38281a;
       --good:#58c389; --good-tint:#1d3227; --warn:#e3b341; --warn-tint:#362d17;
@@ -583,6 +593,14 @@ const CSS = `
       --agent-orange:#f59e0b; --agent-green:#58c389; --agent-pink:#ec6cb9; --agent-blue:#60a5fa;
       --agent-purple:#a78bfa; --agent-none:#857d71; --shadow:none;
     }
+  }
+  :root[data-theme="dark"] {
+      --ground:#191712; --panel:#211e18; --panel-2:#2a2620; --ink:#ece7dd; --ink-2:#b3aa9b;
+      --ink-3:#7d7568; --line:#363129; --accent:#f08c3e; --accent-ink:#f3a163; --accent-tint:#38281a;
+      --good:#58c389; --good-tint:#1d3227; --warn:#e3b341; --warn-tint:#362d17;
+      --idle:#9aa2ad; --idle-tint:#2b2925; --bad:#e5736c; --bad-tint:#3a201e;
+      --agent-orange:#f59e0b; --agent-green:#58c389; --agent-pink:#ec6cb9; --agent-blue:#60a5fa;
+      --agent-purple:#a78bfa; --agent-none:#857d71; --shadow:none;
   }
   * { box-sizing:border-box; }
   body { background:var(--ground); color:var(--ink); font-family:var(--sans); font-size:14px;

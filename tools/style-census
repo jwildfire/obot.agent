@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// The style census, as a command.
+//
+//   obot.agent/tools/style-census            # the register, and what is owed
+//   obot.agent/tools/style-census --findings # just the problems; exit 1 if any
+//   obot.agent/tools/style-census --md       # the Navigator's alarm form
+//
+// Task jwildfire/obot.agent#295. What it enforces and why lives in tools/style/census.mjs.
+import { census, findings } from './style/census.mjs';
+import { ALLOWED } from './style/surfaces.mjs';
+
+const argv = process.argv.slice(2);
+const result = census();
+const problems = findings(result);
+
+if (argv.includes('--md')) {
+  // The Navigator alarm-tests unindented plain lines and preamble notes only — a
+  // `- ` bullet can never go red (obot.roadmap#241). So the verdict is its own plain
+  // line under the heading and the rows stay bullets.
+  console.log('## Style census');
+  console.log('');
+  console.log(problems.length
+    ? `**STYLE CENSUS GAP** — ${problems.length} surface${problems.length === 1 ? '' : 's'} not accounted for`
+    : `Every surface accounts for its colours. ${ALLOWED.length} registered exemption${ALLOWED.length === 1 ? '' : 's'} outstanding.`);
+  console.log('');
+  for (const p of problems) console.log(`- ${p.file} — ${p.kind}: ${p.detail}`);
+  for (const a of ALLOWED) console.log(`- ${a.file} — registered ${a.since}, removed by ${a.issue}`);
+  process.exit(problems.length ? 1 : 0);
+}
+
+if (!argv.includes('--findings')) {
+  console.log(`workspace: ${result.root ?? '(not found — obot.agent measured alone)'}`);
+  if (result.missingRoots.length) console.log(`not on this machine: ${result.missingRoots.join(', ')}`);
+  console.log('');
+  const width = Math.max(...result.surfaces.map((s) => s.file.length), 10);
+  for (const s of result.surfaces) {
+    const note = s.verdict === 'own'
+      ? (s.allowed ? `registered ${s.allowed.since} · ${s.allowed.issue}` : 'UNREGISTERED')
+      : s.consumes.join('; ');
+    console.log(`${s.verdict.padEnd(10)} ${s.file.padEnd(width)}  ${note}`);
+  }
+  console.log('');
+  for (const a of result.archives.length ? [...new Set(result.archives.map((x) => x.archive))] : []) {
+    console.log(`archive    ${a}  ${result.archives.filter((x) => x.archive === a).length} dated pages, frozen`);
+  }
+  console.log('');
+}
+
+if (!problems.length) { console.log('census: clean — no surface carries an unregistered palette.'); process.exit(0); }
+for (const p of problems) console.log(`FINDING  ${p.file}\n         ${p.kind}: ${p.detail}`);
+process.exit(1);

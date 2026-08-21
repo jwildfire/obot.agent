@@ -1,0 +1,101 @@
+/* obot shared keynote stylesheet — the espresso language the public sites wear.
+ *
+ * Task jwildfire/obot.agent#295, under requirement jwildfire/obot.roadmap#289, and
+ * finishing what obot.agent#15 asked for on 2026-07-11: "Land the shared keynote
+ * stylesheet". #15 was closed on 2026-08-20 by the *document* stylesheet, which is a
+ * different language — so this had been quietly left with no owner and no issue.
+ *
+ * ## What this is, measured rather than remembered
+ *
+ * Four sites carry the espresso theme in four separate files, 5,251 lines between
+ * them: obot.roadmap/site/assets/styles.css, safety.viz/site/site.css,
+ * open.gismo/site/src/style.css, open.csr/site/site.css. open.gismo's own header
+ * says it adopted safety.viz's tokens by copying, "because there was nothing to
+ * reference". This is the thing to reference.
+ *
+ * Seventeen token names are common to the first three. Fourteen carry byte-identical
+ * values and are below verbatim. The three that do not are the font stacks, which
+ * differ only by quote character and by extra fallbacks — drift already under way, and
+ * the cheapest possible thing for a shared sheet to stop. They are reconciled here to
+ * the union of the fallbacks, so no site loses one it had.
+ *
+ * (docs/shared-stylesheet.md previously said all seventeen were identical. Re-measured
+ * on 2026-08-21 across the four sheets; fourteen is the number. open.csr shares one
+ * value of the seventeen, which is consistent with its header calling its palette
+ * deliberately different — it is a sibling theme, not a drifted copy.)
+ *
+ * ## Why there is no dark palette here, stated so it is a decision and not an omission
+ *
+ * The hub sheet says it outright at line 636: "This site has no dark theme: flipping
+ * the series colors on OS-dark while the page stayed on warm paper would put
+ * dark-surface colors on a light surface and break the contrast they were chosen for."
+ * That reasoning is sound and it is already load-bearing on a public site.
+ *
+ * So this sheet commits to one look and paints it completely on bare :root — every
+ * colour defined there, none defined only inside a media or [data-theme] block, and a
+ * body background stated explicitly rather than inherited. A surface that later gains
+ * a dark theme states the palette three times per the program's contract; the census
+ * in tools/style/ enforces that on any sheet that HAS a dark block, and does not
+ * invent one for a sheet that has deliberately declined.
+ *
+ * That is the difference between this and the document sheet (assets/obot.css), which
+ * dresses surfaces he reads at midnight on a phone and therefore does carry all three
+ * states.
+ *
+ * ## Consuming it
+ *
+ * A multi-page site links or @imports it and then declares its own layout and
+ * components on top — that is how the espresso sites are already built, and none of
+ * them needs to move a single rule. Take the tokens from here and delete the local
+ * :root palette; everything else stays.
+ *
+ * The hub deploy checks out only obot.roadmap, so a cross-repo link is impossible
+ * there and the file is vendored into obot.roadmap/site/assets/ by
+ * tools/style/vendor.mjs with a provenance header. tools/style/census.mjs asserts the
+ * vendored bytes are the canonical bytes, which is what makes a vendored copy a
+ * different thing from a copy nobody is looking at.
+ *
+ * The greppable string "obot shared keynote stylesheet" is how you find a consumer
+ * that copied the bytes instead.
+ */
+
+:root {
+  /* The espresso band: the dark masthead and footer, and the ink that sits on them. */
+  --side-bg:#271810;
+  --side-ink:#f5ede4;
+  --side-soft:#c4a995;
+
+  /* The page. */
+  --paper:#faf6f1;
+  --ink:#2a211b;
+  --muted:#6b5d52;
+  --faint:#a3958a;
+
+  /* Accents. --accent is a link at rest; --accent-bright is the hover and the border. */
+  --accent:#c2410c;
+  --accent-bright:#f97316;
+
+  /* Surfaces and edges. */
+  --rule:#ece2d7;
+  --panel:#f5efe7;   /* warm inset: code, table heads, baselines */
+  --card:#ffffff;
+
+  /* Verdict colours. */
+  --good:#166534;
+  --warn:#92400e;
+
+  /* The three families, reconciled to the union of what the four sheets carried:
+     double quotes throughout, and every fallback any of them named. safety.viz used
+     single quotes; open.gismo added "Segoe UI" to --sans and "Times New Roman" to
+     --serif. Nothing loses a fallback it had. */
+  --sans:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:"Instrument Serif",Georgia,"Times New Roman",serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+
+/* The ground is painted explicitly. A body with no background borrows whatever is
+   behind it, which on a themed host is the wrong theme's paper. */
+body {
+  background:var(--paper);
+  color:var(--ink);
+}
