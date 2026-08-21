@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-21 -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/312 on 2026-08-21 16:05 EDT -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0 -->
 
 The style census had no caller. It was named in no workflow, no sweep and no script — only in its own tests and its own documentation — so it ran when a human typed it and at no other moment. It now runs on every pull request and every five minutes, and the first honest run found real drift.
