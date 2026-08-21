@@ -40,8 +40,21 @@ SETTINGS="$WORKSPACE/.claude/settings.json"
 # hook script  ->  the settings.json event it registers under
 declare -a HOOKS=(
   "merge-gate-guard.sh:PreToolUse:Bash"
+  "attribution-guard.sh:PreToolUse:Bash"
   "scratchpad-heartbeat.sh:Stop:"
   "session-state-publish.sh:Stop:"
+)
+
+# Permission allowlist entries, so the wrappers the guards point at are actually
+# runnable. A guard that refuses `gh issue edit` and sends the agent to a command
+# the harness then puts to a nondeterministic classifier has moved the failure
+# rather than removed it: that coin flip is what left obot.agent#150 and #158
+# finished and unmerged overnight (obot.agent#162). Entries are additive - an
+# existing allow list is merged into, never replaced.
+declare -a ALLOW=(
+  "Bash(scripts/obot-gh *)"
+  "Bash(obot.agent/scripts/obot-gh *)"
+  "Bash($HOME/Documents/obot2/obot.agent/scripts/obot-gh *)"
 )
 
 # Opt-in only (@jwildfire, 2026-07-26). chat-inbox-deliver.sh is the delivery lane
@@ -80,7 +93,7 @@ done
 
 # Register anything not already registered. Matching is by script basename, so a
 # hand-edited command string (different quoting, a timeout added) is left alone.
-SETTINGS="$SETTINGS" HOOK_SPEC="${HOOKS[*]}" python3 <<'PY'
+SETTINGS="$SETTINGS" HOOK_SPEC="${HOOKS[*]}" ALLOW_SPEC="$(printf '%s\n' "${ALLOW[@]}")" python3 <<'PY'
 import json, os, pathlib
 
 path = pathlib.Path(os.environ["SETTINGS"])
@@ -107,8 +120,16 @@ for entry in os.environ["HOOK_SPEC"].split():
     changed = True
     print(f"registered {name} under {event}")
 
+allow = data.setdefault("permissions", {}).setdefault("allow", [])
+for rule in os.environ.get("ALLOW_SPEC", "").splitlines():
+    rule = rule.strip()
+    if rule and rule not in allow:
+        allow.append(rule)
+        changed = True
+        print(f"allowed {rule}")
+
 if changed:
     path.write_text(json.dumps(data, indent=2) + "\n")
 else:
-    print("settings.json already registers every hook")
+    print("settings.json already registers every hook and allow rule")
 PY

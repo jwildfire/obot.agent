@@ -94,8 +94,17 @@ the whole batch** (tokens expire in ~1h) and post the replies in a single
 authenticated block rather than N sequential writes:
 
 ```bash
-GH_TOKEN=$(obot.agent/scripts/obot-app-token) sh -c '<all addDiscussionComment calls>'
+export OBOT_GH_TOKEN=$(obot.agent/scripts/obot-app-token)
+test -n "$OBOT_GH_TOKEN" || exit 1
+obot.agent/scripts/obot-gh api graphql -f query='<one addDiscussionComment call>'
 ```
+
+The mint and the check are separate lines on purpose. `GH_TOKEN=$(mint) gh ...`
+looks like it checks the mint and does not — a command substitution in an
+assignment prefix has its exit status discarded, so a failed mint leaves the
+variable empty, `gh` reads an empty token as unset, and every reply in the batch
+goes out as @jwildfire while reporting success (obot.agent#207). `obot-gh` reuses
+an exported `OBOT_GH_TOKEN` and skips the mint, so the batch still costs one.
 
 Each reply carries the proposed shape ("reads as a requirement for X — proposed
 to the next-session queue", "added to today's session todo") or the clarifying

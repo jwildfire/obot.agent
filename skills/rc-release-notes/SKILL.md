@@ -74,7 +74,7 @@ which is what the Operations Dashboard renders under the title in his queue.
   then. Pushes before he reviews do not move it; a round ending in approval does not either.
 - **Retitle the same PR — never open a new one.** The thread holds his comments, the review
   decisions and the CI history, and he reviews `-RC2` by re-reading `-RC1`. One
-  `gh pr edit --title`. A *mechanical* re-open (authorship, so he can hold the reviewer
+  `obot-gh pr edit --title`. A *mechanical* re-open (authorship, so he can hold the reviewer
   role — open.gismo #9 → #10) is not a re-cut and does not increment.
 - **Resets per version**: `v1.1.0-RC1`, `v1.1.0-RC2`, then `v1.2.0-RC1`.
 - **The tag drops the suffix** — the release is `v1.1.0`. `-RCn` never reaches a tag, a
@@ -187,6 +187,6 @@ what the release pages already say — never invent history.
   the tag goes on **the RC merge commit — the `stable` tip** — by publishing with
   `target_commitish` set to that sha; a **draft** release cannot be addressed by tag
   (`gh release edit <tag>` returns "release not found"), so edit it by **release id**
-  (`gh api -X PATCH repos/{owner}/{repo}/releases/{id} … -F draft=false`); and the attested
+  (`obot-gh api -X PATCH repos/{owner}/{repo}/releases/{id} … -F draft=false`); and the attested
   `obot-merge` call must be invoked directly, not wrapped in a helper script — the wrapped
   spelling is what the permission allowlist does not cover.

@@ -343,7 +343,7 @@ For **each issue or PR the inventory says was touched** (not the whole tracker):
 - **Releases tied?** Any release published this session lists its hub
   requirement(s) in the release notes — a `Requirements delivered:` line placed
   before the closing attribution rule. Retro-add via the releases API
-  (`gh api -X PATCH repos/{owner}/{repo}/releases/{id}`) when missing.
+  (`obot-gh api -X PATCH repos/{owner}/{repo}/releases/{id}`) when missing.
 - **Ideas promoted?** The sibling lists still-open Ideas discussions
   (`gh api graphql` on the hub's Ideas category, states `OPEN`, excluding the
   pinned explainer #47) and each is noted as "captured, not yet promoted" — these
