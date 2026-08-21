@@ -1,0 +1,229 @@
+#!/usr/bin/env node
+// premise-status — hand the public site what the sweep measured, and nothing else.
+//
+// Requirement: jwildfire/obot.roadmap#266, task #301. Sibling of `tools/config-count`,
+// and the same shape of thing for the same reason.
+//
+// The claim sweep has re-checked every decision artifact's premises on a five-minute
+// cadence since #262, and reported `PREMISE BROKEN` on the Navigator surface. The
+// artifact page itself said nothing, so a reader — @jwildfire, or anyone on the public
+// site — met an argument built on a premise that may have expired with no indication
+// that anything had ever looked. The hub renders the strip; this is the half that gets
+// the reading to it.
+//
+//   obot.agent/tools/premise-status            # write the file
+//   obot.agent/tools/premise-status --dry-run  # print it, write nothing
+//   obot.agent/tools/premise-status --check    # exit 1 if what is published has drifted
+//
+// ## What crosses
+//
+// Per premise: its id, a twelve-hex fingerprint of the proof that was run, one of
+// three states, when it was measured, and — only for `unknown` — which of three kinds
+// of not-knowing it was.
+//
+//   { "_schema": "obot.roadmap/premise-status@1",
+//     "asOf": "2026-08-21T18:04:00Z",
+//     "readings": [ { "id": "D0021.p2", "sha": "9f2ad1c4b077",
+//                     "state": "holds", "at": "2026-08-21T18:03:58Z", "why": null } ] }
+//
+// No sentences. The premise sentences a reader sees on the strip are the page's own
+// `<meta name="premise">` content — written by the artifact's author, in the hub
+// repository, already published — so this channel never has to carry prose to render
+// prose. That is not a convenience; it is what lets the hub's reader refuse every
+// payload that is not numbers, dates, hex and closed enums (BL2/BL4, and
+// obot.roadmap scripts/lib/public-channel.mjs).
+//
+// The `why` values are a closed set of three (`manual`, `refused`, `errored`) and the
+// sentence a reader sees for each is composed on the hub's side. The sweep knows the
+// reason in its own words — "tmutil is not on the read-only allowlist" — and those
+// words are free text produced on this machine, so they stop here.
+//
+// ## The fingerprint is the seam
+//
+// The hub parses the same `<meta name="premise">` tags this does, because a build
+// there cannot import from this clone (obot.roadmap's local-only guard makes that
+// impossible on purpose). Two parsers, one grammar. The fingerprint is what makes
+// that safe: it is taken over the proof as parsed here, the hub takes it over the
+// proof as parsed there, and where they ever disagree the strip says the reading no
+// longer applies rather than showing a verdict against a premise it did not measure.
+//
+// It also does the job it was added for. A premise that gets reworded keeps its id
+// and its position; without the fingerprint the strip would carry the old verdict
+// against the new sentence, which is exactly the silent wrongness #266 exists to
+// stop, reintroduced by the fix.
+//
+// ## Which premises are published
+//
+// All of them, every scope. The cadence only re-runs `live` premises and the ones an
+// open artifact leaves undeclared — but the strip has to render a `history` premise
+// too, saying it was measured when the decision was made, and it cannot say that
+// without the reading from the moment its author ran the publish-time gate. A premise
+// with no reading at all is published with none and renders as unmeasured, which is a
+// state and not an omission.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { premiseClaims } from './navigator/currency.mjs';
+import { FAILS, HOLDS, UNKNOWN, readChecks, verifyPlan } from './lib/claims.mjs';
+
+const SCHEMA = 'obot.roadmap/premise-status@1';
+
+const args = process.argv.slice(2);
+const flag = (name) => args.includes(`--${name}`);
+const value = (name, fallback) => {
+  const i = args.indexOf(`--${name}`);
+  return i === -1 ? fallback : args[i + 1];
+};
+
+const workspace = path.resolve(value('workspace', process.env.OBOT_WORKSPACE || process.cwd()));
+const hub = path.resolve(value('hub', process.env.OBOT_HUB || path.join(workspace, 'obot.roadmap')));
+const out = path.join(hub, 'data', 'premise-status.json');
+
+const trim = (s) => String(s ?? '').trim();
+
+/** Twelve hex over the proof. Mirrored by obot.roadmap scripts/lib/premise-status.mjs. */
+const fingerprint = (c) => crypto.createHash('sha256')
+  .update(c.manual ? `manual ${trim(c.expect)}` : `${trim(c.command)} ${trim(c.expect)}`, 'utf8')
+  .digest('hex').slice(0, 12);
+
+// ------------------------------------------------------------------ the readings
+
+const prem = premiseClaims(hub);
+if (!prem.read) {
+  // A registry that could not be read is not "no premises". Publishing an empty list
+  // here would put "this page states no assumption anything can check" on twenty-five
+  // artifacts on the strength of a file nobody opened — the silent-success shape this
+  // programme keeps paying for. Refuse, and leave what was last published in place:
+  // an older reading is honest, and the strip renders its age.
+  console.error(`premise-status: refusing to write — ${prem.why}`);
+  console.error('premise-status: an unread registry is not an absence of premises; the last published readings stand.');
+  process.exit(1);
+}
+
+const checks = readChecks(workspace);
+const readings = [];
+for (const c of prem.all) {
+  const plan = verifyPlan({ verify: { command: c.command, manual: c.manual } });
+  const rec = checks[c.id];
+  let state = UNKNOWN;
+  let why = null;
+  let at = null;
+
+  if (!plan.auto) {
+    // Never measured and never going to be, so there is no time to state. A manual
+    // premise says a person has to look; a refused one says its proof is not a
+    // recognised read-only command. They are different work and are kept apart.
+    why = c.manual ? 'manual' : 'refused';
+  } else if (!rec) {
+    // Auto-runnable and nothing has ever run it — typically a `history` premise whose
+    // author never ran the publish-time gate. Published with no reading rather than
+    // omitted, so the strip can say which premise is missing one.
+    why = 'errored';
+  } else if (rec.command && rec.command !== c.command) {
+    // The proof was rewritten since it last ran. The fingerprint would catch this on
+    // the far side anyway; catching it here means the page is told "unmeasured"
+    // rather than being handed a verdict about a command nobody wrote.
+    why = 'errored';
+  } else {
+    state = rec.state === HOLDS ? HOLDS : rec.state === FAILS ? FAILS : UNKNOWN;
+    at = typeof rec.at === 'string' ? rec.at.replace(/\.\d+Z$/, 'Z') : null;
+    if (state === UNKNOWN) why = 'errored';
+    if (!at) { state = UNKNOWN; why = 'errored'; }
+  }
+
+  readings.push({ id: c.id, sha: fingerprint(c), state, at, why });
+}
+
+const payload = {
+  _schema: SCHEMA,
+  asOf: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+  readings: readings.sort((a, b) => a.id.localeCompare(b.id)),
+};
+
+// --------------------------------------------------- assert before writing
+//
+// Checked here as well as by the hub's reader, and neither is redundant. This one
+// catches the mistake while its author can still see why; the reader catches whatever
+// arrives, from whoever wrote it. A file that fails here never reaches the repo.
+
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const ID = /^D\d{4}\.p\d{1,3}$/;
+const SHA = /^[0-9a-f]{12}$/;
+const STATES = [HOLDS, FAILS, UNKNOWN];
+const WHYS = ['manual', 'refused', 'errored'];
+
+const problems = [];
+if (Object.keys(payload).sort().join(',') !== '_schema,asOf,readings') problems.push('unexpected top-level fields');
+if (!ISO.test(payload.asOf)) problems.push(`asOf is not an ISO timestamp: ${payload.asOf}`);
+const seen = new Set();
+for (const r of payload.readings) {
+  const keys = Object.keys(r).sort().join(',');
+  if (keys !== 'at,id,sha,state,why') { problems.push(`${r.id}: unexpected fields (${keys})`); continue; }
+  if (!ID.test(r.id)) problems.push(`not a premise id: ${JSON.stringify(r.id)}`);
+  if (seen.has(r.id)) problems.push(`${r.id}: published twice`);
+  seen.add(r.id);
+  if (!SHA.test(r.sha)) problems.push(`${r.id}: fingerprint is not twelve hex characters`);
+  if (!STATES.includes(r.state)) problems.push(`${r.id}: ${JSON.stringify(r.state)} is not a state`);
+  if (r.at !== null && !ISO.test(r.at)) problems.push(`${r.id}: at is not an ISO timestamp`);
+  if (r.at === null && r.state !== UNKNOWN) problems.push(`${r.id}: states a verdict with no time`);
+  if (r.state === UNKNOWN && !WHYS.includes(r.why)) problems.push(`${r.id}: unknown without saying which kind`);
+  if (r.state !== UNKNOWN && r.why !== null) problems.push(`${r.id}: gives a reason for a measured verdict`);
+  // The belt-and-braces one. Every string in a row is a member of a declared set or
+  // matches a pattern; nothing here may carry a sentence, and this is the line that
+  // dies rather than the review nobody ran.
+  for (const [k, v] of Object.entries(r)) {
+    if (typeof v === 'string' && !['id', 'sha', 'state', 'at', 'why'].includes(k)) problems.push(`${r.id}: ${k} carries text, which never crosses this boundary`);
+    if (typeof v === 'string' && v.length > 40) problems.push(`${r.id}: ${k} is too long to be anything this channel carries`);
+  }
+}
+if (problems.length) {
+  for (const p of problems) console.error(`premise-status: ${p}`);
+  process.exit(1);
+}
+
+const json = `${JSON.stringify(payload, null, 2)}\n`;
+
+const tally = (rs) => {
+  const c = { holds: 0, fails: 0, unknown: 0 };
+  for (const r of rs) c[r.state] += 1;
+  return `${c.holds} hold · ${c.fails} expired · ${c.unknown} unmeasured`;
+};
+
+if (flag('dry-run')) {
+  process.stdout.write(json);
+  process.exit(0);
+}
+
+// What is worth a commit. The timestamp moves every five minutes and the verdicts do
+// not, so comparing whole files would push 288 times a day and comparing only verdicts
+// would leave the published `asOf` weeks old while the strip correctly reported it as
+// stale. Neither is the answer: the readings decide, and the age is refreshed on a
+// slower heartbeat so a page's reading stays inside its own staleness bar.
+const material = (doc) => JSON.stringify((doc?.readings ?? []).map((r) => [r.id, r.sha, r.state, r.why]));
+const HEARTBEAT_HOURS = 6;
+
+let published = null;
+try { published = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { /* nothing published yet */ }
+
+const changed = !published || material(published) !== material(payload);
+const publishedAge = published?.asOf ? (Date.now() - Date.parse(published.asOf)) / 3600000 : Infinity;
+const due = changed || !(publishedAge < HEARTBEAT_HOURS);
+
+if (flag('check')) {
+  if (!published) { console.error(`premise-status: nothing published at ${path.relative(workspace, out)}`); process.exit(1); }
+  if (changed) { console.error('premise-status: the published readings no longer match what the sweep measures — re-run to refresh'); process.exit(1); }
+  if (publishedAge >= HEARTBEAT_HOURS) { console.error(`premise-status: the published reading is ${publishedAge.toFixed(1)}h old — re-run to refresh its age`); process.exit(1); }
+  console.log(`premise-status: published readings are current (${tally(payload.readings)})`);
+  process.exit(0);
+}
+
+if (!due) {
+  console.log(`premise-status: unchanged and published ${publishedAge.toFixed(1)}h ago — nothing to write (${tally(payload.readings)})`);
+  process.exit(0);
+}
+
+fs.mkdirSync(path.dirname(out), { recursive: true });
+fs.writeFileSync(out, json);
+console.log(`premise-status: wrote ${path.relative(workspace, out)} — ${payload.readings.length} premises, ${tally(payload.readings)}`);
+console.log(`premise-status: ${changed ? 'the readings changed' : `refreshing the age, last published ${publishedAge.toFixed(1)}h ago`}; commit it to publish.`);
