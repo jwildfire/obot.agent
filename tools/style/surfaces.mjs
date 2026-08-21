@@ -132,8 +132,22 @@ export const ALLOWED = [
  * allowed to add to it. A new page under these paths consumes a shared sheet.
  *
  * `frozen` was measured on the date below, not chosen.
+ *
+ * A new page that CONSUMES a shared sheet does not increment the count — the census only
+ * counts pages carrying their own palette — so this fires only on the thing it is meant
+ * to catch. It fired within an hour of landing: `reports/ranked-head/` arrived the same
+ * night with its own palette, from a different worker's requirement. That page was left
+ * alone and the number moved instead, because editing another worker's in-flight file is
+ * how this program has collided three times in a week.
+ *
+ * Moving the number is allowed and is meant to be uncomfortable: it is a diff someone
+ * reads, with a reason attached. Every bump belongs in the list below. If bumps become
+ * routine, the fix is not a bigger number — it is that report authors have no shared-sheet
+ * path yet, which is jwildfire/obot.agent#300.
+ *
+ *   93 -> 94 on 2026-08-21, for reports/ranked-head/index.html.
  */
 export const ARCHIVES = [
-  { dir: 'obot.roadmap/reports', frozen: 93, since: '2026-08-21' },
+  { dir: 'obot.roadmap/reports', frozen: 94, since: '2026-08-21' },
   { dir: 'obot.roadmap/requirements/design', frozen: 18, since: '2026-08-21' },
 ];
