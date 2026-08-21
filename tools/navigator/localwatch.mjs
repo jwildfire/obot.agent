@@ -611,8 +611,9 @@ export function localSection(found = {}, now = Date.now()) {
   // down from the one this file is about.
   const fetchFailed = found.fetchFailed ?? []
   const credBlind = creds !== null && creds.scanned === 0
-  if (live === null || unread.length || undated.length || cloneUnread.length || !fetchAge
-      || fetchFailed.length || branches.unread || credBlind || creds?.unreadable?.length) {
+  const partial = live === null || unread.length || undated.length || cloneUnread.length || !fetchAge
+      || fetchFailed.length || branches.unread || credBlind || Boolean(creds?.unreadable?.length)
+  if (partial) {
     const why = []
     if (live === null) why.push('the live agent ledger could not be read, so no worktree here can be called ownerless — an unreadable fleet is not an empty one')
     if (unread.length) why.push(`${unread.length} working tree(s) could not be read`)
@@ -629,7 +630,15 @@ export function localSection(found = {}, now = Date.now()) {
   if (findings > 0) {
     lines.push(`${ALARM_FINDING} — ${findings} piece(s) of work exist on this machine that no GitHub-derived check can see: ${stranded.length} stranded worktree(s), ${branches.findings.length} unproposed branch(es), ${cloneAlarms.length} checkout(s) out of step with their remote.`)
   } else if (!credFindings.length) {
-    lines.push(`local-only work: clean — ${verdicts.length} worktrees and ${clones.length} checkouts read, nothing stranded${fetchAge ? `, positions as last fetched ${fetchAge} ago` : ''}`)
+    // "clean" is a verdict and it may not sit directly under this section's own
+    // "Nothing below is a clean bill of health". On the empty machine both lines
+    // printed at once — the alarm, then the all-clear — which is the dashboard's old
+    // "All answered" beside "Decisions unavailable", one section down
+    // (jwildfire/obot.roadmap#223). What was read is still worth saying; calling it
+    // clean is not.
+    lines.push(partial
+      ? `local-only work: nothing stranded in what could be read — ${verdicts.length} worktree(s) and ${clones.length} checkout(s) read${fetchAge ? `, positions as last fetched ${fetchAge} ago` : ''}. The gaps above are unknown, not clear.`
+      : `local-only work: clean — ${verdicts.length} worktrees and ${clones.length} checkouts read, nothing stranded${fetchAge ? `, positions as last fetched ${fetchAge} ago` : ''}`)
   }
 
   // Its own headline. A token at rest is a different thing from an abandoned worktree

@@ -34,7 +34,7 @@
 // tools/ops-dashboard/test/config-card.test.mjs.
 import path from 'node:path';
 
-import { collectConfig } from './ops-dashboard/lib/collect.mjs';
+import { collectConfig, configFile } from './ops-dashboard/lib/collect.mjs';
 import { criticalClaim } from './ops-dashboard/lib/rank.mjs';
 import { buildCard, readCardSource, renderCard, summaryText, writeCard, cardsDir } from './ops-dashboard/lib/config-card.mjs';
 
@@ -50,11 +50,17 @@ if (flag('help') || flag('h')) {
 
 const workspace = path.resolve(value('workspace', process.env.OBOT_WORKSPACE ?? process.cwd()));
 
-const { items, error } = collectConfig(workspace);
+const { items, error, absent } = collectConfig(workspace);
 if (error) {
   // A list that could not be read is not an empty list. Rendering zero cards over a
   // file this process failed to open would quietly retire every item on the page.
-  console.error(`config-card: refusing to render — ${error}`);
+  //
+  // The message names the path and what would create it, which `config-count` has done
+  // since it was written and this did not: on a new machine "refusing to render — no
+  // config file" tells a reader nothing about which file or how to start one, and every
+  // absence notice on this programme's surfaces owes both halves (obot.roadmap#223).
+  console.error(`config-card: refusing to render — ${error} (${configFile(workspace)})`);
+  if (absent) console.error('config-card: the list is local to a machine and does not travel between them; capture this machine\'s first setup step with obot.agent/tools/blocker-log.');
   process.exit(1);
 }
 

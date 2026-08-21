@@ -274,6 +274,42 @@ test('a worker that has stopped is not reported as beside you', () => {
   assert.deepEqual(dispatchOverlap({ ws: dir, jobs, now }).groups, []);
 });
 
+// ---------------------------------------------- the ledger that is not there yet
+
+test('an absent worker ledger is not a fleet of nobody', () => {
+  // The first morning of the new machine. `.claude/workers.journal` is local-only and
+  // does not travel, so no clone brings it — and `readClaims` answered ENOENT with an
+  // empty claim list, which reached both readers as a measurement. The sweep printed
+  // "0 worker(s) in flight, 0 of them placed under a requirement; no two are on the
+  // same one", and the sibling briefing every worker opens with printed "Nobody else
+  // is in flight right now" (jwildfire/obot.roadmap#223).
+  const dir = ws();                          // no journal written at all
+  const a = adjacentWorkers({ ws: dir, jobs: jobsWith([]), now: NOW });
+  assert.equal(a.absent, true, 'the absence has to survive the join to be sayable');
+  assert.deepEqual(a.workers, []);
+
+  const md = constraintsSection(collectConstraints({ ws: dir, jobs: jobsWith([]), now: NOW }));
+  assert.doesNotMatch(md, /no two are on the same one/,
+    'a verdict on overlap, from a ledger nobody could open');
+  assert.doesNotMatch(md, /0 worker\(s\) in flight/, 'a plausible zero from an unread source');
+  assert.match(md, /no worker ledger on this machine/i);
+  assert.match(md, /worker-id init/, 'a notice that does not say what would fill it is a dead end');
+  assert.doesNotMatch(md, ALARM_RE, 'a machine nobody has dispatched on yet is not a fault');
+});
+
+test('a journal that exists and holds no live claim still reads as measured', () => {
+  // The other side of the same distinction, and the reason this is not just a length
+  // check: the ledger is armed, both its claims have stopped, and "no two are on the
+  // same one" is then a thing that was actually looked at.
+  const dir = ws({ claims: REAL_CLAIMS });
+  const jobs = jobsWith([], { terminal: ['W0071', 'W0072'] });
+  const a = adjacentWorkers({ ws: dir, jobs, now: new Date('2026-08-18T11:35:00Z') });
+  assert.equal(a.absent, false);
+  const md = constraintsSection(collectConstraints({ ws: dir, jobs, now: new Date('2026-08-18T11:35:00Z') }));
+  assert.match(md, /0 worker\(s\) in flight/);
+  assert.match(md, /no two are on the same one/);
+});
+
 // ---------------------------------------------------------------- the surface
 
 test('every headline this section can print is one the real ALARM_RE matches, on a line it tests', () => {

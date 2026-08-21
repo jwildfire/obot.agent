@@ -258,7 +258,27 @@ export function judge(exitCode, stdout, expect) {
  */
 export function noAnswer(exitCode, stdout, expect, stderr = '') {
   if (exitCode === 0) return null;
-  if (!/^prints\s+\S/i.test(String(expect ?? '').trim())) return null;
+  const e = String(expect ?? '').trim();
+
+  // `not X` is an assertion about output as much as `prints X` is, and it reached this
+  // rule a day late. On a machine with no history the repository a premise asks about
+  // is simply not cloned: `git --git-dir=safetyCharts/.git branch -r --contains
+  // remove-tendril` exits 128 with `fatal: not a git repository` and prints nothing,
+  // and `judge` read that as `not origin/` being satisfied in the negative — a red
+  // **PREMISE BROKEN** on the Navigator page and on the published artifact strip,
+  // in a sentence carrying "checked just now" (jwildfire/obot.roadmap#223).
+  //
+  // Only the SECOND half carries over, and the asymmetry is the design. For `prints X`
+  // an empty stdout means there is nothing to compare; for `not X` an empty stdout is a
+  // legitimate answer — what it printed does not contain X — so keying on emptiness
+  // here would turn real negatives into `unknown` and quietly stop checking them.
+  if (/^not\s+\S/i.test(e)) {
+    return String(stderr ?? '').trim()
+      ? 'exited non-zero and reported an error, so what it printed is the failure rather than the answer'
+      : null;
+  }
+
+  if (!/^prints\s+\S/i.test(e)) return null;
   if (!String(stdout ?? '').trim()) return 'exited non-zero and printed nothing, so there was no output to compare with what the claim expects';
   if (String(stderr ?? '').trim()) return 'exited non-zero and reported an error, so what it printed is the failure rather than the answer';
   return null;

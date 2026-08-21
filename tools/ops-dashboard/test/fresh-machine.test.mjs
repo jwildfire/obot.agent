@@ -112,7 +112,7 @@ const routes = {};
 before(async () => {
   machine = freshMachine();
   server = await boot(machine);
-  for (const route of ['/', '/live.html', '/session', '/session/log', '/navigator', '/navigator/record', '/session/frame', '/queue.json']) {
+  for (const route of ['/', '/live.html', '/session', '/session/log', '/navigator', '/navigator/record', '/session/frame', '/queue.json', '/wire.html', '/config/c0002']) {
     const res = await fetch(`${server.base}${route}`);
     routes[route] = { status: res.status, body: await res.text() };
   }
@@ -127,7 +127,7 @@ test('the server starts on a machine with nothing to read', () => {
   assert.equal(server.stderr(), '', 'the server logged to stderr while starting');
 });
 
-for (const route of ['/', '/live.html', '/session', '/session/log', '/navigator', '/navigator/record']) {
+for (const route of ['/', '/live.html', '/session', '/session/log', '/navigator', '/navigator/record', '/wire.html']) {
   test(`${route} renders honestly with no history at all`, () => {
     const r = routes[route];
     assert.equal(r.status, 200, `${route} answered ${r.status}`);
@@ -192,6 +192,20 @@ test('the sessions brief keeps its feed and its record link with nothing to show
   // record page keeps its feed.
   assert.ok(routes['/live.html'].body.includes('/session/log'), 'the record link is gone');
   assert.match(readable(routes['/session/log'].body), /What changed/);
+});
+
+test('one config item as a page says the list is absent, not that the item is not on it', () => {
+  // `/wire.html` arrived after this file was written and was never in the sweep above;
+  // it turned out honest and is asserted with the rest now. This route was not, and
+  // answered "c0002 is not an open item on the config list" on a machine that has no
+  // config list at all — absence rendered as emptiness, the same sentence shape #206
+  // removed from the queue panel one level up (jwildfire/obot.roadmap#223).
+  const r = routes['/config/c0002'];
+  assert.equal(r.status, 404, 'there is still no such page to serve');
+  const text = readable(r.body);
+  assert.doesNotMatch(text, /is not an open item/, 'a verdict on a list this machine does not have');
+  assert.match(text, /blockers\.md/, 'the missing list is named by path');
+  assert.match(text, /blocker-log/, 'and so is what would create it');
 });
 
 // ---- day two, and day three ----------------------------------------------

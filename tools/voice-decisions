@@ -255,7 +255,7 @@ function main() {
     // whole tool exists to make visible.
     const store = readUnrouted(WS);
     return out(unroutedSection(store.items, {
-      read: store.read, why: store.why, lane: { armed: isArmed(WS), read: null },
+      read: store.read, absent: store.absent, why: store.why, lane: { armed: isArmed(WS), read: null },
     }).trimEnd());
   }
 

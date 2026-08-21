@@ -407,7 +407,15 @@ export function carveoutSection({ raised = [], covered = [], checked = 0, skippe
     lines.push(`already routed: ${covered.length} pull request(s) covered by an open config item — ` +
                covered.map((c) => `${c.ref} · ${c.ids.join(', ')}`).join(' · '))
   }
-  if (!raised.length && !covered.length) {
+  if (!raised.length && !covered.length && checked === 0) {
+    // Zero lanes examined is not zero lanes needing him. On a machine where `gh` is not
+    // yet authenticated every lane fails, and this line headlined "nothing to route" with
+    // the `unread:` reasons underneath — which is where a summariser stops reading
+    // (jwildfire/obot.roadmap#223). Not an alarm: on the first morning nobody has raised
+    // anything either, and an alarm about that would be noise on every new machine.
+    lines.push('carve-out routing: no lane could be listed this pass, so nothing was examined and nothing was cleared. '
+      + 'Unknown, not clear — a carve-out PR could be sitting on any of them.')
+  } else if (!raised.length && !covered.length) {
     lines.push(`carve-out routing: nothing to route — ${checked} lane(s) checked, none forced the attested lane on a carve-out path`)
   } else {
     lines.push(`  ${checked} lane(s) checked this pass${dryRun ? ' · DRY RUN, nothing was filed' : ''}`)

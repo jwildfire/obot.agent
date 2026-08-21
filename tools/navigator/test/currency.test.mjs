@@ -403,6 +403,32 @@ test('a prints-X claim whose command errored is unknown, not broken', () => {
   assert.equal(noAnswer(0, '', 'prints true', 'a warning'), null, 'a clean exit answered the question')
 })
 
+test('a not-X claim whose command could not run is unknown, not broken', () => {
+  // The reading a machine with no history produces. D0025 argues from "the prepared
+  // safetyCharts work is still on this laptop only, because the branch has never been
+  // pushed", proved by `git --git-dir=safetyCharts/.git branch -r --contains
+  // remove-tendril → not origin/`. On a new laptop that repository is not cloned yet,
+  // so git exits 128 with `fatal: not a git repository` on stderr and nothing on
+  // stdout — and the page said **PREMISE BROKEN**, in a sentence carrying "checked
+  // just now". Nobody checked anything: the thing the premise asks about is not here.
+  assert.equal(noAnswer(128, '', 'not origin/', "fatal: not a git repository: 'safetyCharts/.git'"),
+    'exited non-zero and reported an error, so what it printed is the failure rather than the answer')
+  assert.equal(noAnswer(1, '', 'not origin/', 'gh auth login'),
+    'exited non-zero and reported an error, so what it printed is the failure rather than the answer')
+
+  // The half that deliberately does NOT carry over from `prints X`. Empty output is a
+  // legitimate ANSWER to `not X` — "what it printed does not contain X" — where for
+  // `prints X` there is nothing to compare against. A rule that read both halves here
+  // would swallow a real negative into `unknown`.
+  assert.equal(noAnswer(1, '', 'not origin/', ''), null, 'no error: the empty output is the answer')
+  assert.equal(noAnswer(0, '', 'not origin/', 'a warning'), null, 'a clean exit answered the question')
+  assert.equal(noAnswer(0, 'origin/main', 'not origin/', ''), null)
+
+  // And nothing above changes what the two other expectation forms do.
+  assert.equal(noAnswer(1, '0', 'prints 0', ''), null, 'grep -c prints the right answer and exits 1')
+  assert.equal(noAnswer(1, '', 'the file exists', 'test: no such file'), null, 'a prose expectation is judged on the exit code')
+})
+
 test('the negative control still discriminates — a proof that always passes is not a proof', () => {
   // The other half of W0071's set: the same shape returning false must read as broken,
   // or the check is decorative.

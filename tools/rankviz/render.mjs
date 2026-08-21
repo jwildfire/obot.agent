@@ -161,6 +161,10 @@ export function renderPage(data) {
   const h = data.history
   const zone = tzName(h.span?.from || data.generatedAt, data.tz)
   const headRows = data.order.rows ?? []
+  // The bench is the `on-deck` label on GitHub and nothing else — unlike the ranked ten,
+  // which are declared locally in `rank/top10.json` and are readable with no network at
+  // all. So with no reading its length is not a count of anything, and "0 on the bench"
+  // sat in the same strip as "state read not known" (jwildfire/obot.roadmap#223).
   const benchRows = data.bench.rows ?? []
   const holes = h.read ? h.frames.filter((f) => !f.reconstructed) : []
 
@@ -200,7 +204,7 @@ ${LAYOUT_CSS}
   written down anywhere.</p>
   <div class="facts">
     <span><b>${headRows.length}</b> ranked</span>
-    <span><b>${benchRows.length}</b> on the bench</span>
+    <span><b>${data.live.read ? benchRows.length : '&mdash;'}</b> on the bench</span>
     <span>order last touched <b>${esc(fmt(data.order.touched?.iso, data.tz))}</b>${data.order.touched?.dirty ? ' (edited since, not committed)' : ''}</span>
     <span>state read <b>${esc(fmt(data.live.at, data.tz))}</b></span>
     <span>all times ${esc(zone)}</span>

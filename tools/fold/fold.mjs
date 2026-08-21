@@ -181,6 +181,10 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
       rcs: rcs.length,
       decisions: decisions.items.length,
       todos: todos.items.length,
+      // Carried rather than re-derived: by the time `render` holds a number it can no
+      // longer tell an unread source from an empty one.
+      rcsRead: !swept.unknown && swept.snapshotRead !== false,
+      todosRead: !todos.unknown,
       blockers: blockers.count,
       commits: git.commits.length,
       events: swept.events.length,
@@ -189,8 +193,11 @@ export async function run(argv = [], { workspace = WS, hub = HUB, now = new Date
     unknowns: [
       ...git.failed.map((f) => `git: ${f}`),
       swept.unknown ? `sweep: ${swept.why}` : null,
+      (!swept.unknown && swept.snapshotRead === false)
+        ? 'sweep: no sweep has ever read GitHub on this machine, so the release-candidate queue is unmeasured rather than empty' : null,
       decisions.unknown ? `decisions: ${decisions.why}` : null,
       blockers.unknown ? `blockers: ${blockers.why}` : null,
+      todos.unknown ? `todos: ${todos.why}` : null,
       state.corrupt ? 'state: the fold state file was unreadable and was treated as first-run' : null,
     ].filter(Boolean),
     dryRun: opts.dryRun,
@@ -399,7 +406,7 @@ function previousEntryDate(hub, date) {
   }
 }
 
-function render(r) {
+export function render(r) {
   const L = []
   L.push(`fold: ${r.verdict.toUpperCase()}${r.dryRun ? '  (dry run — nothing written)' : ''}`)
   L.push(`window: ${r.window.since} -> ${r.window.until}`)
@@ -429,8 +436,15 @@ function render(r) {
            `${d.landed} change(s) → ${d.file}${d.why ? `  (${d.why})` : ''}`)
   }
   L.push('')
-  L.push(`queue: ${r.counts.rcs} RC · ${r.counts.decisions} decisions · ${r.counts.todos} todos · ` +
-         `${r.counts.blockers ?? '?'} config items`)
+  // A count is printed only for a source that was read. The config item count already
+  // worked this way — `?` when its list could not be opened — and the other two did
+  // not: on a machine with no history the RC count came from a sweep snapshot that
+  // does not exist and the todo count from a scratchpad directory that does not exist,
+  // and both rendered `0`. A zero and an unread file look identical
+  // (jwildfire/obot.roadmap#223).
+  const count = (n, read) => (read === false || n === null || n === undefined ? '?' : n)
+  L.push(`queue: ${count(r.counts.rcs, r.counts.rcsRead)} RC · ${r.counts.decisions} decisions · ` +
+         `${count(r.counts.todos, r.counts.todosRead)} todos · ${count(r.counts.blockers, true)} config items`)
   if (r.unknowns.length) {
     L.push('')
     L.push('UNKNOWN — a source could not answer. Nothing here is being called quiet:')

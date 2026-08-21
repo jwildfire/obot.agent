@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 24
       - name: Test suite
-        run: node --test tools/session-hub/test/*.test.mjs tools/ops-dashboard/test/*.test.mjs tools/statusline/test/*.test.mjs tools/navigator/test/*.test.mjs tools/style/test/*.test.mjs tools/fold/test/*.test.mjs tools/voice/test/*.test.mjs tools/rankviz/test/*.test.mjs scripts/test/*.test.mjs
+        run: node --test tools/session-hub/test/*.test.mjs tools/ops-dashboard/test/*.test.mjs tools/statusline/test/*.test.mjs tools/navigator/test/*.test.mjs tools/style/test/*.test.mjs tools/fold/test/*.test.mjs tools/voice/test/*.test.mjs tools/rankviz/test/*.test.mjs tools/session-init/test/*.test.mjs scripts/test/*.test.mjs
       - name: Policy file validation
         run: python3 scripts/obot-policy validate
 

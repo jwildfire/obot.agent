@@ -712,7 +712,17 @@ export function admiralSection({ trigger = null, decision = null, overruns = [],
     : null
 
   if (!trigger.fired) {
-    lines.push('admiral: nothing to act on — no session past the bar, no idle operational PR, no unrecorded closeout')
+    // "Nothing to act on" over lanes nobody could list is the same claim the config
+    // queue stopped making in obot.agent#206, one level up. On a machine where `gh` is
+    // not authenticated yet — which is every new machine on its first morning — every
+    // lane fails, and two of this sentence's three clauses were about things this pass
+    // never looked at. The `unread:` reasons print underneath, which is where a reader
+    // summarising the section stops (jwildfire/obot.roadmap#223).
+    const unread = trigger.unread ?? []
+    lines.push(unread.length
+      ? `admiral: nothing to act on in what could be read — ${unread.length} lane(s) could not be listed this run, `
+        + 'so no session, pull request or closeout on them was examined. Unknown, not clear.'
+      : 'admiral: nothing to act on — no session past the bar, no idle operational PR, no unrecorded closeout')
     lines.push('  the trigger is a positive condition: an empty fleet never launches an admiral')
     if (routedLine) lines.push(`  ${routedLine}`)
     if (trigger.judgedReadable === false) lines.push(`  ${UNJUDGED_NOTE}`)

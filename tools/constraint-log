@@ -169,6 +169,12 @@ export function briefBlock({ worker = null, scope = null, ws = WS, jobs = JOBS, 
   const adj = adjacentWorkers({ ws, jobs, exclude: worker, now });
   if (!adj.read) {
     out.push(`**DISPATCH RECORD UNREADABLE** — ${adj.why}. Nothing here says whether anyone else is on this; assume they might be and say so in your close-out.`);
+  } else if (adj.absent) {
+    // The new machine's first morning. `.claude/workers.journal` is local-only and no
+    // clone brings it, so an empty list here is an unopened file rather than an empty
+    // fleet — and this is the sentence a worker uses to decide whether to check for
+    // overlap before building the same thing twice (jwildfire/obot.roadmap#223).
+    out.push('- **No worker ledger on this machine yet**, so nothing here has looked at who else is in flight. That is unknown rather than none: if your brief could overlap someone, say so in your close-out. `obot.agent/tools/worker-id init` writes the first.');
   } else if (!adj.workers.length) {
     out.push('- Nobody else is in flight right now.');
   } else {
