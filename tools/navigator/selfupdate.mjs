@@ -81,6 +81,17 @@ import { captureCode, git as gitRead } from '../ops-dashboard/lib/provenance.mjs
 // rather than re-deriving either is what keeps a test server safe from this module.
 import { readLastSeen } from '../ops-dashboard/lib/last-seen.mjs'
 import { markerPath, readMarker } from '../ops-dashboard/lib/serve-marker.mjs'
+// The clone half (obot.agent#291) borrows rather than re-derives, and both borrowings
+// are the same argument the file already makes about the dashboard port: two halves
+// that disagree about which remote is "the" remote, or about how often to fetch, would
+// update nothing and report that everything was fine. `resolveRemote` is the rule the
+// local-work section MEASURES by, and `fetchIfDue` is the cadence it already set — so
+// the check that reports a clone out of step and the step that brings it back mean the
+// same thing by both, and there is one fetch on this machine rather than two.
+import { FETCH_TTL_MIN, ageText, fetchCachePath, fetchIfDue, gitRead as localGit, readRemotes, resolveRemote } from './localwatch.mjs'
+// Which repos this machine is supposed to hold, and which of their branches hold a
+// role. policy.json is already the authority on both and nothing here adds a list.
+import { discoverRepos, readPolicy } from './classify.mjs'
 
 const GIT_TIMEOUT = 45000
 
@@ -359,23 +370,40 @@ export function planFastForward(state, upstream) {
  * `--ff-only` is not belt and braces on top of the ancestor test; it is the guarantee
  * that survives a race. The fetch and the merge are separate commands and a worker can
  * commit between them, so the plan is advice and the flag is the contract.
+ *
+ * `fetch` is optional because THE FETCH CADENCE ON THIS MACHINE BELONGS TO ONE PLACE
+ * (obot.agent#291). Fetching one repo every five minutes is cheap and fetching six is
+ * 3.6s warm and unbounded on a bad connection, which is why localwatch already put the
+ * others on an hourly TTL and says "as last fetched" on every number it prints. A
+ * second cadence invented here would spend the sweep's wall clock twice over for the
+ * same refs. The move itself needs no network at all: a fast-forward onto a ref
+ * already on disk is free, so the caller that has already fetched passes `false` and
+ * the checkout still catches up on the same sweep.
  */
-export function fastForward(root, { git = gitRead, slow = gitRun, remote = 'origin', branch = 'main' } = {}) {
+export function fastForward(root, { git = gitRead, slow = gitRun, remote = 'origin', branch = 'main', fetch = true } = {}) {
   const before = readCheckout(root, { git, remote, branch })
   const pre = planFastForward(before, { sha: 'unknown', ancestor: true })
   // Refuse before touching the network when the reason is local: a dirty tree is a
   // refusal whether or not the remote has moved.
   if (!pre.ok && pre.code !== 'no-upstream') return { ...pre, moved: false, from: before.head, to: before.head, branch: before.branch }
 
-  const fetched = slow(root, ['fetch', '--quiet', remote, branch]) !== null
+  const reachable = fetch ? slow(root, ['fetch', '--quiet', remote, branch]) !== null : true
   const ref = `${remote}/${branch}`
-  const upSha = fetched ? git(root, ['rev-parse', ref]) : null
+  const upSha = reachable ? git(root, ['rev-parse', ref]) : null
   const upstream = {
     sha: upSha,
     ancestor: upSha && before.head ? git(root, ['merge-base', '--is-ancestor', before.head, upSha]) !== null : false,
   }
   const plan = planFastForward(before, upstream)
-  if (!plan.ok) return { ...plan, moved: false, from: before.head, to: before.head, branch: before.branch }
+  if (!plan.ok) {
+    // The stock sentence blames the fetch, which is right on the path that fetched and
+    // wrong on the path that deliberately did not. A refusal that misnames its own
+    // cause sends a reader to look at a network that was never asked anything.
+    const reason = (!fetch && plan.code === 'no-upstream')
+      ? `\`${ref}\` is not on disk and nothing was fetched this run — the position is as last fetched, so there is nothing to fast-forward onto`
+      : plan.reason
+    return { ...plan, reason, moved: false, from: before.head, to: before.head, branch: before.branch }
+  }
   if (plan.code === 'current') return { ...plan, moved: false, from: before.head, to: before.head, branch: before.branch }
 
   const merged = slow(root, ['merge', '--ff-only', ref])
@@ -388,6 +416,165 @@ export function fastForward(root, { git = gitRead, slow = gitRun, remote = 'orig
     ok: true, code: 'moved', moved: true, from: before.head, to: after, branch: before.branch,
     commits: count === null ? null : Number(count),
     reason: `fast-forwarded ${count ?? '?'} commit${count === '1' ? '' : 's'} to ${ref}`,
+  }
+}
+
+// ── Every other clone on this machine ────────────────────────────────────────────
+//
+// obot.agent#291, under the same requirement. Everything above this line moves ONE
+// directory, and the machine reads from seven. On 2026-08-21 five of them were out of
+// step with their remote and `gsm.safety` — a clinical repository — was thirty-one
+// commits behind, which is not a stale number but a different package. An agent
+// reading that checkout was reading something that never shipped, and nothing about a
+// directory of files can say so.
+//
+// This is a WIDENING, not a second updater. Every refusal below is the one
+// `planFastForward` already makes, reached through the same `fastForward`, so a dirty
+// tree or a diverged branch is refused here for exactly the reason it is refused
+// there. What is genuinely new is the two ways a clone can be ineligible that a
+// single-repo updater never needed an opinion about — and both are decisions rather
+// than defaults, so they are written down in `planCloneUpdate` rather than implied.
+
+/**
+ * The checkout the section above already reports. It is fetched every five minutes by
+ * `selfUpdate` itself, so including it here would fetch it twice and print it twice.
+ */
+export const SELF_REPO = 'jwildfire/obot.agent'
+
+/** `jwildfire/gsm.safety` is the id; `gsm.safety` is what a reader on a narrow panel needs. */
+const shortRepo = (repo) => String(repo).replace(/^jwildfire\//, '')
+
+/**
+ * May this clone be fast-forwarded, and if not, why — in a sentence a page can print.
+ *
+ * Pure, for the reason `planFastForward` is pure: these are the two decisions this
+ * change actually makes, and they should be testable without a repository.
+ *
+ * D4 — WHICH REMOTE IS "THE" REMOTE. The one whose URL names the repository we work
+ * in, never whichever one happens to be called `origin`. Measured, not assumed: two
+ * of the seven clones on this machine do not track the remote we work in.
+ * `gsm.safety`'s `origin` is `obot-claw/gsm.safety`, an org archived read-only on
+ * 2026-07-02 which still resolves because GitHub keeps a redirect — today both names
+ * land on the same commit, so nothing is ambiguous, but a redirect is a courtesy that
+ * can be withdrawn and a checkout that depends on one is one deletion from silence.
+ * `open.gismo` is the case where it already matters: its `origin` is
+ * `Gilead-BioStats/open.gismo`, an upstream we may not write to, and its jwildfire
+ * remote is called `fork`. Against `origin` that clone reads seven commits AHEAD;
+ * against `fork` it reads six BEHIND. Those are not two readings of one state, they
+ * are two different repositories, and an updater that picked by name would have
+ * "updated" it against a repository nobody here works in.
+ *
+ * This is the same rule `localwatch.resolveRemote` measures by, and the agreement is
+ * load-bearing rather than tidy: the check that reports a clone out of step and the
+ * step that brings it back have to mean the same thing by "its remote", or the count
+ * never reaches zero and nobody can see why. Neither the remote nor the tracking
+ * branch is CHANGED here — that is @jwildfire's decision, not a side effect of an
+ * update job. What is found is reported and left.
+ *
+ * D5 — WHICH BRANCH MAY MOVE. Only one holding a role in `policy.json`: the
+ * integration lane, or a release branch. This generalises the single-repo rule (`main`
+ * or nothing) without weakening it, and it keeps the property that mattered about it —
+ * a clone parked on a feature branch is somebody working in the main checkout, and the
+ * one thing an automatic update must never do is move a branch out from under them.
+ * Release branches are included deliberately: `safety.viz` and `gsm.safety` are both
+ * checked out on `main`, and that is the code every agent on this machine reads out of
+ * those directories whether or not it is the lane work lands on.
+ */
+export function planCloneUpdate({ repo, remote, branch, roles = [] }) {
+  const no = (code, reason) => ({ ok: false, code, reason })
+  if (!remote) {
+    return no('no-remote', `no remote in this checkout has a URL naming \`${repo}\` — a position measured against a different repository is worse than no position, so nothing is fetched or merged`)
+  }
+  if (!branch) return no('detached', 'the checkout is not on a branch (detached HEAD) — nothing is forced onto it')
+  if (!roles.includes(branch)) {
+    return no('not-a-role-branch', `the checkout is on \`${branch}\`, which holds no role in policy.json — somebody is working in the main clone, so it is left alone`)
+  }
+  return { ok: true, code: 'eligible', remote, branch,
+           reason: `\`${branch}\` holds a role in policy.json and \`${remote}\` names \`${repo}\`` }
+}
+
+/**
+ * Fast-forward every clone in the policy, and report where each one actually stands.
+ *
+ * The fetch goes through `localwatch.fetchIfDue` and its cache file, which is the
+ * whole of the cadence decision: ONE hourly fetch for the machine, made here because
+ * this runs first, and read as already-done by the local-work section that runs later
+ * in the same sweep. Inventing a second TTL would double the wall clock for the same
+ * refs and give the page two ages to reconcile.
+ *
+ * Position is measured AFTER the attempt and independently of it, which is
+ * obot.agent#231 applied to six more directories: "the update was refused" and "the
+ * checkout is thirty-one commits behind" are different facts, they diverge exactly
+ * when it matters, and a reader needs both.
+ *
+ * Nothing in here may throw. A clone that cannot be read is a value, the same way
+ * every refusal above is a value, because an update step must never be able to take
+ * the sweep down.
+ */
+export function updateClones({ ws, repos = null, cacheFile = null, now = Date.now(),
+                               git = localGit, ff = fastForward, fetchDue = null,
+                               fetch = fetchIfDue, exists = existsSync, read = readFileSync } = {}) {
+  let policyError = null
+  let list = repos
+  if (!list) {
+    // A policy file that cannot be read is reported, never assumed empty: zero clones
+    // and zero findings render identically, and one of them is a broken machine.
+    try { list = discoverRepos(readPolicy()) } catch (e) { policyError = String(e.message).slice(0, 120); list = [] }
+  }
+  const roots = (list ?? [])
+    .map((r) => ({
+      repo: r.repo,
+      roles: [r.integration, ...(r.release || [])].filter(Boolean),
+      root: join(ws, String(r.repo).split('/').pop()),
+    }))
+    .filter((r) => r.repo !== SELF_REPO && exists(join(r.root, '.git')))
+  for (const r of roots) {
+    r.remote = resolveRemote(readRemotes(r.root, { git }), r.repo)
+    r.branch = git(r.root, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || null
+  }
+
+  // `fetchDue: false` skips the network outright — for a caller that has already
+  // fetched, and for the tests, which must not reach a remote at all.
+  let fetched = { fetchedAt: null, failed: [] }
+  if (fetchDue === false) {
+    try { fetched = { ...fetched, ...JSON.parse(read(cacheFile, 'utf8')) } } catch { /* never fetched here */ }
+  } else {
+    try { fetched = fetch(roots.filter((r) => r.remote), { cacheFile, now, git }) } catch (e) {
+      policyError = policyError ?? `the shared fetch failed outright — ${String(e.message).slice(0, 100)}`
+    }
+  }
+
+  const clones = roots.map((r) => {
+    const base = { repo: r.repo, root: r.root, remote: r.remote, branch: r.branch, roles: r.roles }
+    // Measured last, so a clone that just moved reads level and a clone that refused
+    // reads exactly how far behind it still is. Never fetches — `checkoutPosition`
+    // says why, and the sentence it produces says "as last fetched" for the same reason.
+    const where = () => (r.remote && r.branch
+      ? checkoutPosition(r.root, { git, remote: r.remote, branch: r.branch })
+      : null)
+    try {
+      const plan = planCloneUpdate(r)
+      if (!plan.ok) return { ...base, ...plan, moved: false, position: where() }
+      const res = ff(r.root, { git, remote: r.remote, branch: r.branch, fetch: false })
+      return { ...base, ok: res.ok, code: res.code, moved: Boolean(res.moved),
+               from: res.from ?? null, to: res.to ?? null, commits: res.commits ?? null,
+               reason: res.reason, position: where() }
+    } catch (e) {
+      return { ...base, ok: false, code: 'broken', moved: false, position: null,
+               reason: `the update step failed outright — ${String(e.message).slice(0, 120)}` }
+    }
+  })
+
+  return {
+    at: new Date(now).toISOString(),
+    fetchedAt: fetched.fetchedAt ?? null,
+    // The failures travel with the freshness, the way localwatch already learned to
+    // carry them: without this the page says "last fetched 0m ago" over a repo whose
+    // fetch had just failed, and its position is hours old behind a current-looking number.
+    fetchFailed: fetched.failed ?? [],
+    ttlMin: FETCH_TTL_MIN,
+    policyError,
+    clones,
   }
 }
 
@@ -719,7 +906,8 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
                              marker = readMarker(markerPath(workspace)),
                              health: readHealth = health, lastSeen = readLastSeen(workspace),
                              restart = restartDashboard, ff = fastForward, quietMs = QUIET_MS,
-                             port = DASHBOARD_PORT, logFile = null, previous = undefined } = {}) {
+                             port = DASHBOARD_PORT, logFile = null, previous = undefined,
+                             clones = updateClones } = {}) {
   const at = now().toISOString()
   const checkout = ff(root)
   const headSha = checkout.to ?? null
@@ -774,6 +962,22 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
     } finally { lock.release() }
   }
 
+  // The other six clones, AFTER the restart rather than before it (obot.agent#291).
+  // The restart is the time-sensitive half — a page he is watching is stale until it
+  // happens — and the hourly fetch this can trigger measured 3.6s warm and is unbounded
+  // on a bad connection. Putting it first would spend that latency on his dashboard once
+  // an hour for nothing: the clones are no less updated for going second.
+  let cloneReport = null
+  try {
+    cloneReport = clones({ ws: workspace, cacheFile: fetchCachePath(workspace), now: now().getTime() })
+  } catch (e) {
+    // A widening that could take the sweep down would be a worse defect than the one it
+    // fixes, so the catch reports rather than throws — and reports as BROKEN rather than
+    // as an empty list, because an empty list is what a clean machine looks like.
+    cloneReport = { at, fetchedAt: null, fetchFailed: [], ttlMin: null, clones: [],
+                    policyError: `the clone update failed outright — ${String(e?.message ?? e).slice(0, 140)}` }
+  }
+
   const record = {
     at,
     sweep: stamp ?? null,
@@ -787,6 +991,7 @@ export function selfUpdate({ root, workspace, stamp, now = () => new Date(),
       commits: checkout.commits ?? null, reason: checkout.reason,
     },
     consumers,
+    clones: cloneReport,
     policy: CONSUMER_POLICY,
   }
   writeRecord(workspace, record)
@@ -921,6 +1126,37 @@ export function renderSelfUpdate(record, now = new Date()) {
     }
   }
 
+  // THE OTHER SIX CLONES (obot.agent#291). One plain verdict line, because the parser
+  // alarm-tests plain lines only and a bullet can never go red however it is worded;
+  // the per-clone detail is bullets below, where it belongs.
+  const cl = record.clones ?? null
+  if (cl) {
+    const rows = cl.clones ?? []
+    // Two ways a clone is still wrong after this ran, and they are one finding: the
+    // update refused, or the update did not refuse and the checkout is STILL behind.
+    // Reporting only the first is how a widening comes to say "6 of 6 updated" over a
+    // machine that is six commits stale.
+    const stuck = rows.filter((r) => !r.ok || (r.position?.known && r.position.behind > 0))
+    const moved = rows.filter((r) => r.moved)
+    if (cl.policyError) {
+      lines.push(`**CLONE UPDATE BROKEN** — ${cl.policyError}. No other checkout on this machine was read this sweep, which is not the same as finding nothing wrong with them.`)
+    }
+    if (cl.fetchFailed?.length) {
+      lines.push(`**CLONE FETCH FAILED** — the fetch failed for ${cl.fetchFailed.join(', ')}, so those positions are older than the age below them says.`)
+    }
+    if (stuck.length) {
+      // The label names WHY, and a clone the update did not refuse needs a different
+      // why from one it did: `(current)` over a checkout thirty-one commits behind is
+      // the code word answering a question nobody asked.
+      const why = (r) => (r.ok ? `still ${r.position.behind} behind` : r.code)
+      lines.push(`**CLONE UPDATE FAILED** — ${stuck.length} of ${rows.length} checkout(s) on this machine are not level with their remote: ${stuck.map((r) => `${shortRepo(r.repo)} (${why(r)})`).join(', ')}. An agent reading one of those is reading a different repository from the one on GitHub.`)
+    } else if (rows.length) {
+      lines.push(`clones: ${rows.length} checkout${rows.length === 1 ? '' : 's'} level with ${rows.length === 1 ? 'its remote' : 'their remotes'}${moved.length ? `, ${moved.length} fast-forwarded this sweep` : ''} — as last fetched`)
+    } else if (!cl.policyError) {
+      lines.push('clones: no other policy repo is cloned on this machine — nothing else to bring level')
+    }
+  }
+
   lines.push('')
   const s = record.sweep
   // The sweep's own build stamp, and the one honest thing to say about a process that
@@ -939,6 +1175,19 @@ export function renderSelfUpdate(record, now = new Date()) {
     // this bullet without a count knows there was nothing to restart in the first place.
     const count = con.deferred ? `, deferral ${con.deferrals ?? 1} of ${con.limit ?? DEFERRAL_LIMIT}` : ''
     lines.push(`- ${con.id}: not restarted${count} — ${con.reason}`)
+  }
+  for (const r of record.clones?.clones ?? []) {
+    // What the update did, then where the checkout actually stands — separately, because
+    // "refused" and "thirty-one commits behind" are different facts and the second is the
+    // one that tells a reader what the code in that directory IS (obot.agent#231).
+    const did = r.moved ? `fast-forwarded ${r.commits ?? '?'} commit${r.commits === 1 ? '' : 's'}` : r.reason
+    lines.push(`- ${shortRepo(r.repo)}: ${did} — ${positionSentence(r.position)}`)
+  }
+  const fetchAge = record.clones?.fetchedAt ? ageText(Math.max(0, now.getTime() - Date.parse(record.clones.fetchedAt))) : null
+  if (record.clones) {
+    lines.push(fetchAge
+      ? `- clone remotes last fetched ${fetchAge} ago, refreshed at most every ${record.clones.ttlMin ?? FETCH_TTL_MIN}m on the cadence the local-work reading already set — every clone position above is as last fetched, never live`
+      : '- clone remotes have never been fetched on this machine, so every clone position above is unmeasured rather than current')
   }
   lines.push(`- never restarted: ${CONSUMER_POLICY.never.map((n) => `${n.what} — ${n.why}`).join('; ')}.`)
   return `${lines.join('\n')}\n`

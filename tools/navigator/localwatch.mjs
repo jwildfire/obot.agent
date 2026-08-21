@@ -689,6 +689,16 @@ export function localSection(found = {}, now = Date.now()) {
  *
  * Never prunes. A prune is a delete, and this file does not delete.
  */
+/**
+ * Where the ONE fetch cadence on this machine remembers its last fetch.
+ *
+ * A path rather than a literal in two files, since obot.agent#291 put a second caller
+ * on it: the clone update runs first in the sweep and fetches when the TTL is up, and
+ * this section runs later and reads the same cache as already-refreshed. Two spellings
+ * of one path is how that becomes two fetches an hour and two ages on one page.
+ */
+export const fetchCachePath = (ws) => join(ws, '.claude', 'session-hub', 'cache', 'localwatch.json')
+
 export function fetchIfDue(targets, { cacheFile, ttlMin = FETCH_TTL_MIN, now = Date.now(), git = gitRead, read = readFileSync, write = writeFileSync } = {}) {
   let cache = {}
   try { cache = JSON.parse(read(cacheFile, 'utf8')) } catch { /* first run */ }
