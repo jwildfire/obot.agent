@@ -173,3 +173,23 @@ node obot.agent/tools/style/vendor.mjs --dest obot.roadmap:<path>   # into a wor
 `--dest`, and its read-side twin `OBOT_STYLE_DEST=obot.roadmap:<path>`, exist because a cross-repo change has to be verifiable before either half merges. Both halves live in linked worktrees; without an override the census reads the clones sitting on `main` and reports the work as undone, which is indistinguishable from the work actually being undone.
 
 In CI only `obot.agent` is on the runner. Every other root is reported as not-on-this-machine and skipped — an absent clone is absence, never a defect and never a silent pass.
+
+### Who runs it
+
+Until 2026-08-21 the answer was "a person, when they remember". The census was named in no workflow, no sweep and no script — only in its own tests and on this page — so [#289](https://github.com/jwildfire/obot.roadmap/issues/289)'s "a check fails if any surface reintroduces its own copy" described something nothing ever asked. A check nobody invokes cannot fail. [#311](https://github.com/jwildfire/obot.agent/issues/311) gave it two callers with different jobs, because the two vantage points can do different things and neither is redundant.
+
+| caller | sees | can it stop a merge |
+|---|---|---|
+| `.github/workflows/test.yml`, step **Style census** | `obot.agent` alone — four of the nine declared roots are absent on the runner and always will be | yes. `--md` exits 1 on drift, and the step is on every pull request |
+| `tools/navigator/style.mjs`, in the five-minute sweep | all nine roots, which exist together on no other machine | no. It reports into `navigator-state.md`, and from there onto the Operations Dashboard |
+
+CI can never watch `safety.viz` reintroduce a palette; the sweep can never block the pull request that does it.
+
+Both run the same command, `tools/style-census --md`, so the gate and the detector cannot disagree about what a surface is. The sweep spawns it rather than importing it: the sweep is synchronous end to end and an in-process walk cannot be interrupted, so the 20-second `spawnSync` timeout is the bound that keeps a pathological run costing a section rather than the cadence. Measured on 2026-08-21 over all nine roots: 0.55s cold, 0.36s warm, against a pass that takes about half a minute. The number is printed in the section, so a slowdown becomes visible rather than being inferred from a sweep that stopped arriving.
+
+`unknown` survives both trips, which is the part a caller usually destroys:
+
+- CI pipes the markdown to `$GITHUB_STEP_SUMMARY`, so the run page carries "unknown, not clean" and the names of every root it could not reach. A green tick meaning "no drift among the four roots I could not read" is the same defect one layer up, wearing a check mark. The step declares `shell: bash` for `pipefail` — GitHub's default `run:` shell has none, and without it the pipeline exits with `tee`'s status and a red census renders green.
+- The sweep renders the census's own words untouched, alarms on `**STYLE CENSUS GAP**`, alarms on `**STYLE CENSUS BROKEN**` when the reading did not happen at all, and prints `unknown` plainly without an alarm — an absent clone is a fact about the machine, not something wrong with the work.
+
+The first honest run found real drift, which is what a first honest run is for: `obot.roadmap/scripts/lib/premise-status.mjs` declares six colour tokens under `.pcx` and is registered nowhere. It arrived with the premise-strip work, after the shared sheet landed, and it is left standing rather than registered — an exemption written to make a first run green is how a gate becomes inert a second time.

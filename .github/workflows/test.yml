@@ -19,6 +19,29 @@ jobs:
           node-version: 24
       - name: Test suite
         run: node --test tools/session-hub/test/*.test.mjs tools/ops-dashboard/test/*.test.mjs tools/statusline/test/*.test.mjs tools/navigator/test/*.test.mjs tools/style/test/*.test.mjs tools/fold/test/*.test.mjs tools/voice/test/*.test.mjs tools/rankviz/test/*.test.mjs tools/session-init/test/*.test.mjs scripts/test/*.test.mjs
+      # The done-gate of jwildfire/obot.roadmap#289 — "a check fails if any surface
+      # reintroduces its own copy" — wired to something that runs (obot.agent#311).
+      # The census existed from #295 and was honest about what it could not read from
+      # #309, and until now nothing ever called it, so the requirement read as
+      # delivered while the property was unguarded.
+      #
+      # The runner checks out obot.agent alone, so four of the nine declared roots are
+      # invisible here and always will be. That is not swept under the tick: the `--md`
+      # form names every root, exemption, ratchet and vendored copy it could not reach,
+      # and the run's summary page carries the sentence "unknown, not clean" rather
+      # than a bare green check. The detector that CAN see the other four is the
+      # Navigator sweep (tools/navigator/style.mjs); neither caller is redundant.
+      #
+      # `shell: bash` is load-bearing, not decoration. GitHub's default shell for
+      # `run:` is `bash -e {0}` with NO pipefail, so `census | tee` would exit with
+      # tee's status and a red census would render as a green tick — a gate that
+      # cannot fail, which is the exact defect this step exists to remove. Naming the
+      # shell is what asks for `-eo pipefail`. tools/style/test/gate.test.mjs asserts
+      # it, and runs this very command line red and green.
+      - name: Style census
+        shell: bash
+        run: node tools/style-census --md | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
       - name: Policy file validation
         run: python3 scripts/obot-policy validate
 
