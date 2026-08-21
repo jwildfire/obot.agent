@@ -40,6 +40,7 @@ SETTINGS="$WORKSPACE/.claude/settings.json"
 # hook script  ->  the settings.json event it registers under
 declare -a HOOKS=(
   "merge-gate-guard.sh:PreToolUse:Bash"
+  "spend-cap-hook.py:PreToolUse:Bash"
   "scratchpad-heartbeat.sh:Stop:"
   "session-state-publish.sh:Stop:"
 )
