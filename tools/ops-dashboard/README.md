@@ -464,6 +464,33 @@ obot.agent/tools/config-count --dry-run   # print it, write nothing
 obot.agent/tools/config-count --check     # exit 1 if the published count has drifted
 ```
 
+## Premise readings reach the hub; the sweep's own words never do
+
+`obot.agent/tools/premise-status` writes `<hub>/data/premise-status.json`: one row per
+decision-artifact premise carrying its id, a twelve-hex fingerprint of the proof that ran,
+one of three states, when it was measured, and — only for an `unknown` — which of three
+kinds of not-knowing it was. Nothing else, and nothing in prose.
+
+It is the other half of [jwildfire/obot.roadmap#266](https://github.com/jwildfire/obot.roadmap/issues/266).
+The sweep has re-checked these premises every five minutes since #262 and reported an expiry
+on the Navigator surface; the artifact page itself said nothing, so a reader met an argument
+built on a premise that might have expired with no sign anything had ever looked. The hub
+renders a strip above every artifact's masthead from these readings; this gets them there.
+
+The premise *sentences* a reader sees are the page's own `<meta name="premise">` content —
+written in the hub repository, already public — so this channel never has to carry prose in
+order to render prose. That is what lets the hub's reader refuse every payload that is not a
+number, a date, hex, or a member of a closed set.
+
+The sweep runs it every pass and never commits: what is committed is what the pages get, so
+the Navigator surface reports the gap between the two rather than closing it unattended.
+
+```bash
+obot.agent/tools/premise-status             # write it
+obot.agent/tools/premise-status --dry-run   # print it, write nothing
+obot.agent/tools/premise-status --check     # exit 1 if the published readings have drifted
+```
+
 ## How the page is dressed
 
 The palette, the type and the document components come from the repository's shared
