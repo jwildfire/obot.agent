@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-21 -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/303 on 2026-08-21 -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0, Parent issue: #302 -->
 
 The currency sweep skipped every artifact that was decided or closed, on the reasoning that a settled artifact's premises are history. D0020 is decided, and its page says goal #73's rename and rewritten body are approved and *not yet applied* — true today, false the moment somebody applies them, and nothing was looking. Decided is not the same as no longer claiming anything, so the premise now says which kind it is instead of the artifact's state guessing for it.
