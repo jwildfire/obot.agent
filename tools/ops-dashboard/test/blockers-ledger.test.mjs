@@ -30,7 +30,8 @@ const read = (f) => fs.readFileSync(f, 'utf8');
 
 // The IQ flags every entry needs since obot.agent#122; the point of these tests is
 // the id and the ledger, so the protocol itself is boilerplate here.
-const iq = (n) => ['--do', `type ${n}`, '--expect', `${n} is there`,
+const iq = (n) => ['--matters', 'Work he cares about stops until somebody types this one thing.',
+  '--do', `type ${n}`, '--expect', `${n} is there`,
   '--verify', `test -f /tmp/${n} -> the file exists`, '--source', 'a session'];
 
 const run = (ws, args, env = {}) => {

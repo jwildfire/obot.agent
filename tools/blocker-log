@@ -12,20 +12,37 @@
 # and it is the specification, not a metaphor.
 #
 # So an entry is a protocol:
+#   --matters   what problem it fixes; what stays broken if he never does it.
+#               FIRST on the entry and first on the card (@jwildfire, 2026-08-20:
+#               "I need the config summarys to start with the 'why'. Why is this
+#               important? What problem does it fix?"). This is NOT --why: moving
+#               the mechanism to the top would satisfy that sentence and produce
+#               exactly the agent-to-agent opening --why is kept last to prevent.
+#               It is the STAKES - which is what --unblocks already meant, so this
+#               is that flag renamed and promoted rather than a second one beside
+#               it. --unblocks still works and writes the same field; two fields
+#               both meaning "why" drift apart.
 #   --do        the exact command, or the exact click-path when there is none
 #   --expect    what he should see when it worked
 #   --verify    a command that PROVES it, and what its output should say:
 #               'grep -c foo /path/file -> prints 1 or more'
 #               (use 'manual - <what to look at>' when nothing can be scripted)
-#   --unblocks  what it buys, in his terms
 #   --source    where the item came from (url or provenance)
 #   --blocks    filed work stuck behind it: 'owner/repo#12' (repeatable)
 #   --why       the mechanism, optional and LAST - an item that opens with the
 #               mechanism is written agent-to-agent, and he triages by skimming
 #
-# The three required flags are --do, --expect and --verify. This is enforced
-# HERE, at capture, and not patched up in the renderer: a tool that accepts a
-# free-text one-liner gets fed free-text one-liners forever.
+# The four required flags are --matters, --do, --expect and --verify. This is
+# enforced HERE, at capture, and not patched up in the renderer: a tool that
+# accepts a free-text one-liner gets fed free-text one-liners forever.
+#
+# THE MATTERS BAR. --matters is checked, not just required: a line that opens
+# with a command, a path, a flag, a bare mechanism ("the classifier ..."), or a
+# "because ...", or that is too short to be a sentence, is refused with EVERY
+# reason at once rather than one at a time. What the bar cannot catch is a
+# grammatical sentence that says nothing - that is the writer's judgement, and a
+# pass is not a compliment. An item nobody can write a --matters for is a strong
+# candidate for not being needed at all, which is the other half of the job.
 #
 # THE VERIFY CONTRACT: the command must exit 0 exactly when the item is done.
 # `grep -c`, `test -f` and a `gh api` read all do this naturally. The dashboard
@@ -36,10 +53,12 @@
 # script asks, and writes '(verified open <date>)' only on a real answer. No gh,
 # a closed reference, or a missing one - no stamp, and the item is ordinary.
 #
-#   blocker-log '<what>' --do '<exact action>' --expect '<what he sees>' \
+#   blocker-log '<what>' --matters '<what problem it fixes>' \
+#     --do '<exact action>' --expect '<what he sees>' \
 #     --verify '<command> -> <expected output>' --source '<url>' \
-#     [--unblocks '<what it buys>'] [--blocks owner/repo#12] [--why '<mechanism>']
+#     [--blocks owner/repo#12] [--why '<mechanism>']
 #
+#   blocker-log --set-matters c0003 --text '<why it matters>'   (write/replace, journaled)
 #   blocker-log --retire c0007 --reason 'folded into c0001'
 #   blocker-log --audit                 (read-only; exit 1 if the ledger has a gap)
 #
@@ -85,7 +104,7 @@
 # The list is LOCAL-ONLY: never committed to any repo, never published (the hub
 # deploy carries a sentinel guard).
 set -u
-usage() { sed -n '2,79p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,105p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 WS="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
 FILE="$WS/.claude/blockers.md"
 LIB="$(cd "$(dirname "$0")/lib" 2>/dev/null && pwd)"
@@ -124,6 +143,88 @@ for line in report(a, p):
     print(line)
 sys.exit(1 if a["missing"] else 0)
 PY
+  exit $?
+fi
+
+# ---- set-matters lane: write or replace one entry's `Why it matters` ----
+# Backfill needs a real mechanism rather than a hand edit. A hand edit bypasses the
+# lock and moves the digest the journal watches, so the next run reports the file as
+# changed by something it cannot account for - which is true, and useless. This does
+# it inside the lock, applies the same bar as capture, and journals the change.
+if [ "$WHAT" = "--set-matters" ]; then
+  shift
+  MID="${1:-}"; [ -z "$MID" ] && { echo "blocker-log: --set-matters needs an id (c0007)" >&2; exit 1; }
+  shift
+  TEXT=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --text) TEXT="${2:?--text needs a value}"; shift 2;;
+      *) echo "blocker-log: unknown argument: $1" >&2; exit 1;;
+    esac
+  done
+  if ! python3 -c "
+import sys
+sys.path.insert(0, sys.argv[1])
+from blockers_ledger import matters_findings
+f = matters_findings(sys.argv[2])
+if f:
+    print('blocker-log: that is not a statement of why it matters.', file=sys.stderr)
+    for x in f:
+        print('  - ' + x, file=sys.stderr)
+    sys.exit(1)
+" "$LIB" "$TEXT"; then
+    exit 1
+  fi
+  python3 - "$LIB" "$FILE" "$MID" "$TEXT" <<'PYSET'
+import sys, pathlib, re
+sys.path.insert(0, sys.argv[1])
+from blockers_ledger import locked, journal_path, ensure_seeded, append_journal, actor, sha, now
+p = pathlib.Path(sys.argv[2]); mid, text = sys.argv[3:5]
+
+# Every label the list has ever used, so a replace finds the old lead whatever it
+# was called, and a body line is never mistaken for a field.
+LEAD = re.compile(r"^\s*(why it matters|unblocks)\s*:", re.I)
+FIELD = re.compile(r"^\s*(why it matters|unblocks|do|expect|verify|source|blocks|why|fix)\s*:", re.I)
+
+with locked(p):
+    md = p.read_text()
+    records = ensure_seeded(journal_path(p), md)
+    lines = md.splitlines()
+    try:
+        open_i = lines.index("## Open")
+    except ValueError:
+        sys.exit("blocker-log: no ## Open section")
+    end_of_open = next((i for i in range(open_i + 1, len(lines))
+                        if lines[i].startswith("## ")), len(lines))
+    start = next((i for i in range(open_i + 1, end_of_open)
+                  if re.match(r"^-\s+\[ \]\s*" + re.escape(mid) + r"\b", lines[i], re.I)), None)
+    if start is None:
+        sys.exit("blocker-log: %s is not open in %s" % (mid, p))
+    end = start + 1
+    while end < len(lines) and not (lines[end].startswith("- ") or lines[end].startswith("## ")):
+        end += 1
+
+    # Drop any existing lead - under either label - so this replaces rather than
+    # leaving the same field written twice under two names.
+    body, i = [], start + 1
+    while i < end:
+        if LEAD.match(lines[i]):
+            i += 1
+            while i < end and not FIELD.match(lines[i]):
+                i += 1
+            continue
+        body.append(lines[i]); i += 1
+
+    head, *rest = text.strip().split("\n")
+    field = ["  Why it matters: " + head.strip()] + ["      " + r.strip() for r in rest if r.strip()]
+    lines[start + 1:end] = field + body
+    new = "\n".join(lines) + "\n"
+    p.write_text(new)
+    append_journal(journal_path(p), {"ts": now(), "op": "set-matters", "id": mid.lower(),
+                                     "actor": actor(), "text": text.strip()[:200], "sha256": sha(new)})
+
+print("blocker-log: %s - Why it matters: %s" % (mid, text.strip().splitlines()[0]))
+PYSET
   exit $?
 fi
 
@@ -200,14 +301,16 @@ PY
 fi
 
 shift
-DO=""; EXPECT=""; VERIFY=""; SOURCE=""; UNBLOCKS=""; WHY=""; BLOCKS=""
+DO=""; EXPECT=""; VERIFY=""; SOURCE=""; MATTERS=""; WHY=""; BLOCKS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --do)       DO="${2:?--do needs a value}"; shift 2;;
     --expect)   EXPECT="${2:?--expect needs a value}"; shift 2;;
     --verify)   VERIFY="${2:?--verify needs a value}"; shift 2;;
     --source)   SOURCE="${2:?--source needs a value}"; shift 2;;
-    --unblocks) UNBLOCKS="${2:?--unblocks needs a value}"; shift 2;;
+    --matters)  MATTERS="${2:?--matters needs a value}"; shift 2;;
+    # The old name for the same field, still accepted so nothing in flight breaks.
+    --unblocks) MATTERS="${2:?--unblocks needs a value}"; shift 2;;
     --why)      WHY="${2:?--why needs a value}"; shift 2;;
     --blocks)   BLOCKS="${BLOCKS}${BLOCKS:+ }${2:?--blocks needs a value}"; shift 2;;
     --fix)      echo "blocker-log: --fix is retired. An installation qualification needs --do (the exact action), --expect (what you should see) and --verify (a command that proves it). See --help." >&2; exit 1;;
@@ -217,14 +320,35 @@ while [ $# -gt 0 ]; do
 done
 
 MISSING=""
+[ -z "$MATTERS" ] && MISSING="$MISSING --matters"
 [ -z "$DO" ]     && MISSING="$MISSING --do"
 [ -z "$EXPECT" ] && MISSING="$MISSING --expect"
 [ -z "$VERIFY" ] && MISSING="$MISSING --verify"
 if [ -n "$MISSING" ]; then
   echo "blocker-log: missing$MISSING." >&2
-  echo "  An entry on this list is an installation qualification, not a note: the exact" >&2
-  echo "  action, what he should see when it worked, and a command that proves it." >&2
-  echo "  Without all three he cannot tell success from silent failure. See --help." >&2
+  echo "  An entry on this list is an installation qualification, not a note: why it" >&2
+  echo "  matters, the exact action, what he should see when it worked, and a command" >&2
+  echo "  that proves it. Without the last three he cannot tell success from silent" >&2
+  echo "  failure; without the first he cannot tell whether to care. See --help." >&2
+  exit 1
+fi
+
+# The `Why it matters` bar. Same doctrine as the three above: enforced at capture,
+# never patched up in the renderer. Prints every reason at once, because one
+# finding at a time turns a rewrite into a guessing game.
+if ! python3 -c "
+import sys
+sys.path.insert(0, sys.argv[1])
+from blockers_ledger import matters_findings
+f = matters_findings(sys.argv[2])
+if f:
+    print('blocker-log: that is not a statement of why it matters.', file=sys.stderr)
+    for x in f:
+        print('  - ' + x, file=sys.stderr)
+    print('  This field leads the entry and the card. It is the STAKES, not the', file=sys.stderr)
+    print('  mechanism - the mechanism is --why and it stays last.', file=sys.stderr)
+    sys.exit(1)
+" "$LIB" "$MATTERS"; then
   exit 1
 fi
 [ -z "$SOURCE" ] && { echo "blocker-log: --source is required (issue/PR/close-out URL or provenance note)" >&2; exit 1; }
@@ -261,13 +385,13 @@ if [ -n "$BLOCKS" ]; then
 fi
 
 TODAY="$(date +%F)"
-python3 - "$LIB" "$FILE" "$TODAY" "$WHAT" "$DO" "$EXPECT" "$VERIFY" "$UNBLOCKS" "$SOURCE" "$BLOCKS_FIELD" "$WHY" <<'PY'
+python3 - "$LIB" "$FILE" "$TODAY" "$WHAT" "$DO" "$EXPECT" "$VERIFY" "$MATTERS" "$SOURCE" "$BLOCKS_FIELD" "$WHY" <<'PY'
 import sys, pathlib, re
 sys.path.insert(0, sys.argv[1])
 from blockers_ledger import (locked, journal_path, ensure_seeded, append_journal,
                              next_id, audit, report, actor, sha, now)
 p = pathlib.Path(sys.argv[2])
-today, what, do, expect, verify, unblocks, source, blocks, why = sys.argv[3:12]
+today, what, do, expect, verify, matters, source, blocks, why = sys.argv[3:12]
 # The local-only sentinel, composed from two halves so this script's own text
 # can never trip the hub deploy guard if it is ever rendered onto a page.
 sentinel = "LOCAL-ONLY: never publish" + ", never commit"
@@ -312,11 +436,12 @@ with locked(p):
     cid = next_id(text, records)
 
     entry = [f"- [ ] {cid} · filed {today} · verified {today} — **{what.strip()}**"]
+    # First, always: what problem this fixes. He triages by skimming, and the line
+    # he skims has to be the one that tells him whether to care.
+    entry += field("Why it matters", matters)
     entry += field("Do", do)
     entry += field("Expect", expect)
     entry += field("Verify", verify.replace("->", "→"))
-    if unblocks.strip():
-        entry += field("Unblocks", unblocks)
     entry += field("Source", source)
     if blocks.strip():
         entry += field("Blocks", blocks)

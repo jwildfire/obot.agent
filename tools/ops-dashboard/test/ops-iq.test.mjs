@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -41,7 +41,7 @@ test('an IQ entry parses into the steps, the expected result, and the proof', ()
   assert.match(iq.expect.text, /parses as JSON/);
   assert.equal(iq.verify.command, 'grep -c "tools/scratchpad-log" /w/.claude/settings.json');
   assert.equal(iq.verify.expect, 'prints 1 or more');
-  assert.match(iq.unblocks.text, /heartbeat/);
+  assert.match(iq.matters.text, /heartbeat/, 'the legacy `Unblocks:` label still parses, into its new home');
   assert.equal(iq.source.text, 'obot.agent#91');
   // A field the entry does not have must stay absent, or the panel renders an
   // empty labelled block for it.
@@ -74,7 +74,7 @@ test('an IQ is complete only with an action, an expected result and a proof', ()
 `);
   const v = iqComplete(old);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.missing.sort(), ['expect', 'verify']);
+  assert.deepEqual(v.missing.sort(), ['expect', 'matters', 'verify']);
 });
 
 test('a web-only step says so instead of pretending to be a command', () => {
@@ -315,7 +315,14 @@ test('snoozed and cleared items stay on the page, collapsed', () => {
 // ------------------------------------------------------- capture enforcement
 
 const logTool = new URL('../../blocker-log', import.meta.url).pathname;
-const capture = (ws, args) => execFileSync(logTool, args, { env: { ...process.env, OBOT_WORKSPACE: ws }, encoding: 'utf8' });
+// `--matters` became required on 2026-08-20. It is defaulted here rather than added
+// to every call, so each test below stays about the thing it was written to check;
+// the tests that are ABOUT the new field pass their own and opt out of the default.
+const A_REAL_WHY = 'Every session pays a token tax for a workaround nobody can see.';
+const withMatters = (args) =>
+  (args.includes('--matters') || args.includes('--unblocks') || args[0]?.startsWith('--'))
+    ? args : [...args, '--matters', A_REAL_WHY];
+const capture = (ws, args) => execFileSync(logTool, withMatters(args), { env: { ...process.env, OBOT_WORKSPACE: ws }, encoding: 'utf8' });
 const captureFails = (ws, args) => {
   try { capture(ws, args); return null; } catch (e) { return String(e.stderr || e.stdout || e.message); }
 };
@@ -336,7 +343,10 @@ test('capture writes the IQ shape the dashboard reads back', () => {
     '--do', 'add the line to /w/.claude/settings.json',
     '--expect', 'the allow array carries it',
     '--verify', 'grep -c scratchpad-log /w/.claude/settings.json → prints 1 or more',
-    '--unblocks', 'cheap heartbeats',
+    // The old flag name, deliberately: it must still write the field. It also has
+    // to clear the same bar, so 'cheap heartbeats' - which this test used to pass -
+    // is now refused for being a label rather than a reason.
+    '--unblocks', 'Every session burns tokens on a workaround for two logging commands.',
     '--source', 'obot.agent#91',
   ]);
   const { items } = collectConfig(ws);
@@ -469,4 +479,110 @@ test('a snoozed row is not selectable — it has no detail to open', () => {
   });
   assert.ok(html.includes('q-off'), 'a folded row is marked as inert');
   assert.ok(html.includes(".q:not(.q-off)"), 'and the click handler skips it, rather than opening an empty panel');
+});
+
+// --------------------------------------------------- the `Why it matters` bar
+//
+// @jwildfire, 2026-08-20: "I need the config summarys to start with the 'why'.
+// Why is this important? What problem does it fix?"
+//
+// The trap these tests exist to hold shut: the list already had a `Why`, and his
+// own earlier rule keeps it LAST because an item opening with the mechanism is
+// written agent-to-agent. Satisfying his sentence by promoting `Why` would have
+// produced exactly that. `Why it matters` is the stakes and a different field.
+
+test('`Why it matters` and `Why` are different fields — the shorter name must not shadow the longer', () => {
+  const iq = parseIQ(`- [ ] c0031 · filed 2026-08-20 — **two whys**
+  Why it matters: Agents lose about 250 tokens a turn to a workaround nobody can see.
+  Do: add the line.
+  Expect: it is there.
+  Verify: grep -c x /f → prints 1
+  Source: a session.
+  Why: the classifier refuses settings writes, so no agent can do it.
+`);
+  assert.match(iq.matters.text, /250 tokens/);
+  assert.match(iq.why.text, /classifier/);
+  assert.notEqual(iq.matters.text, iq.why.text, 'a parser that let `Why` win would file the stakes as the mechanism, silently');
+});
+
+test('the pre-rename `Unblocks:` label still parses, into its new home', () => {
+  // The rename is a promotion, not a second field: an entry written before it keeps
+  // rendering, and its existing wording is already the why in most cases.
+  const iq = parseIQ(`- [ ] c0032 · filed 2026-08-01 — **an older one**
+  Do: add the line.
+  Expect: it is there.
+  Verify: grep -c x /f → prints 1
+  Unblocks: every session logs its heartbeat with one cheap command.
+  Source: a session.
+`);
+  assert.match(iq.matters.text, /heartbeat/);
+  assert.ok(!iq.unblocks, 'one field, one name — two would drift apart');
+  assert.equal(iqComplete(iq).ok, true);
+});
+
+test('capture refuses a why that is really a command, and says every reason at once', () => {
+  const ws = tmp();
+  const err = captureFails(ws, [
+    'Merge the thing',
+    '--matters', 'gh pr merge 273',
+    '--do', 'run it', '--expect', 'merged',
+    '--verify', 'gh pr view 273 → MERGED', '--source', 'a session',
+  ]);
+  assert.match(err, /not a statement of why it matters/);
+  assert.match(err, /opens with the command "gh"/);
+  assert.match(err, /characters/, 'length and shape are both reported — one finding at a time makes a rewrite a guessing game');
+  assert.match(err, /\bwords\b/);
+  assert.equal(fs.existsSync(path.join(ws, '.claude', 'blockers.md')), false, 'a refused capture claims no id');
+});
+
+test('capture refuses a why that opens with a path, a flag, or a bare mechanism', () => {
+  const ws = tmp();
+  const rest = ['--do', 'run it', '--expect', 'ok', '--verify', 'test -f /tmp/a → exists', '--source', 's'];
+  const why = (m) => captureFails(ws, ['Give the hub its isolation file', '--matters', m, ...rest]);
+  assert.match(why('/Users/jwildfire/.claude/settings.json needs two more lines adding to it'), /opens with a path/);
+  assert.match(why('--bgIsolation none has to be set on both of the two repositories here'), /opens with a flag/);
+  assert.match(why('The classifier refuses the call every single time that any agent runs it'), /naming a mechanism/);
+  assert.match(why('Because the guard blocks it, agents cannot write these files without heredocs'), /answers "why does this happen"/);
+});
+
+test('a why that names the stakes is accepted, and it leads the entry', () => {
+  const ws = tmp();
+  capture(ws, [
+    'Let agents log without a prompt',
+    '--matters', 'Every session burns tokens on a workaround for two logging commands.',
+    '--do', 'add the line', '--expect', 'it is there',
+    '--verify', 'grep -c x /f → prints 1', '--source', 'obot.agent#91',
+    '--why', 'the classifier blocks settings writes.',
+  ]);
+  const md = fs.readFileSync(path.join(ws, '.claude', 'blockers.md'), 'utf8');
+  const body = md.slice(md.indexOf('c0001'));
+  assert.ok(body.indexOf('Why it matters:') < body.indexOf('Do:'), 'the stakes come first — he triages by skimming');
+  assert.ok(body.indexOf('Why:') > body.indexOf('Verify:'), 'and the mechanism still comes last');
+});
+
+test('--set-matters replaces the old lead in place rather than leaving two of them', () => {
+  const ws = tmp();
+  capture(ws, ['Give the hub its isolation file', '--unblocks', 'The old wording of what this one buys him, written before the rename.',
+    '--do', 'run it', '--expect', 'ok', '--verify', 'test -f /tmp/a → exists', '--source', 's']);
+  const out = execFileSync(logTool, ['--set-matters', 'c0001', '--text',
+    'Hub edits go through shell workarounds today, which is slower and mangles content.'],
+  { env: { ...process.env, OBOT_WORKSPACE: ws }, encoding: 'utf8' });
+  assert.match(out, /Why it matters/);
+  const md = fs.readFileSync(path.join(ws, '.claude', 'blockers.md'), 'utf8');
+  assert.equal(md.match(/Why it matters:/g).length, 1, 'replace, never a second copy under a second label');
+  assert.equal(md.includes('Unblocks:'), false);
+  assert.match(md, /Hub edits go through shell workarounds/);
+  // Journaled, not hand-edited: a hand edit moves the digest and the next run
+  // reports a change it cannot account for.
+  const journal = fs.readFileSync(path.join(ws, '.claude', 'blockers.journal'), 'utf8');
+  assert.match(journal, /"op": ?"set-matters"/);
+});
+
+test('--set-matters holds the same bar as capture', () => {
+  const ws = tmp();
+  capture(ws, ['Give the hub its isolation file', '--do', 'run it', '--expect', 'ok', '--verify', 'test -f /tmp/a → exists', '--source', 's']);
+  const r = spawnSync(logTool, ['--set-matters', 'c0001', '--text', 'gh pr merge it'],
+    { env: { ...process.env, OBOT_WORKSPACE: ws }, encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /opens with the command "gh"/);
 });

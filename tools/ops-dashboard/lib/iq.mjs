@@ -8,16 +8,25 @@
 // action, the result expected of it, a check that proves it, and a recorded
 // pass/fail. So an entry on the config list carries five fields —
 //
-//   Do        the exact command, or the exact click-path when there is no command
-//   Expect    what he should see when it worked
-//   Verify    a command that proves it, and what its output should say
-//   Unblocks  what it buys, in his terms
-//   Source    where the item came from
+//   Why it matters  what problem it fixes, what stays broken if he never does it
+//   Do              the exact command, or the exact click-path when there is no command
+//   Expect          what he should see when it worked
+//   Verify          a command that proves it, and what its output should say
+//   Source          where the item came from
 //
 // — and two optional ones: `Blocks` (filed work stuck behind it, which is the only
 // way an item earns the critical tag — see rank.mjs) and `Why` (the mechanism,
 // last and optional, because an item that opens with the mechanism is written
 // agent-to-agent and he triages by skimming).
+//
+// `Why it matters` leads (@jwildfire, 2026-08-20: "I need the config summarys to
+// start with the 'why'. Why is this important? What problem does it fix?"). Note
+// what it is NOT: it is not `Why`, and moving the mechanism to the top would satisfy
+// the letter of that sentence while producing exactly the agent-to-agent opening the
+// field order exists to prevent. It is the STAKES — which is what `Unblocks` already
+// held ("what it buys, in his terms"), so this is that field renamed and promoted
+// rather than a second one beside it. Two fields both meaning "why" drift apart;
+// `Unblocks:` is still read as an alias so no existing entry stops parsing.
 //
 // The contract that makes the check meaningful: **a verify command must exit 0
 // exactly when the item is done.** `grep -c`, `test -f` and a `gh api` read all do
@@ -41,12 +50,41 @@ export { AUTO_VERIFY_HEADS, judge, readChecks, splitVerify, tokenize, verifyPlan
 // `Do` and is still read, so an entry written before this pass renders rather
 // than disappearing — but `iqComplete` still reports it as incomplete, which is
 // the point: the old shape was missing the half that mattered.
-const FIELDS = ['do', 'expect', 'verify', 'unblocks', 'source', 'blocks', 'why'];
-const ALIAS = { fix: 'do' };
-const FIELD_RE = new RegExp(`^\\s*(${[...FIELDS, ...Object.keys(ALIAS)].join('|')})\\s*:\\s*(.*)$`, 'i');
+const FIELDS = ['matters', 'do', 'expect', 'verify', 'source', 'blocks', 'why'];
 
-/** Required before an entry counts as an installation qualification. */
-export const REQUIRED = ['do', 'expect', 'verify'];
+/** What each field is called on disk and on the page. */
+export const LABEL = {
+  matters: 'Why it matters', do: 'Do', expect: 'Expect', verify: 'Verify',
+  source: 'Source', blocks: 'Blocks', why: 'Why',
+};
+
+// Older spellings, still read so an entry written before a rename keeps parsing.
+// `fix` is the pre-2026-08-16 name for `do`; `unblocks` is the pre-2026-08-20 name
+// for `matters`, and promoting it in place is what makes the backfill mostly free —
+// an entry whose `Unblocks:` already said what it buys is already a why.
+const ALIAS = { fix: 'do', unblocks: 'matters' };
+
+// Longest label first. `Why it matters` and `Why` are different fields and the
+// shorter name is a prefix of the longer one, so an unordered alternation would let
+// `Why` shadow it — silently filing the stakes as the mechanism, which is the exact
+// confusion this rename exists to end.
+const RECOGNISED = [...FIELDS.map((f) => LABEL[f]), ...Object.keys(ALIAS)]
+  .sort((a, b) => b.length - a.length);
+const KEY = new Map([
+  ...FIELDS.map((f) => [LABEL[f].toLowerCase(), f]),
+  ...Object.entries(ALIAS),
+]);
+const escapeLabel = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const FIELD_RE = new RegExp(`^\\s*(${RECOGNISED.map(escapeLabel).join('|')})\\s*:\\s*(.*)$`, 'i');
+
+/**
+ * Required before an entry counts as an installation qualification.
+ *
+ * `matters` joined this list on 2026-08-20. An item that cannot say why it matters is
+ * a strong candidate for not being needed at all, so the requirement is doing audit
+ * work as well as editorial work.
+ */
+export const REQUIRED = ['matters', 'do', 'expect', 'verify'];
 
 const line = (s) => String(s ?? '').trim();
 
@@ -83,7 +121,7 @@ export function parseIQ(entry = '') {
   for (const raw of lines.slice(1)) {
     const m = FIELD_RE.exec(raw);
     if (m) {
-      const name = ALIAS[m[1].toLowerCase()] ?? m[1].toLowerCase();
+      const name = KEY.get(m[1].toLowerCase()) ?? m[1].toLowerCase();
       field = iq[name] ?? (iq[name] = { text: '', code: [] });
       if (line(m[2])) field.text = line(m[2]);
       continue;
