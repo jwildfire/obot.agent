@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 import { census, findings, palettes, consumesShared, isCssSelector, themeFaults, vendorDrift, resolve, workspaceRoot, PALETTE_MIN, REPO } from '../census.mjs';
@@ -311,4 +312,23 @@ test('a workspace with only this repo in it is clean, not red', () => {
     },
   });
   assert.match(out, /census: clean/, out);
+});
+
+test('every surface this repo generates actually parses', async () => {
+  // Twice tonight a comment written INSIDE a CSS template literal used backticks to
+  // quote a CSS property, ended the literal mid-file, and produced a syntax error. The
+  // first was caught by loading the module by hand; the second reached a pushed commit
+  // and only surfaced because an unrelated test spawns the dashboard as a child process
+  // and reported "server exited 1".
+  //
+  // Importing every generator is the cheap, direct check that nothing here is broken in
+  // a way no test happens to spawn.
+  const r = census();
+  const generators = r.surfaces
+    .filter((s) => s.file.startsWith('obot.agent/') && s.file.endsWith('.mjs'))
+    .map((s) => resolve(workspaceRoot(), s.file));
+  assert.ok(generators.length, 'the census found no generators in this repo, which means it is not looking');
+  for (const file of generators) {
+    await assert.doesNotReject(() => import(pathToFileURL(file).href), `${path.relative(REPO, file)} does not parse`);
+  }
 });

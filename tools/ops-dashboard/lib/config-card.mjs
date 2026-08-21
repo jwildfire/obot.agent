@@ -576,13 +576,13 @@ const CARD_CSS = `
      room — he reads this to decide whether to stand up, so it must not need a
      sideways scroll at 390px. minmax(0,…) because a long value in a grid track
      whose minimum is auto pushes the whole page wider than the viewport. */
-  /* Renamed off `.facts` on 2026-08-21. The shared sheet has a component of that
-     name — a masthead strip — and this grid overrode only its layout properties, so
-     its `font:500 12.5px/1.5 var(--mono)` and `color:var(--mute)` came through and
-     turned the decision strip monospace. Adopting a sheet with generic component
-     names means checking what the names already mean; a class this page owns should
-     not be a class the sheet owns. */
-  .cc-facts { display:grid; grid-template-columns:1fr; gap:0.4rem 1rem; margin:0 0 0.8rem; }
+  /* Renamed off the name .facts on 2026-08-21. The shared sheet has a component of
+     that name — a masthead strip — and this grid overrode only its layout properties,
+     so the sheet's mono font shorthand and muted colour came through and turned the
+     decision strip monospace. Adopting a sheet with generic component names means
+     checking what the names already mean; a class this page owns should not be a
+     class the sheet owns. (No backticks in here: this comment lives inside a
+     template literal, and one ended it mid-file once already tonight.) */
   @media (min-width:34rem) { .cc-facts { grid-template-columns:repeat(2, minmax(0,1fr)); } }
   .fact { display:flex; flex-direction:column; gap:0.05rem; min-width:0; }
   .fact .lab { font-size:0.6rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--faint); }
