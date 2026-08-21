@@ -148,8 +148,14 @@ test('a surface that adopts the shared sheet instead does not trip it', () => {
     'consuming the shared sheet is the whole point and must be silent');
 });
 
-test('adding a page to a frozen archive turns the census red', () => {
+test('adding a page to a frozen archive turns the census red', (t) => {
   const arc = ARCHIVES[0];
+  // Every archive lives in obot.roadmap, which CI does not check out. Skipped with a
+  // reason rather than passed: a green tick on a check that examined nothing is the
+  // failure this program calls silent success, and a skip is visible in the output.
+  if (census().missingRoots.some((dir) => arc.dir.startsWith(dir))) {
+    return t.skip(`${arc.dir.split('/')[0]} is not on this machine — the archive ratchet was not exercised`);
+  }
   const rel = path.join(arc.dir, '__new-report', 'index.html');
   const problems = withFile(rel,
     '<style>:root { --paper:#fff; --ink:#111; --rule:#eee; --blue:#07f; --go:#0a0; }</style>',
