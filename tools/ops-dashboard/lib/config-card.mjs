@@ -58,6 +58,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { OBOT_CSS } from '../../../assets/obot-css.mjs';
+
 import { LABEL as FIELD_LABEL } from './iq.mjs';
 import { opsDir, SENTINEL } from './store.mjs';
 
@@ -447,7 +449,7 @@ export function renderCard(card) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(card.id ?? 'config')} · ${esc(card.title)}</title>
-<style>${CARD_CSS}</style>
+<style>${OBOT_CSS}${CARD_CSS}</style>
 </head>
 <body>
 <article>
@@ -514,19 +516,36 @@ function proofBlock(card) {
 }
 
 const CARD_CSS = `
+  /* The palette, the type and the base are the shared sheet's now (assets/obot.css,
+     jwildfire/obot.agent#295 under jwildfire/obot.roadmap#289) — @jwildfire, 2026-08-20:
+     "Prioritize creating a shared style sheet for the project." What is left here is
+     this page's own names pointed at that sheet's tokens, and the layout, which the
+     sheet deliberately does not carry.
+
+     The aliases are the same bridge the dashboard uses in render.mjs, mapped the same
+     way on purpose: a card opens from the dashboard, and two surfaces of one product
+     resolving --accent to different colours is the drift this exercise exists to end.
+     Roles, not shades: accent is the link/primary blue, a settled thing is green, a
+     caution is bronze, critical is the flag red.
+
+     What this replaced also had a broken theme contract, which is why adopting beats
+     patching. It wrote its dark palette inside a bare, unguarded prefers-color-scheme
+     block with no [data-theme] rule at all, so an explicit light choice lost to the
+     system and an explicit dark choice did nothing whatever. The shared sheet states
+     the palette three times and both directions work. */
   :root {
-    --paper:#F4F1EC; --card:#FDFCFA; --ink:#26211B; --muted:#6F6558; --faint:#9C917F;
-    --line:#E2DACC; --accent:#B4470E; --accent-soft:#F4E2D2; --good:#2F6B4F;
-    --warn:#8A5A00; --warn-soft:#F6ECD8; --crit:#A8201A;
-    --sans:"Instrument Sans","Avenir Next","Segoe UI",system-ui,sans-serif;
-    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --card:var(--panel);
+    --muted:var(--ink2);
+    --faint:var(--mute);
+    --line:var(--rule);
+    --accent:var(--blue);
+    --accent-soft:var(--blue-soft);
+    --good:var(--go);
+    --warn:var(--bronze);
+    --warn-soft:var(--bronze-soft);
+    --crit:var(--flag);
+    --sans:var(--body);
   }
-  @media (prefers-color-scheme: dark) { :root {
-    --paper:#1A1611; --card:#232019; --ink:#EAE4D8; --muted:#A69B89; --faint:#7E7462;
-    --line:#383126; --accent:#E8843C; --accent-soft:#3C2A18; --good:#7FBF9B;
-    --warn:#D9A441; --warn-soft:#33280F; --crit:#F0736B;
-  } }
-  * { box-sizing:border-box; }
   body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.55;
          font-size:16px; -webkit-text-size-adjust:100%; }
   article { max-width:44rem; margin:0 auto; padding:1rem 0.9rem 3rem; }
