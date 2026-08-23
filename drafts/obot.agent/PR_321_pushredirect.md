@@ -1,4 +1,4 @@
-<!-- STATUS: Drafted on 2026-08-22 -->
+<!-- STATUS: Posted to https://github.com/jwildfire/obot.agent/pull/321 on 2026-08-22 -->
 <!-- GITHUB_PROPERTIES: Milestone: v0.5.0 -->
 
 ## Summary
