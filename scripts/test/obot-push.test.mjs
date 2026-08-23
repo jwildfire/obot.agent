@@ -411,7 +411,7 @@ test('state 3 — with no way to ask GitHub at all, it refuses rather than guess
   assert.match(r.out, /could not be resolved/i)
 })
 
-test('state 3 — a way out it could not CHECK is not reported as a way out it did not FIND', () => {
+test('state 3 — a remote it could not CHECK is not reported as one it checked and ruled out', () => {
   // The same collapse one layer down, and this program's most-repeated defect. When
   // resolution is broken, every other remote in the clone is unresolvable too — and
   // saying "no remote in this clone resolves inside the org" then states as measured
