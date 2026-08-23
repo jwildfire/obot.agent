@@ -14,13 +14,49 @@
 # module: a URL reconstructed from memory is a URL that comes out plausible and wrong,
 # and thirty-eight fabricated user ids are the evidence (obot.agent#241).
 #
+# WHERE A REMOTE POINTS IS NOT WHAT ITS URL SAYS (obot.agent#320). The org check used
+# to read the URL text as the authority on who owns the repository. For a transferred
+# repository that text is stale by design and stays stale for as long as the clone
+# lives: `gsm.safety`'s origin still reads `obot-claw/gsm.safety`, GitHub resolves it
+# to `jwildfire/gsm.safety`, and a push through it always was going to land in the
+# right place. Refusing there did not merely block a correct write — it routed the
+# agent toward `git push`, the one unguarded path, which is the exact thing this
+# wrapper exists to close. So the decision is made on where the remote RESOLVES, and a
+# remote has THREE states, never two:
+#
+#   resolves inside the org  -> push, to the resolved name
+#   resolves outside it      -> refuse, naming the resolved owner
+#   cannot be resolved at all -> refuse, in words that say so
+#
+# The third state is the one this program keeps finding collapsed into one of the
+# others, and here collapsing it permissively costs a push recorded as him forever.
+# An unresolvable remote is not a jwildfire remote. No network, no credential, a 404,
+# an answer that is not an owner/name: all of them refuse.
+#
+# The resolution is asked for EVERY remote, including one whose URL already reads
+# `jwildfire/…`. Trusting that text would be the same stale-text bug pointed the
+# permissive way — a repository that leaves the account keeps its old URL resolving
+# too, and the guard would wave it through. The lane already cannot work without the
+# network, because the token mint needs it, so this adds no new class of outage.
+#
 # WHAT IT REFUSES, and why each refusal is louder than the failure it prevents:
 #   - an empty or unmintable token. An empty credential is not an error to git; it
 #     falls through to whatever is ambient, which is his keyring, and the push is
 #     recorded as his permanently (obot.agent#207, twice already).
-#   - a remote outside the jwildfire org. Read-only there, no exceptions.
+#   - a remote that resolves outside the jwildfire org. Read-only there, no exceptions.
+#   - a remote that cannot be resolved. Fail closed, never a permissive default.
 #   - --force / --force-with-lease / --delete. This is the attribution lane, not a
 #     shortcut to a rewrite; a history rewrite stays something a person types out.
+#
+# EVERY REFUSAL NAMES THE WAY OUT WHERE ONE EXISTS. Each of the three clones this was
+# measured in carries a second remote — `fork` in open.gismo, `jwildfire` in the other
+# two — and a refusal that says only "no" in a clone that does have a writable remote
+# is the condition that produces the workaround. So the message names it, proven by
+# resolving it too rather than by reading its URL: `safety-histogram`'s second remote
+# turned out to be archived, like the first, so the honest answer there is that there
+# is no way out and it says that instead of pointing somewhere that would reject the
+# push at the far end. The scan runs only when we are already refusing, so it costs the
+# passing path nothing.
 #
 # The SSH remote is left exactly as it is. That is deliberate: his own pushes from
 # these clones must keep going out as him, and if a mint fails the correct outcome is
@@ -30,13 +66,16 @@
 #   obot.agent/scripts/obot-push                 # current branch to its own name
 #   obot.agent/scripts/obot-push -u              # ...and track the NAMED remote after
 #   obot.agent/scripts/obot-push HEAD:some-branch
+#   OBOT_PUSH_REMOTE=fork obot.agent/scripts/obot-push   # a remote other than origin
 set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOKEN_BIN="${OBOT_APP_TOKEN_BIN:-$SELF_DIR/obot-app-token}"
 REMOTE_NAME="${OBOT_PUSH_REMOTE:-origin}"
+GH_BIN="${OBOT_PUSH_GH_BIN:-gh}"
+ORG="jwildfire"
 
-die() { echo "obot-push: $*" >&2; exit 1; }
+die() { printf 'obot-push: %s\n' "$*" >&2; exit 1; }
 
 SET_UPSTREAM=0
 ARGS=()
@@ -55,15 +94,132 @@ for arg in "$@"; do
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
-url="$(git remote get-url "$REMOTE_NAME" 2>/dev/null)" || die "no remote '$REMOTE_NAME' here — run this from inside the checkout or worktree you want pushed"
-
 # Both spellings a remote can take, reduced to owner/repo.
-slug="$(printf '%s' "$url" | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
-owner="${slug%%/*}"
-[ "$owner" = "jwildfire" ] || die "remote '$REMOTE_NAME' is $slug — writes outside the jwildfire org are refused, with no exceptions. Hand the change to @jwildfire instead."
+slug_of() {
+  printf '%s' "$1" | sed -E 's#^git@github\.com:##; s#^ssh://git@github\.com/##; s#^https://github\.com/##; s#\.git$##; s#/$##'
+}
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
+# Ask GitHub where a slug actually points. On success sets RESOLVED (owner/name as
+# GitHub spells it today) and RESOLVED_ARCHIVED; on any failure sets RESOLVE_ERR and
+# returns non-zero, and the caller must treat that as "unresolved", never as "fine".
+RESOLVED=""; RESOLVED_ARCHIVED=""; RESOLVE_ERR=""
+resolve_slug() {
+  local s="$1" out name arch
+  RESOLVED=""; RESOLVED_ARCHIVED=""; RESOLVE_ERR=""
+  if ! command -v "$GH_BIN" >/dev/null 2>&1; then
+    RESOLVE_ERR="no '$GH_BIN' on PATH, so there is no way to ask where this remote points"
+    return 1
+  fi
+  # GH_TOKEN is set from a variable already checked non-empty. Assigning it from a
+  # command substitution on this line would discard the mint's exit status and let gh
+  # fall back to his keyring instead (obot.agent#207) — for a read that is harmless,
+  # but the answer would then depend on whose credential asked.
+  if ! out="$(GH_TOKEN="$token" "$GH_BIN" api "repos/$s" --jq '"\(.full_name)\t\(.archived)"' 2>&1)"; then
+    # gh prints the response body and then its own one-line reading of it. The body is
+    # noise in a refusal — a wall of documentation_url with the part a reader needs at
+    # the far end of it — but the status inside gh's line is not, so keep that.
+    RESOLVE_ERR="$(printf '%s' "$out" | tr '\n\t' '  ' | sed -E 's/^\{.*\}//; s/^ +//')"
+    [ -n "$RESOLVE_ERR" ] || RESOLVE_ERR="$(printf '%s' "$out" | tr '\n\t' '  ')"
+    return 1
+  fi
+  IFS=$'\t' read -r name arch <<<"$out" || true
+  case "$name" in
+    */*)
+      RESOLVED="$name"; RESOLVED_ARCHIVED="$arch"; return 0 ;;
+    *)
+      # `.full_name` absent, an HTML error page, a proxy interstitial. An ambiguous
+      # answer is an unresolved one; the fail-closed rule applies to it identically.
+      RESOLVE_ERR="GitHub answered '$(printf '%s' "$out" | tr '\n\t' '  ')' for repos/$s, which is not an owner/name"
+      return 1 ;;
+  esac
+}
+
+# The sentence a refusal ends on. Run only on a refusal, so the extra resolutions it
+# makes cost the passing path nothing.
+#
+# It reports four different things, because they mean four different things to whoever
+# reads it:
+#
+#   - a remote that resolves inside the org and can take the push: named, with the
+#     exact command to retry with.
+#   - a remote that resolves inside the org but is ARCHIVED: named as that. Never
+#     offered — offering it spends the next attempt and fails at the far end — but not
+#     silently dropped either, because "no remote here points inside the org" is a
+#     false sentence in that clone, and `safety-histogram` is that clone: both copies
+#     of it are archived, measured 2026-08-22.
+#   - a remote that could not be RESOLVED: named as unknown. When resolution is broken
+#     for the primary it is broken for these too, and calling that a measured absence
+#     is the same collapse this whole change is about, one layer down.
+#   - nothing of the above: then, and only then, it says there is no local way round.
+#
+# Every candidate is RESOLVED, never read off its URL — the same reason the primary is.
+remedy() {
+  local other ourl oslug live_name="" live_target="" shut_name="" shut_target="" blind_name=""
+  for other in $(git remote 2>/dev/null || true); do
+    if [ "$other" = "$REMOTE_NAME" ]; then continue; fi
+    if ! ourl="$(git remote get-url "$other" 2>/dev/null)"; then continue; fi
+    oslug="$(slug_of "$ourl")"
+    if ! resolve_slug "$oslug"; then
+      # Not "does not point inside the org" — NOT LOOKED AT. When resolution is broken
+      # for the primary it is broken for these too, and reporting that as a measured
+      # absence is the same collapse one layer down.
+      [ -n "$blind_name" ] || blind_name="$other"
+      continue
+    fi
+    if [ "$(lower "${RESOLVED%%/*}")" != "$ORG" ]; then continue; fi
+    if [ "$RESOLVED_ARCHIVED" = "true" ]; then
+      [ -n "$shut_name" ] || { shut_name="$other"; shut_target="$RESOLVED"; }
+      continue
+    fi
+    live_name="$other"; live_target="$RESOLVED"
+    break
+  done
+
+  if [ -n "$live_name" ]; then
+    printf "\n  Remote '%s' in this same clone resolves to %s, which does accept the push. If that is the one you meant:\n    OBOT_PUSH_REMOTE=%s %s\n" \
+      "$live_name" "$live_target" "$live_name" "$SELF_DIR/obot-push"
+  elif [ -n "$shut_name" ]; then
+    printf "\n  Remote '%s' here does resolve inside the %s org, to %s — but that is archived too, so it cannot accept a push either. Hand the change to @jwildfire instead.\n" \
+      "$shut_name" "$ORG" "$shut_target"
+  elif [ -n "$blind_name" ]; then
+    printf "\n  Remote '%s' here could not be resolved either, so whether anything in this clone would accept the push is unknown rather than answered. Hand the change to @jwildfire instead.\n" \
+      "$blind_name"
+  else
+    printf '\n  No remote in this clone resolves inside the %s org. Hand the change to @jwildfire instead.\n' "$ORG"
+  fi
+}
+
+url="$(git remote get-url "$REMOTE_NAME" 2>/dev/null)" || die "no remote '$REMOTE_NAME' here — run this from inside the checkout or worktree you want pushed"
+slug="$(slug_of "$url")"
+
+# Minted before anything is asked of GitHub, because the resolution read should go out
+# as the app too, and because an unmintable token is a refusal that needs no network
+# call to reach.
 token="$("$TOKEN_BIN" 2>/dev/null)" || token=""
 [ -n "$token" ] || die "the app token mint returned nothing — refusing to push on whatever credential is ambient, which is @jwildfire's. Nothing was pushed."
+
+if ! resolve_slug "$slug"; then
+  err="$RESOLVE_ERR"
+  die "remote '$REMOTE_NAME' is $slug, and where it points could not be resolved: $err
+  Refusing. An unresolvable remote is not a $ORG remote, and a push made on a guess is recorded as @jwildfire permanently. Nothing was pushed.$(remedy)"
+fi
+
+target="$RESOLVED"
+archived="$RESOLVED_ARCHIVED"
+
+if [ "$(lower "${target%%/*}")" != "$ORG" ]; then
+  note=""
+  # Not a decision input — the refusal above is on the owner — but it is in the answer
+  # we already have, and a push to an archived repository fails at the far end whatever
+  # this guard decides.
+  [ "$archived" = "true" ] && note=" It is also archived, so it would reject a push in any case."
+  die "remote '$REMOTE_NAME' is $slug, which resolves to $target — writes outside the $ORG org are refused, with no exceptions.$note$(remedy)"
+fi
+
+# Said out loud so the transcript records which repository was actually written, not
+# the stale name the clone happens to carry.
+[ "$target" != "$slug" ] && printf 'obot-push: %s redirects to %s — pushing there.\n' "$slug" "$target" >&2
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
 if [ "$#" -eq 0 ]; then
@@ -73,7 +229,7 @@ fi
 
 # The token is interpolated into the URL and never echoed: this output reaches a
 # transcript, and an installation token is live for an hour.
-git push "https://x-access-token:${token}@github.com/${slug}.git" "$@"
+git push "https://x-access-token:${token}@github.com/${target}.git" "$@"
 
 if [ "$SET_UPSTREAM" = "1" ]; then
   [ "$branch" != "HEAD" ] || die "pushed, but cannot set upstream from a detached HEAD"

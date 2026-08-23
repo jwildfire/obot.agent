@@ -96,9 +96,9 @@ obot.agent/scripts/obot-push          # current branch; add -u to set upstream
 
 `obot-push` exists because every remote here is SSH, so a plain `git push` authenticates
 as @jwildfire whatever token is set — no token fixes it. It mints, refuses on an empty
-token instead of falling through to his keyring, refuses a remote outside the jwildfire
-org, and refuses `--force` and `--delete`. The SSH remote is deliberately left alone so
-his own pushes stay his.
+token instead of falling through to his keyring, refuses a remote that does not resolve
+inside the jwildfire org, and refuses `--force` and `--delete`. The SSH remote is
+deliberately left alone so his own pushes stay his.
 
 One consequence worth knowing before it costs you a detour: a branch the wrapper has
 already pushed cannot be rebased and re-pushed through it, because that needs a force.
@@ -106,6 +106,31 @@ Merge the integration branch into your branch instead — which is the right flo
 anyway, since every PR is squashed. The refusal stays deliberately: an escape hatch on a
 force-push tool gets used once for a good reason and then always
 (🧭🤖 obot-navigator, 2026-08-18).
+
+### Where a remote resolves, not what its URL says
+
+A transferred repository keeps its old path in every clone that was made before the
+move (obot.agent#320): `gsm.safety`'s `origin` still reads `obot-claw/gsm.safety`, and
+GitHub resolves it to `jwildfire/gsm.safety`. The wrapper asks GitHub once per push
+and acts on the answer, so there are three outcomes rather than two:
+
+- resolves inside the org — pushed, to the resolved name rather than the stale one
+- resolves outside it — refused, naming the owner GitHub gave, not the one written
+- cannot be resolved (no network, no visibility, a 404, an answer that is not an
+  owner/name) — refused, saying so in those words
+
+The third refuses like the second on purpose. An unresolvable remote is not a jwildfire
+remote, and a push made on a guess is recorded as him permanently. The question is asked
+even when the URL already reads `jwildfire/…`, because a repository that leaves the
+account keeps its old URL resolving too — trusting that text is the same bug pointed the
+permissive way.
+
+Every refusal names the remote in the same clone that would work, where there is one:
+`OBOT_PUSH_REMOTE=jwildfire obot-push` in `gsm.safety` and `safety-histogram`,
+`OBOT_PUSH_REMOTE=fork obot-push` in `open.gismo`. That candidate is resolved too, not
+read off its URL, and an archived one is never offered. This matters more than it
+sounds: a refusal that says only "no" in a clone that does have a writable remote is the
+condition that sends an agent to `git push`, which is the one path with no guard on it.
 
 ### The commit identity is resolved, never typed
 
