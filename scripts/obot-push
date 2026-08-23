@@ -24,9 +24,9 @@
 # wrapper exists to close. So the decision is made on where the remote RESOLVES, and a
 # remote has THREE states, never two:
 #
-#   resolves inside the org   -> push, to the resolved name
-#   resolves outside it       -> refuse, naming the resolved owner
-#   cannot be resolved at all  -> refuse, in words that say so
+#   resolves inside the org  -> push, to the resolved name
+#   resolves outside it      -> refuse, naming the resolved owner
+#   cannot be resolved at all -> refuse, in words that say so
 #
 # The third state is the one this program keeps finding collapsed into one of the
 # others, and here collapsing it permissively costs a push recorded as him forever.
@@ -48,13 +48,15 @@
 #   - --force / --force-with-lease / --delete. This is the attribution lane, not a
 #     shortcut to a rewrite; a history rewrite stays something a person types out.
 #
-# EVERY REFUSAL NAMES THE WAY OUT WHERE ONE EXISTS. All three clones this was measured
-# in carry a second remote that points somewhere legitimate — `jwildfire` in
-# gsm.safety and safety-histogram, `fork` in open.gismo. A refusal that says only "no"
-# in a clone that does have a writable remote is the condition that produces the
-# workaround, so the message names the remote, proven by resolving it too rather than
-# by reading its URL. That scan runs only when we are already refusing, so it costs
-# the passing path nothing.
+# EVERY REFUSAL NAMES THE WAY OUT WHERE ONE EXISTS. Each of the three clones this was
+# measured in carries a second remote — `fork` in open.gismo, `jwildfire` in the other
+# two — and a refusal that says only "no" in a clone that does have a writable remote
+# is the condition that produces the workaround. So the message names it, proven by
+# resolving it too rather than by reading its URL: `safety-histogram`'s second remote
+# turned out to be archived, like the first, so the honest answer there is that there
+# is no way out and it says that instead of pointing somewhere that would reject the
+# push at the far end. The scan runs only when we are already refusing, so it costs the
+# passing path nothing.
 #
 # The SSH remote is left exactly as it is. That is deliberate: his own pushes from
 # these clones must keep going out as him, and if a mint fails the correct outcome is
