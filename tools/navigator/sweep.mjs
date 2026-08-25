@@ -50,6 +50,7 @@ import { isArmed as voiceArmed } from '../voice/lib/armed.mjs'
 import { readQueue as voiceQueue } from '../voice/lib/handles.mjs'
 import { pollReminders } from '../voice/lib/reminders.mjs'
 import { episodeCoverage, episodesSection } from '../voice/lib/episodes.mjs'
+import { STANDUP_STATUS, standupSection } from '../voice/lib/standup.mjs'
 import { readUnrouted, unroutedSection } from '../voice/lib/route.mjs'
 import { ORPHAN_QUERY, auditFreshness, checksSection, emptyCloseouts, orphanedWork,
          orphansAccepted, orphansOutsideWindow, parseIndexRows, parseRefLookup, readJson,
@@ -268,7 +269,7 @@ export function diff(prev, next, goneStates = {}, failedRepos = new Set(), { bas
   return events
 }
 
-export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, stalls = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null, constraints = null, style = null }) {
+export function renderState({ snapshot, events, meta, answers = [], ledger = null, workers = null, delivery = null, checks = null, wake = null, stalls = null, admiral = null, carveout = null, selfupdate = null, local = null, identity = null, currency = null, rankhead = null, spend = null, landings = null, landingsVerdict = null, voice = null, decisionEpisodes = null, standup = null, constraints = null, style = null }) {
   const stamp = `[verified gh ${meta.sweptAt.slice(-5)}]`
   // Has this machine ever had a reading of the queue? On a new machine there is no
   // snapshot file, so `snapshot` is `{}` — the same value a genuinely empty queue
@@ -475,6 +476,13 @@ export function renderState({ snapshot, events, meta, answers = [], ledger = nul
     ? decisionEpisodes.trimEnd()
     : '## Decision episodes — an open decision he can answer from the car\n\n**DECISION EPISODE READING BROKEN** — no reading ran this sweep, so nothing here says whether an open decision is waiting without an episode.')
 
+  // The outbound half of the same pathway: the spoken standup a voice session reads
+  // aloud, published by `scripts/obot-standup` after this file is written. What is
+  // rendered here is therefore the PREVIOUS pass's outcome, which the section says.
+  // It is here rather than nowhere because a publisher that stops is the one failure
+  // he cannot hear — the file still fetches and still reads fluently.
+  lines.push('', (standup && standup.trim()) ? standup.trimEnd() : standupSection(null, { cadenceMin: meta.cadenceMin }))
+
   // The Navigator session's own record, folded in whole (D0017, 2026-08-16). Two
   // writers, two files: the session appends to delivery.md and never touches this
   // one; the sweep reads that file and never writes it. They rejoin here because
@@ -612,6 +620,37 @@ function runCarveout() {
   // off the page entirely, and this is the one spot on it where a carve-out pull
   // request is supposed to appear.
   return (r.stdout || '').trim() || routingBroken(`the router printed nothing (exit ${r.status})`)
+}
+
+/**
+ * What the last standup publish did. `null` means it has never run on this machine —
+ * distinct from a record that could not be read, which is a finding.
+ */
+function readStandupStatus() {
+  try {
+    return JSON.parse(readFileSync(join(WS, STANDUP_STATUS), 'utf8'))
+  } catch (e) {
+    // ENOENT is the only failure allowed to read as absence (oa#206/#215): a file that
+    // exists and will not parse is a publisher whose record is broken, not one that has
+    // never run, and reporting the second would hide the first.
+    if (e?.code === 'ENOENT') return null
+    return { read: false, why: String(e.code ?? e.message).slice(0, 80) }
+  }
+}
+
+/**
+ * Publish the spoken standup, after the state file it is derived from has been written.
+ *
+ * Bounded and never fatal: this is the last thing the sweep does and the sweep's own
+ * job is the file above. A failure here is recorded by the publisher and reported by
+ * `standupSection` on the next pass.
+ */
+function runStandup() {
+  const r = spawnSync(join(REPO_ROOT, 'scripts', 'obot-standup'), [], {
+    env: { ...process.env, OBOT_WORKSPACE: WS }, encoding: 'utf8', timeout: 120000,
+  })
+  if (r.error || r.status === null) return `standup: launcher did not run (${r.error ? String(r.error.message).slice(0, 80) : 'killed'})`
+  return (r.stdout || '').trim().split('\n').pop() || `standup: exit ${r.status}`
 }
 
 function runAdmiral() {
@@ -1293,7 +1332,7 @@ async function main() {
       // local store, they need no policy file, and an answer of his that nothing has
       // applied is exactly as undelivered when the RC sweep is broken.
       unapplied: unappliedDetections(safePending()) })
-    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, stalls: wake.stallSection, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: safeStyle().section }))
+    writeFileSync(STATE_MD, renderState({ snapshot: prevWrap.snapshot, events: prevWrap.events, meta, answers: safePending(), ledger: safeLedger(), workers: safeWorkers(), delivery: safeDelivery(), checks: safeChecks([], jobs)?.section, wake: wake.section, stalls: wake.stallSection, selfupdate, admiral: safeAdmiral(), carveout: safeCarveout(), identity: null, currency: await safeCurrency(), rankhead: safeRankhead(), spend: safeSpend(), landings: safeLandingRender(), landingsVerdict: landingsNote({ missing: [], state: failState, read: false, now: new Date() }), voice: safeVoice(), decisionEpisodes: safeEpisodes(), standup: standupSection(readStandupStatus(), { cadenceMin: CADENCE_MIN }), constraints: safeConstraints(), style: safeStyle().section }))
     log(`FAILED policy.json: ${e.message} · wake: ${wake.note}`)
     process.exit(0)
   }
@@ -1447,10 +1486,15 @@ async function main() {
   const rankhead = safeRankhead()
   const spend = safeSpend()
   const style = safeStyle()
-  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, stalls: wake.stallSection, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes(), constraints: safeConstraints(), style: style.section }))
+  writeFileSync(STATE_MD, renderState({ snapshot: next, events: allEvents, meta, answers, ledger, workers, delivery, checks, wake: wake.section, stalls: wake.stallSection, admiral, carveout, selfupdate, local, identity, currency, rankhead, spend, landings: safeLandingRender(), landingsVerdict, voice: safeVoice(), decisionEpisodes: safeEpisodes(), standup: standupSection(readStandupStatus(), { cadenceMin: CADENCE_MIN }), constraints: safeConstraints(), style: style.section }))
   // `sweptIso` is the host guard's only input: the gap between two sweeps is what
   // separates a suspended laptop from a stalled fleet, and the local `sweptAt`
   // string cannot be differenced across a timezone or a date boundary.
+  // AFTER the state file: the standup is derived from what was just written, so
+  // publishing before it would publish the previous pass's reading under this pass's
+  // timestamp — the exact dishonesty this whole file is arranged to avoid.
+  let standupNote = 'not run'
+  try { standupNote = runStandup() } catch (e) { standupNote = `threw: ${String(e.message).slice(0, 60)}` }
   writeFileSync(SNAPSHOT, JSON.stringify({ lastGoodAt: meta.lastGoodAt, sweptIso, snapshot: next, events: allEvents }, null, 2))
 
   for (const e of stamped.slice(0, 5)) scratchpad(e.line)
@@ -1464,7 +1508,7 @@ async function main() {
   if (wake.delivered.length) {
     scratchpad(`WAKE x${wake.delivered.length} delivered — ${wake.delivered.map(d => `${d.worker} ${d.kind}`).join(', ')}`)
   }
-  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over, ${wake.answers?.length ?? 0} woken) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · style: ${style.note} · metrics: ${metricsNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
+  log(`${ok ? 'ok' : 'PARTIAL'} — ${repos.length} repos, ${Object.keys(next).length} RCs, ${events.length} events, ${answers.length} answers pending (${answerEvents.length} handed over, ${wake.answers?.length ?? 0} woken) · workers: ${workers ? (workers.ok ? 'clean' : 'FINDING') : 'no reading'} · wake: ${wake.note} · style: ${style.note} · metrics: ${metricsNote} · ${standupNote} · checkout: ${update.checkout.code}${update.consumers?.map(c => ` · ${c.id}: ${c.code}`).join('') ?? ''}${errors.length ? ' · ' + errors.join('; ') : ''}`)
 }
 
 // `main` awaits the claim-currency pass, so it returns a promise. A rejection here has
