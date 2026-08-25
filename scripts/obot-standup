@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# obot-standup — publish the spoken standup where a voice session can read it.
+#
+#   obot-standup              # render, publish if the content changed
+#   obot-standup --dry-run    # print the file, publish nothing
+#
+# @jwildfire is moving his daily check-in to Claude voice mode, and this is the
+# outbound half of that pathway: one plain-text file, no JavaScript, no client-side
+# rendering, fetched as text and read aloud. The inbound half already exists (the Ideas
+# discussions and their triage) and is documented inside the file rather than rebuilt.
+#
+# ## Why a branch and not the site
+#
+# The same reason `obot-session-state` publishes to a branch: every path the hub's
+# deploy watches triggers a full Pages rebuild, including the R toolchain behind the
+# status dashboard, so a five-minute file there would rebuild the world all night and
+# bury main's history under three hundred commits a day. The payload lives on the
+# orphan `session-state` branch beside `session.json` and is fetched from
+# raw.githubusercontent.com, which is CORS-enabled, plain text and has roughly the same
+# five-minute cache as the cadence that writes it.
+#
+# `STANDUP.md` at the root of the hub is the address, committed once and never again —
+# the name a voice session finds by looking, pointing at the file that actually moves.
+#
+# ## Why "unchanged" publishes nothing
+#
+# The file states its own age, so every render differs from the last one. The comparison
+# strips the dated preamble and compares the rest: a quiet hour costs one render and no
+# commits, and the age a reader sees comes from the raw URL's own commit time being
+# recent — never from a commit made to say that nothing happened.
+set -euo pipefail
+
+WORKSPACE="${OBOT_WORKSPACE:-$HOME/Documents/obot2}"
+REPO="${OBOT_STATE_REPO:-jwildfire/obot.roadmap}"
+BRANCH="${OBOT_STATE_BRANCH:-session-state}"
+FILE="standup.md"
+CACHE="$WORKSPACE/.claude/session-hub/cache/published-standup.md"
+STATUS="$WORKSPACE/.claude/session-hub/standup-status.json"
+# Script-relative, so a copy of this repo (a worktree, a rehearsal clone) runs its OWN
+# renderer rather than the one in the workspace checkout beside it.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RENDER="${OBOT_STANDUP_RENDER:-$HERE/../tools/voice/standup.mjs}"
+TOKEN_HELPER="$WORKSPACE/obot.agent/scripts/obot-app-token"
+
+dry_run=false
+[[ "${1:-}" == "--dry-run" ]] && dry_run=true
+
+tmp="$(mktemp -t obot-standup)"
+trap 'rm -f "$tmp"' EXIT
+
+# The renderer refuses (exit 2) rather than publishing a file that carries anything
+# local. A refusal is recorded and reported, never swallowed: a publishing lane that
+# fails quietly is indistinguishable from one that is up to date.
+record() {
+  mkdir -p "$(dirname "$STATUS")"
+  printf '{"outcome":"%s","at":"%s","detail":"%s"}\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${2:-}" > "$STATUS"
+}
+
+if ! node "$RENDER" --out "$tmp"; then
+  record refused "the renderer refused or failed"
+  echo "[standup] renderer failed — nothing published"
+  exit 1
+fi
+
+if $dry_run; then
+  cat "$tmp"
+  exit 0
+fi
+
+# Everything above the first section is the dated preamble; below it is the content.
+strip_stamp() { sed -n '/^## /,$p' "$1"; }
+if [[ -f "$CACHE" ]] && [[ "$(strip_stamp "$tmp")" == "$(strip_stamp "$CACHE")" ]]; then
+  record unchanged "nothing moved since the last publish"
+  echo "[standup] unchanged — nothing published"
+  exit 0
+fi
+
+GH_TOKEN="$("$TOKEN_HELPER")"
+if [[ -z "$GH_TOKEN" ]]; then
+  record failed "no app token"
+  echo "[standup] no app token — nothing published"
+  exit 1
+fi
+export GH_TOKEN
+
+put() {
+  local sha
+  sha="$(gh api "repos/$REPO/contents/$FILE?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
+  local args=(--method PUT "repos/$REPO/contents/$FILE"
+    -f "message=standup: $(date -u +%Y-%m-%dT%H:%MZ)"
+    -f "branch=$BRANCH"
+    -f "content=$(base64 < "$tmp" | tr -d '\n')")
+  [[ -n "$sha" ]] && args+=(-f "sha=$sha")
+  gh api "${args[@]}" --jq '.commit.sha' >/dev/null
+}
+
+# The read-then-write is not atomic and the sweep is not the only thing that can
+# publish here, so a 409 just means somebody else won the race: re-read the sha and
+# try once more before giving up.
+if put || { sleep 2; put; }; then
+  mkdir -p "$(dirname "$CACHE")"
+  cp "$tmp" "$CACHE"
+  record published "$REPO@$BRANCH/$FILE"
+  echo "[standup] published to $REPO@$BRANCH/$FILE"
+else
+  record failed "the write to $REPO@$BRANCH was refused"
+  echo "[standup] publish FAILED"
+  exit 1
+fi
