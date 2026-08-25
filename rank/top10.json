@@ -9,11 +9,12 @@
     {
       "issue": 164,
       "why": "the R package that carries these charts into clinical reports still wraps the library from three releases ago, so it draws a liver view a July release already corrected",
-      "review": "already half-built and stuck - gsm.safety#51 is open and CONFLICTING since 2026-08-17, and the release that blocked it merged four days ago"
+      "review": "the candidates exist and are his to read - gsm.safety#68 and #69 opened 22 Aug, mergeable, demos attached; the earlier review line saying #51 was CONFLICTING was true on 18 Aug and #51 merged on the 21st"
     },
     {
       "issue": 274,
-      "why": "he answered all six questions on the census design on 20 August and nothing has been built since; the design is signed, so only the building stands between here and a release candidate"
+      "why": "he answered all six questions on the census design on 20 August and nothing has been built since; the design is signed, so only the building stands between here and a release candidate",
+      "review": "built, not pending - all four steps merged to dev by 22 Aug (#57, #59, #62, #67); what remains is the thirteenth metric, which waits on D0027, and the disagreement metric, which waits on him"
     },
     {
       "issue": 291,
@@ -21,7 +22,8 @@
     },
     {
       "issue": 153,
-      "why": "three consecutive weekly runs have failed and the published site still shows the last good one, so nothing looks broken from outside - which is exactly why it went three weeks"
+      "why": "three consecutive weekly runs have failed and the published site still shows the last good one, so nothing looks broken from outside - which is exactly why it went three weeks",
+      "review": "the pipeline half is done - the scheduled run published on its own at 07:03 UTC on 24 Aug, the first Actions-produced snapshot this repo has had; only the goal binding remains and that is a carve-out edit"
     },
     {
       "issue": 34,
@@ -41,7 +43,8 @@
     },
     {
       "issue": 33,
-      "why": "eight original chart repositories still carry issues filed by the people who used them - charts to make grounded in what real reviewers asked for rather than in a competitor's marketing page"
+      "why": "eight original chart repositories still carry issues filed by the people who used them - charts to make grounded in what real reviewers asked for rather than in a competitor's marketing page",
+      "review": "the report is delivered and nothing is filed - 282 issues across twelve trackers classified on 24 Aug with nine quick wins, and his review gates any filing, which is what the requirement asked for"
     },
     {
       "issue": 176,
