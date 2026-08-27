@@ -20,6 +20,7 @@
  "calibration": {
   "at": "2026-08-20T10:42:05.623Z",
   "weeklyPercent": 99,
+  "bucket": "weekly_all",
   "spentUsd": 3654.11,
   "source": "inferred — bootstrap calibration, not a published figure",
   "_": "One real meter reading against the measured spend behind it: at 10:42:05Z on 2026-08-20 the API reported the weekly_all bucket at 99%, and the obot2 artifact prices the complete UTC days of that allowance week (2026-08-14 through 2026-08-19) at $3,654.11. One point is therefore worth about $36.91 of API-equivalent spend. Deliberately conservative in two ways: it excludes the two partial days at the window edges, which the projection does count, and it prices at API list rates rather than at whatever Anthropic's meter actually weighs — both push the reading to trip sooner rather than later. It is an INFERENCE and is labelled as one everywhere it is printed. Anthropic publishes no numeric weekly limit for Max and every limit_dollars on this account is null, so no dollar allowance is asserted anywhere in this file. It is also inflated by the '+50% weekly limits promo through Aug 31' active on the account, which is another reason it is re-derived from the live meter rather than frozen."

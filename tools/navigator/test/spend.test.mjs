@@ -659,12 +659,23 @@ test('the same meter fetch is never re-recorded, and a weak one is never recorde
 
 test('the newer of the bootstrap and the machine-recorded calibration wins', () => {
   const boot = { at: '2026-08-20T10:42:05.623Z', weeklyPercent: 99, spentUsd: 3654.11 }
-  const later = { at: '2026-08-27T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500 }
-  const older = { at: '2026-08-01T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500 }
+  const later = { at: '2026-08-27T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500, bucket: 'weekly_all' }
+  const older = { at: '2026-08-01T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500, bucket: 'weekly_all' }
   assert.equal(pickCalibration({ calibration: boot }, later), later)
   assert.equal(pickCalibration({ calibration: boot }, older), boot)
   assert.equal(pickCalibration({ calibration: boot }, null), boot)
   assert.equal(pickCalibration({ calibration: null }, later), later)
+})
+
+test('a calibration recorded before the buckets were told apart is not trusted', () => {
+  // The one on this machine on 2026-08-27 read `63%` with nothing saying which
+  // bucket that was. It cannot be told apart from a Fable-scoped derivation now, and
+  // the bootstrap it would displace prices a point LOWER — so falling back trips
+  // sooner, not later (obot.agent#331).
+  const boot = { at: '2026-08-20T10:42:05.623Z', weeklyPercent: 99, spentUsd: 3654.11, bucket: 'weekly_all' }
+  const untagged = { at: '2026-08-27T14:55:22.445Z', weeklyPercent: 63, spentUsd: 3231.66 }
+  assert.equal(pickCalibration({ calibration: boot }, untagged), boot)
+  assert.equal(pickCalibration({ calibration: null }, untagged), null)
 })
 
 test('readSpend records the new calibration and prints which one it used', () => {
@@ -826,8 +837,8 @@ test('a night that spans the weekly reset says so rather than asserting the poin
   // The figure stays (dropping it would let an unbounded night through); the claim
   // it makes is corrected in the output.
   const v = verdictAt('2026-08-27T21:10:00Z', { '2026-08-27': 1040.81 }, { meter: LIVE_0827 })
-  assert.match(spendSection(v), /previous allowance week/)
+  assert.match(spendSection(v), /previous allowance week/i)
   const ordinary = verdictAt('2026-08-29T04:00:00Z', { '2026-08-29': 100 },
                              { meter: { ...LIVE_0827, percent: 20 } })
-  assert.doesNotMatch(spendSection(ordinary), /previous allowance week/)
+  assert.doesNotMatch(spendSection(ordinary), /previous allowance week/i)
 })
