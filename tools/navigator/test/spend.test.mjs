@@ -659,12 +659,23 @@ test('the same meter fetch is never re-recorded, and a weak one is never recorde
 
 test('the newer of the bootstrap and the machine-recorded calibration wins', () => {
   const boot = { at: '2026-08-20T10:42:05.623Z', weeklyPercent: 99, spentUsd: 3654.11 }
-  const later = { at: '2026-08-27T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500 }
-  const older = { at: '2026-08-01T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500 }
+  const later = { at: '2026-08-27T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500, bucket: 'weekly_all' }
+  const older = { at: '2026-08-01T10:00:00.000Z', weeklyPercent: 60, spentUsd: 1500, bucket: 'weekly_all' }
   assert.equal(pickCalibration({ calibration: boot }, later), later)
   assert.equal(pickCalibration({ calibration: boot }, older), boot)
   assert.equal(pickCalibration({ calibration: boot }, null), boot)
   assert.equal(pickCalibration({ calibration: null }, later), later)
+})
+
+test('a calibration recorded before the buckets were told apart is not trusted', () => {
+  // The one on this machine on 2026-08-27 read `63%` with nothing saying which
+  // bucket that was. It cannot be told apart from a Fable-scoped derivation now, and
+  // the bootstrap it would displace prices a point LOWER — so falling back trips
+  // sooner, not later (obot.agent#331).
+  const boot = { at: '2026-08-20T10:42:05.623Z', weeklyPercent: 99, spentUsd: 3654.11, bucket: 'weekly_all' }
+  const untagged = { at: '2026-08-27T14:55:22.445Z', weeklyPercent: 63, spentUsd: 3231.66 }
+  assert.equal(pickCalibration({ calibration: boot }, untagged), boot)
+  assert.equal(pickCalibration({ calibration: null }, untagged), null)
 })
 
 test('readSpend records the new calibration and prints which one it used', () => {
@@ -716,4 +727,118 @@ test('an expired meter leaves the last recorded calibration standing', () => {
   assert.equal(r.verdict.state, 'ok')
   assert.equal(r.config.calibration.spentUsd, CALIBRATION.spentUsd, 'the bootstrap still applies')
   assert.match(r.section, /expired/i)
+})
+
+// ------------------------------------------------- the two weekly buckets (#331)
+//
+// On 2026-08-27 the guard reported 20% of the week gone seventeen minutes after the
+// client's own `/usage` reported 5%. Two separate faults produced that, and the
+// fixtures below are the machine's real cached block for that instant rather than
+// numbers chosen to make a point:
+//
+//   limits[] carried `weekly_all` at 5 and `weekly_scoped` (Fable) at 9, from ONE
+//   fetch at 20:41:00.593Z. The reading took `Math.max` over everything in the
+//   `weekly` group, so the Fable bucket populated the all-model field. There was no
+//   second reading for the meter to have "moved" between — both numbers are in the
+//   same document.
+//
+//   The week began at 15:00Z that day, and the priced artifact buckets by whole UTC
+//   day. All $1,040.81 of 2026-08-27 was therefore charged to a week that was seven
+//   hours old, when $1,004.84 of it had been spent before the reset. That is where
+//   the 20% came from: the projection, not the meter.
+//
+// The rule the fix states: the meter measured everything up to the instant it was
+// fetched, so the artifact may only ADD days the meter had not yet seen.
+
+/** The machine's real cached block at 2026-08-27T20:41:00.593Z. */
+const LIVE_0827 = { percent: 5, scoped: 9, fetchedAt: '2026-08-27T20:41:00.593Z',
+                    resetsAt: '2026-09-03T15:00:00.469896+00:00' }
+
+test('a scoped bucket never populates the all-model field', () => {
+  const m = readMeter(meterFile(LIVE_0827), new Date('2026-08-27T21:10:00Z'))
+  assert.equal(m.percent, 5, 'the all-model bucket, which is what /usage calls "all models"')
+  assert.deepEqual(m.scoped, [{ label: 'Fable', percent: 9 }])
+  // The highest bucket is still known — it is what the refusal ladder uses — but it
+  // is a separate field, named, and never the week position.
+  assert.deepEqual(m.worst, { label: 'Fable', percent: 9 })
+})
+
+test('both buckets are stated side by side, and which one binds is said not inferred', () => {
+  const v = verdictAt('2026-08-27T21:10:00Z', { '2026-08-27': 1040.81 }, { meter: LIVE_0827 })
+  const out = spendNote(v)
+  assert.match(out, /all models 5%/)
+  assert.match(out, /Fable 9%/)
+  assert.match(out, /all-model bucket/, 'the output must say which bucket the points are measured against')
+})
+
+test('the artifact does not re-charge the meter for days the meter already measured', () => {
+  // The live defect. The week is seven hours old; the artifact holds a whole UTC day
+  // that straddles the reset, and the meter — fetched inside that same day — has
+  // already counted whatever part of it belongs to this week.
+  const v = verdictAt('2026-08-27T21:10:00Z', { '2026-08-27': 1040.81 }, { meter: LIVE_0827 })
+  assert.equal(v.week.percentUsed, 5, 'the meter measured this week directly; the artifact has nothing to add')
+  assert.equal(v.state, 'ok')
+})
+
+test('spend on a day the meter has not seen is still added on top of it', () => {
+  // The other direction, and the reason the projection exists at all: the CLI
+  // refreshes the meter when it feels like it. A night that runs after the last
+  // fetch must not be invisible.
+  const v = verdictAt('2026-08-29T04:00:00Z',
+                      { '2026-08-27': 1040.81, '2026-08-28': 900, '2026-08-29': 900 },
+                      { meter: { ...LIVE_0827, percent: 40, fetchedAt: '2026-08-27T20:41:00.593Z' } })
+  // $1,800 on the two days since the fetch, at the bootstrap's $38.07/point.
+  assert.ok(v.week.percentUsed > 80, `40 metered plus the two unmetered days, got ${v.week.percentUsed}`)
+  assert.match(v.week.source, /since/)
+})
+
+test('an unusable meter still projects across the whole window', () => {
+  // Nothing about this fix may narrow the fallback: with no meter, the artifact is
+  // the only reading there is and every day of the window counts.
+  const v = verdictAt('2026-08-19T01:00:00Z', REAL_WEEK)
+  assert.equal(v.state, 'stop')
+  assert.ok(v.week.percentUsed > 90)
+})
+
+test('a scoped bucket past the stop line refuses on its own, by name', () => {
+  // The conservatism the old `Math.max` bought by accident, kept on purpose. A
+  // model-scoped limit can bind before the all-model one.
+  const v = verdictAt('2026-08-27T21:10:00Z', { '2026-08-27': 10 },
+                      { meter: { ...LIVE_0827, percent: 20, scoped: 93 } })
+  assert.equal(v.state, 'stop')
+  assert.equal(v.allowed, false)
+  assert.match(v.headline, /Fable/)
+  assert.match(v.headline, /93/)
+})
+
+test('a scoped bucket below the stop line does not raise the all-model position', () => {
+  const v = verdictAt('2026-08-27T21:10:00Z', { '2026-08-27': 10 },
+                      { meter: { ...LIVE_0827, percent: 20, scoped: 60 } })
+  assert.equal(v.week.percentUsed, 20, 'a Fable bucket says nothing about the all-model allowance')
+  assert.equal(v.state, 'ok')
+})
+
+test('the denominator is calibrated against the all-model bucket and records which', () => {
+  // Pairing every measured dollar with a MODEL-SCOPED percentage prices a point off
+  // two different populations. The obot2 workspace spent 100% Opus in the week this
+  // was found, while the Fable bucket read 9% — driven entirely by usage the
+  // artifact cannot see.
+  const meter = readMeter(meterFile({ percent: 40, scoped: 90, fetchedAt: '2026-08-25T10:00:00.000Z',
+                                      resetsAt: '2026-08-27T14:59:59.596883+00:00' }),
+                          new Date('2026-08-25T12:00:00Z'))
+  const c = nextCalibration({ meter, weekSpentUsd: 1500, stored: null })
+  assert.equal(c.weeklyPercent, 40, 'the all-model bucket, not the highest one')
+  assert.equal(c.bucket, 'weekly_all')
+})
+
+test('a night that spans the weekly reset says so rather than asserting the points', () => {
+  // The artifact buckets by whole UTC day and the reset lands mid-day, so on one
+  // night a week the night's dollars include spend charged to the week just ended.
+  // The figure stays (dropping it would let an unbounded night through); the claim
+  // it makes is corrected in the output.
+  const v = verdictAt('2026-08-27T21:10:00Z', { '2026-08-27': 1040.81 }, { meter: LIVE_0827 })
+  assert.match(spendSection(v), /previous allowance week/i)
+  const ordinary = verdictAt('2026-08-29T04:00:00Z', { '2026-08-29': 100 },
+                             { meter: { ...LIVE_0827, percent: 20 } })
+  assert.doesNotMatch(spendSection(ordinary), /previous allowance week/i)
 })

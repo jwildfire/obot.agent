@@ -110,7 +110,8 @@ export function loadConfig(repoRoot = REPO_ROOT, env = process.env) {
  */
 export function readMeter(file, now = new Date()) {
   const miss = (why) => ({ read: false, ok: false, usable: false, expired: false,
-                           percent: null, resetsAt: null, fetchedAt: null, scoped: [], why })
+                           percent: null, bucket: null, resetsAt: null, fetchedAt: null,
+                           scoped: [], worst: null, why })
   let raw
   try { raw = fs.readFileSync(file, 'utf8') } catch (e) {
     return miss(e.code === 'ENOENT' ? `no meter cache at ${file}` : `${e.code}: ${file}`)
@@ -124,10 +125,17 @@ export function readMeter(file, now = new Date()) {
 
   const weekly = (u.utilization?.limits || []).filter((l) => l && l.group === 'weekly' && Number.isFinite(l.percent))
   const seven = u.utilization?.seven_day
-  const percent = weekly.length
-    ? Math.max(...weekly.map((l) => l.percent))
-    : (Number.isFinite(seven?.utilization) ? seven.utilization : null)
-  const resetsAt = weekly.find((l) => l.kind === 'weekly_all')?.resets_at || seven?.resets_at || null
+  // `limits[]` carries TWO kinds of weekly bucket and they are not interchangeable.
+  // `weekly_all` is what the client's own `/usage` prints as "Current week (all
+  // models)"; `weekly_scoped` is one model's own allowance, with its own
+  // denominator. Taking `Math.max` across the group put the scoped bucket in the
+  // all-model field — on 2026-08-27 that reported Fable's 9% as the week's position
+  // while the all-model bucket read 5% in the same document (obot.agent#331). The
+  // highest bucket is still worth knowing, so it is kept, named, and separate.
+  const all = weekly.find((l) => l.kind === 'weekly_all')
+  const percent = all ? all.percent : (Number.isFinite(seven?.utilization) ? seven.utilization : null)
+  const bucket = all ? 'weekly_all' : (percent === null ? null : 'seven_day')
+  const resetsAt = all?.resets_at || seven?.resets_at || null
   const fetchedAt = Number.isFinite(u.fetchedAtMs) ? new Date(u.fetchedAtMs).toISOString() : null
   if (percent === null || !resetsAt) return miss('the utilization block carries no weekly bucket')
 
@@ -135,12 +143,17 @@ export function readMeter(file, now = new Date()) {
   // the cached percentage describes a week that is OVER. Believing a 99% reading
   // after a Thursday reset halts a fleet with a full allowance in front of it.
   const expired = now.getTime() >= Date.parse(resetsAt)
+  const scoped = weekly.filter((l) => l.kind === 'weekly_scoped' && l.scope?.model?.display_name)
+    .map((l) => ({ label: l.scope.model.display_name, percent: l.percent }))
+  const worst = [{ label: 'all models', percent }, ...scoped]
+    .filter((b) => Number.isFinite(b.percent))
+    .reduce((a, b) => (b.percent > a.percent ? b : a), { label: 'all models', percent })
   return {
-    read: true, ok: true, expired, percent, resetsAt, fetchedAt,
+    read: true, ok: true, expired, percent, bucket, resetsAt, fetchedAt,
     usable: !expired,
-    severity: weekly.find((l) => l.kind === 'weekly_all')?.severity || null,
-    scoped: weekly.filter((l) => l.kind === 'weekly_scoped' && l.scope?.model?.display_name)
-      .map((l) => ({ label: l.scope.model.display_name, percent: l.percent })),
+    severity: all?.severity || null,
+    scoped,
+    worst: Number.isFinite(worst.percent) ? worst : null,
     why: expired ? `reading fetched ${fetchedAt} describes the week that ended ${resetsAt}` : null,
   }
 }
@@ -262,14 +275,16 @@ export function judge({ meter, usage, config, now = new Date() }) {
   const base = {
     at: now.toISOString(),
     week: { percentUsed: null, source: 'none', spentUsd: null, stopPercent: stopAt,
+            meterPercent: null, addedUsd: null, addedDays: [],
             startsAt: window?.startsAt?.toISOString() ?? null, endsAt: window?.endsAt?.toISOString() ?? null,
             denominator },
     night: { day, spentUsd: null, points: null, capPoints: Number.isFinite(cap) ? cap : null,
-             headroomPoints: null, pctOfHeadroom: null },
+             headroomPoints: null, pctOfHeadroom: null, spansReset: false },
     reading: {
       meter: { read: !!meter?.read, ok: !!meter?.ok, usable: !!meter?.usable, expired: !!meter?.expired,
-               percent: meter?.percent ?? null, fetchedAt: meter?.fetchedAt ?? null,
-               resetsAt: meter?.resetsAt ?? null, scoped: meter?.scoped ?? [], why: meter?.why ?? null },
+               percent: meter?.percent ?? null, bucket: meter?.bucket ?? null,
+               fetchedAt: meter?.fetchedAt ?? null, resetsAt: meter?.resetsAt ?? null,
+               scoped: meter?.scoped ?? [], worst: meter?.worst ?? null, why: meter?.why ?? null },
       usage: { read: !!usage?.read, ok: !!usage?.ok, generatedAt: usage?.generatedAt ?? null, why: usage?.why ?? null },
     },
   }
@@ -288,25 +303,76 @@ export function judge({ meter, usage, config, now = new Date() }) {
   base.week.spentUsd = Number(weekSpentUsd.toFixed(2))
   base.night.spentUsd = Number(nightSpentUsd.toFixed(2))
 
-  const projected = usdPerPoint ? weekSpentUsd / usdPerPoint : null
-  const metered = meter?.usable ? meter.percent : null
-  if (metered === null && projected === null) {
+  const wholePoints = usdPerPoint ? weekSpentUsd / usdPerPoint : null
+  const metered = meter?.usable && Number.isFinite(meter.percent) ? meter.percent : null
+  if (metered === null && wholePoints === null) {
     return unknown(meter?.why
       ? `the meter is unusable (${meter.why}) and no calibration exists to price the artifact in points.`
       : 'no usable meter reading and no calibration, so there is no denominator.')
   }
 
-  // Whichever reads worse governs: the artifact is a floor (it prices only this
-  // workspace), the meter is authoritative but refreshes on the CLI's schedule.
-  const percentUsed = Math.max(metered ?? 0, projected ?? 0)
+  // The meter measured everything up to the instant it was fetched. The artifact may
+  // therefore only ADD what the meter has not seen — and because it buckets by whole
+  // UTC day it cannot split the day the fetch landed in, so the days it can honestly
+  // add are the ones that began after that day ended.
+  //
+  // Charging the whole window on top of a live meter is what read the week four
+  // times high on 2026-08-27 (obot.agent#331). The allowance week was seven hours
+  // old; the artifact charged it a whole UTC day of which $1,004.84 of $1,040.81 had
+  // been spent before the reset. The meter, fetched inside that same day, had
+  // already counted whatever part of it belonged to the new week — and said 5%.
+  //
+  // What this gives up is spend on the fetch's own day after the fetch. That is
+  // bounded by how often the CLI refreshes, it is named in the output, and the day
+  // after it the artifact picks the whole day up. What it does NOT give up is the
+  // reason the projection exists: a meter the CLI has not refreshed for a day or
+  // more is raised by every day since, at full weight.
+  const fetchedDay = metered !== null && meter?.fetchedAt ? meter.fetchedAt.slice(0, 10) : null
+  const addedDays = fetchedDay ? window.days.filter((d) => d > fetchedDay) : []
+  const addedUsd = addedDays.reduce((n, d) => n + (usage.byDay.get(d) || 0), 0)
+  const addedPoints = usdPerPoint ? addedUsd / usdPerPoint : 0
+
+  let percentUsed, source
+  if (metered === null) {
+    percentUsed = wholePoints
+    source = 'artifact projection — no usable meter reading'
+  } else if (fetchedDay === null) {
+    // A meter with no fetch instant cannot be placed in time, so nothing can be said
+    // about what it has and has not seen. Fall back to the older rule: whichever
+    // reads worse governs.
+    percentUsed = Math.max(metered, wholePoints ?? 0)
+    source = 'meter, or the artifact where it reads worse — the meter carries no fetch time'
+  } else {
+    percentUsed = metered + addedPoints
+    source = addedDays.length
+      ? `meter, raised by ${money(addedUsd)} the artifact has recorded on ${addedDays.length} UTC day(s) since it was fetched`
+      : 'meter'
+  }
   base.week.percentUsed = Number(percentUsed.toFixed(2))
-  base.week.source = metered === null ? 'artifact projection'
-    : (projected !== null && projected > metered ? 'meter, raised by spend the artifact has recorded since' : 'meter')
+  base.week.source = source
+  base.week.meterPercent = metered
+  base.week.addedUsd = Number(addedUsd.toFixed(2))
+  base.week.addedDays = addedDays
+  base.night.spansReset = !!window.startsAt && utcDay(window.startsAt) === day
+    && window.startsAt.getTime() !== Date.UTC(window.startsAt.getUTCFullYear(), window.startsAt.getUTCMonth(), window.startsAt.getUTCDate())
+
+  // A model-scoped bucket has its own denominator, so it can never be mixed into the
+  // points arithmetic above — but it can genuinely run out first, and it refuses on
+  // its own when it does. This is the conservatism the old `Math.max` bought by
+  // accident, kept on purpose and this time said out loud.
+  const scopedBreach = (metered === null ? [] : (meter.scoped || []))
+    .find((sc) => Number.isFinite(sc.percent) && sc.percent >= stopAt) || null
+  const scopedStop = () => ({
+    ...base, state: 'stop', allowed: false,
+    why: `the ${scopedBreach.label} weekly bucket is at ${scopedBreach.percent}%, past the ${stopAt}% stop line; the all-model bucket is at ${percentUsed.toFixed(0)}%.`,
+    headline: `${ALARM_STOP} — the ${scopedBreach.label} weekly bucket is at ${scopedBreach.percent}%, past the ${stopAt}% stop line.`,
+  })
 
   const nightPoints = usdPerPoint ? nightSpentUsd / usdPerPoint : null
   if (nightPoints === null) {
     // The week is known but the night is not. That is enough to stop on the week and
     // not enough to say anything about the night.
+    if (scopedBreach) return scopedStop()
     if (percentUsed >= stopAt) {
       return { ...base, state: 'stop', allowed: false,
                why: `the week is at ${percentUsed.toFixed(0)}% of the allowance, past the ${stopAt}% stop line.`,
@@ -321,6 +387,7 @@ export function judge({ meter, usage, config, now = new Date() }) {
   base.night.headroomPoints = Number(headroom.toFixed(2))
   base.night.pctOfHeadroom = headroom > 0 ? Number(((nightPoints / headroom) * 100).toFixed(0)) : 100
 
+  if (scopedBreach) return scopedStop()
   if (weekBefore >= stopAt) {
     return { ...base, state: 'stop', allowed: false,
              why: `the week is at ${weekBefore.toFixed(0)}% of the allowance, past the ${stopAt}% stop line; it resets ${window.endsAt.toISOString().replace('T', ' ').slice(0, 16)}Z.`,
@@ -364,6 +431,12 @@ export const CALIB_MIN_PERCENT = 20
  * pricing change, a plan change, and the "+50% weekly limits promo through Aug 31"
  * expiring, none of which anybody would remember to edit a file for.
  *
+ * It pairs every measured dollar with the ALL-MODEL bucket, and records which
+ * bucket that was. Pricing the workspace's whole spend against a model-scoped
+ * percentage prices a point off two different populations: in the week this was
+ * found the workspace ran 100% Opus 5 while the Fable bucket read 9%, driven
+ * entirely by usage the artifact cannot see (obot.agent#331).
+ *
  * The lag is bounded by the cadence rather than argued about: the sweep observes a
  * new `fetchedAtMs` within five minutes of it appearing and the artifact is at most
  * ten minutes old, so the dollars paired with the percentage trail it by minutes.
@@ -379,17 +452,29 @@ export function nextCalibration({ meter, weekSpentUsd, stored }) {
     at: meter.fetchedAt,
     meterFetchedAt: meter.fetchedAt,
     weeklyPercent: meter.percent,
+    bucket: meter.bucket || 'weekly_all',
     spentUsd: Number(weekSpentUsd.toFixed(2)),
     source: 'live — re-derived from the meter this machine cached',
   }
 }
 
-/** The newer of the shipped bootstrap and whatever the machine has since recorded. */
+/**
+ * The newer of the shipped bootstrap and whatever the machine has since recorded.
+ *
+ * A calibration recorded before obot.agent#331 carries no `bucket`, and the reading
+ * that produced it took the HIGHEST weekly bucket — which may have been a
+ * model-scoped one, priced against every dollar the workspace spent on other models.
+ * The two cannot be told apart after the fact, so an untagged recording is not
+ * trusted: the shipped bootstrap (explicitly weekly_all, and the more conservative
+ * of the two figures) stands until the next meter fetch derives one that says which
+ * bucket it came from.
+ */
 export function pickCalibration(config, stored) {
   const a = config?.calibration || null
-  if (!a) return stored || null
-  if (!stored?.at) return a
-  return Date.parse(stored.at) > Date.parse(a.at) ? stored : a
+  const s = stored?.bucket ? stored : null
+  if (!a) return s
+  if (!s?.at) return a
+  return Date.parse(s.at) > Date.parse(a.at) ? s : a
 }
 
 /** Where the machine remembers its own calibration. */
@@ -416,12 +501,26 @@ const detailLines = (v) => {
   d.push(`week: ${v.week.spentUsd === null ? 'unmeasured' : money(v.week.spentUsd)} measured, meter at ${v.week.percentUsed === null ? '—' : `${v.week.percentUsed.toFixed(0)}%`} of the allowance (${v.week.source}), stop line ${v.week.stopPercent}%, resets ${v.week.endsAt ? `${v.week.endsAt.replace('T', ' ').slice(0, 16)}Z` : 'unknown'}`)
   const den = v.week.denominator
   d.push(`denominator: ${den.what}${den.usdPerPoint ? `; 1 point ≈ ${money(den.usdPerPoint)} of API-equivalent spend, calibrated ${den.calibratedAt} from ${den.calibratedFrom} (${den.source})` : '; NOT CALIBRATED — dollars cannot be priced in points'}`)
-  d.push(`meter: ${v.reading.meter.read
-    ? (v.reading.meter.expired
-        ? `read but EXPIRED — ${v.reading.meter.why}; the week position below comes from the artifact alone`
-        : `${v.reading.meter.percent}% weekly, fetched ${v.reading.meter.fetchedAt}`)
-    : `NOT READ — ${v.reading.meter.why}`}`)
-  for (const s of v.reading.meter.scoped || []) d.push(`  model-scoped limit: ${s.label} at ${s.percent}% — a scoped bucket can bind before the all-model one`)
+  // Both weekly buckets, side by side, with the binding one named. A single
+  // percentage left a reader to infer which bucket it came from, and for a week it
+  // was the wrong one (obot.agent#331).
+  const m = v.reading.meter
+  const buckets = [`all models ${m.percent}%`, ...(m.scoped || []).map((sc) => `${sc.label} ${sc.percent}%`)]
+  d.push(`meter: ${m.read
+    ? (m.expired
+        ? `read but EXPIRED — ${m.why}; the week position below comes from the artifact alone`
+        : `${buckets.join(', ')} (weekly buckets, one fetch at ${m.fetchedAt})`)
+    : `NOT READ — ${m.why}`}`)
+  if (m.read && !m.expired) {
+    d.push(`  the all-model bucket is what the week position and the points above are measured against — it is the number the client's own /usage prints as "Current week (all models)"`)
+    for (const sc of m.scoped || []) {
+      d.push(`  ${sc.label} is a model-scoped bucket with its own denominator: it refuses on its own at the ${v.week.stopPercent}% stop line and never raises the all-model reading`)
+    }
+    d.push(`  projection: the meter measured the week through ${m.fetchedAt}; the artifact adds ${money(v.week.addedUsd ?? 0)} from ${v.week.addedDays?.length ? `UTC day(s) ${v.week.addedDays.join(', ')}` : 'no later UTC day, because it cannot split the day the meter was fetched inside'}`)
+  }
+  if (v.night.spansReset) {
+    d.push(`  the allowance week began at ${String(v.week.startsAt).replace('T', ' ').slice(0, 16)}Z, inside this UTC day: the night's dollars above therefore include spend charged to the PREVIOUS allowance week, which a day-bucketed artifact cannot separate`)
+  }
   d.push(`artifact: ${v.reading.usage.ok ? `rebuilt ${v.reading.usage.generatedAt}` : `NOT READ — ${v.reading.usage.why}`}; it prices only the obot2 workspace, so measured spend is a floor`)
   return d
 }
