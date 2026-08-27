@@ -48,11 +48,14 @@ measured spend behind it, in `config/spend.json`:
 
 ### It maintains itself
 
-Every time the sweep sees a `fetchedAtMs` it has not seen before, it pairs that
-percentage with the dollars measured since the reset and records the result to
+Every time the sweep sees a `fetchedAtMs` it has not seen before, it pairs the
+**all-model** percentage with the dollars measured since the reset, records which
+bucket that was, and writes the result to
 `.claude/session-hub/cache/spend-calibration.json`. Whichever of that and the shipped
 bootstrap is **newer** prices a point, and the section always names which one is in
-force. Only above 20% of a week — one rounding step in an integer percentage moves a
+force. A recording that does not say which bucket it came from is not trusted — it
+may have been paired with a scoped percentage, and the two cannot be told apart after
+the fact — so the bootstrap stands until a tagged one replaces it. Only above 20% of a week — one rounding step in an integer percentage moves a
 small ratio by tens of percent — and never from an expired reading.
 
 The lag is bounded by the cadence rather than argued about: the sweep sees a new fetch
@@ -67,6 +70,26 @@ whatever Anthropic's meter actually weighs. Both push the reading to trip sooner
 is also inflated by the "+50% weekly limits promo through Aug 31" active on the
 account — which is why it is re-derived from the live meter rather than frozen.
 
+## The two weekly buckets
+
+`limits[]` carries more than one weekly bucket and they are **not interchangeable**:
+
+| kind | is | binds |
+|---|---|---|
+| `weekly_all` | what the client's own `/usage` prints as "Current week (all models)" | everything: the week position, the points, the calibration |
+| `weekly_scoped` | one model's own allowance, with its own denominator | only itself — it refuses at the stop line on its own, by name |
+
+`check` prints both, side by side, and says which one the points are measured
+against. A scoped percentage is never mixed into the points arithmetic: the
+workspace's dollars and one model's allowance are two different populations, and
+pricing one against the other prices a point off nothing.
+
+This is not hypothetical. Until obot.agent#331 the reading took `Math.max` across the
+whole `weekly` group, so on 2026-08-27 Fable's 9% sat in the all-model field while
+the all-model bucket read 5% in the same document — and the workspace had spent 100%
+Opus that week, so the Fable bucket was driven entirely by usage the artifact cannot
+see.
+
 ## The two readings
 
 | | sees | blind to |
@@ -74,9 +97,25 @@ account — which is why it is re-derived from the live meter rather than frozen
 | **the meter** (`~/.claude.json`) | the whole account — phone, web, claude.ai | the night; per-agent detail; and it refreshes only when the CLI feels like it |
 | **the artifact** (`build_usage_data.py`) | every night, every agent, rebuilt on the sweep's cadence | anything this machine did not record, so it is a **floor** |
 
-Whichever reads worse governs. A meter reading whose `resets_at` has passed is
-**expired**, not current — believing a 99% reading after a Thursday reset would halt
-a fleet with a full allowance in front of it.
+**The meter measured everything up to the instant it was fetched, so the artifact may
+only add what the meter has not seen.** It buckets by whole UTC day and cannot split
+the day the fetch landed in, so the days it adds are the ones that began after that
+day ended. A meter the CLI has not refreshed for a day or more is raised by every day
+since, at full weight — which is the reason the projection exists.
+
+Charging the whole window on top of a live meter is what read the week four times
+high on 2026-08-27. The allowance week resets mid-day (15:00Z on a Thursday); the
+artifact charged the seven-hour-old week a whole UTC day, of which $1,004.84 of
+$1,040.81 had been spent before the reset.
+
+Two fallbacks are unchanged, and both are the conservative direction. With **no
+usable meter** the artifact projects across the whole window and governs alone. With
+a meter carrying **no fetch instant** — which cannot be placed in time, so nothing
+can be said about what it has seen — whichever of the two reads worse governs.
+
+A meter reading whose `resets_at` has passed is **expired**, not current — believing
+a 99% reading after a Thursday reset would halt a fleet with a full allowance in
+front of it.
 
 ## The night is the UTC day
 
@@ -84,6 +123,11 @@ The generator buckets by `timestamp[:10]` on UTC stamps. For America/New_York a 
 day opens at 20:00 the previous evening, so an overnight fleet dispatched after
 dinner lands entirely inside one bucket — which is the unit a nightly cap needs. It
 is not a rolling twelve hours and nothing here claims it is.
+
+One night a week the UTC day contains the weekly reset, and on that night the night's
+dollars include spend charged to the allowance week that just ended. The figure stays
+— dropping it would let an unbounded night through — and `check` says so on the line
+underneath rather than asserting a number it cannot support.
 
 ## The ladder
 
