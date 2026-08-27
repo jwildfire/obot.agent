@@ -324,3 +324,25 @@ test('a sweep that produced no stall reading says so loudly rather than dropping
   const section = parseNavigatorState(md).sections.find((x) => /Stalled at a prompt/.test(x.title));
   assert.ok(section?.items.some((i) => i.alarm), 'and it renders red on his page');
 });
+
+test('the FINDING branch carries the same `stalls:` marker the clear branch does', () => {
+  // The voice standup reads this section by looking for a line starting `stalls:`. The
+  // clear branch wrote one and the finding branch did not, so the standup could say
+  // "nothing is held up waiting for you" and could NEVER say the opposite — on
+  // 2026-08-27 it told him a parked session "was not measured this pass" while this
+  // very function had measured two and named them.
+  const found = stallSection({
+    read: true,
+    watched: 3,
+    reachable: [],
+    stalls: [
+      { worker: 'prime', minutes: 273, needs: 'answer: the CRAN question' },
+      { worker: 'W0136', minutes: 348, needs: 'approve Bash: git commit --file=...' },
+    ],
+  });
+  const marker = found.split('\n').find((l) => /^stalls:/.test(l.trim()));
+  assert.ok(marker, 'a section reporting parked sessions must carry a `stalls:` line');
+  assert.doesNotMatch(marker.replace(/^stalls:\s*/, ''), /^clear\b/,
+    'and that line must not read as clear');
+  assert.match(found, ALARM_RE, 'the alarm headline must still be alarm-tested');
+});
