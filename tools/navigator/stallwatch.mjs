@@ -289,7 +289,7 @@ export function stallSection(reading) {
   const { stalls, reachable, watched } = reading
   const lines = [HEADING, '']
   if (stalls.length) {
-    lines.push(`**STALL FINDING** — ${stalls.length} background session${stalls.length === 1 ? ' is' : 's are'} parked on a permission prompt and cannot be messaged. A send to one returns \`success: true\` and is never delivered: the queue drains at the receiver's next turn boundary and a prompting session's next turn boundary IS the permission decision (docs/session-reachability.md). Answer the prompt at the session, or stop it and respawn the work — there is no third option and nothing here expires on its own.`)
+    lines.push(`stalls: ${stalls.length} parked — **STALL FINDING** — ${stalls.length} background session${stalls.length === 1 ? ' is' : 's are'} parked on a permission prompt and cannot be messaged. A send to one returns \`success: true\` and is never delivered: the queue drains at the receiver's next turn boundary and a prompting session's next turn boundary IS the permission decision (docs/session-reachability.md). Answer the prompt at the session, or stop it and respawn the work — there is no third option and nothing here expires on its own.`)
   } else {
     lines.push(`stalls: clear — no background session in this workspace is parked on a permission prompt (${watched} watched, \`claude agents --json\` joined to the job records on \`id\`)`)
   }

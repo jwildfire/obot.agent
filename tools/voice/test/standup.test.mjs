@@ -291,6 +291,26 @@ test('stallVerdict is clear or it is not, and an unreadable section is neither',
   assert.equal(stallVerdict('# x\n').read, false);
 });
 
+test('a stall FINDING is read as not-clear, not as unmeasured (the section the sweep really writes)', () => {
+  // The producer writes `stalls: clear - ...` when nothing is parked and, before this
+  // was fixed, wrote a **STALL FINDING** headline with no `stalls:` prefix when
+  // something WAS. So the consumer could report "all clear" and could never report the
+  // one state the section exists for: the standup said "not measured this pass" while
+  // two sessions had been parked for hours and the sweep had measured both.
+  const found = [
+    '## Stalled at a prompt - sessions nobody can reach',
+    '',
+    'stalls: 2 parked - **STALL FINDING** - 2 background sessions are parked on a permission prompt and cannot be messaged.',
+    '',
+    '### Parked',
+    '',
+    '- prime - waiting 273m',
+  ].join('\n');
+  const v = stallVerdict(found);
+  assert.equal(v.read, true, 'a section that WAS measured must not read as unmeasured');
+  assert.equal(v.clear, false, 'a section reporting parked sessions must not read as clear');
+});
+
 test('said turns a small count into a word, because a standup is heard', () => {
   assert.equal(said(0), 'no');
   assert.equal(said(1), 'one');
