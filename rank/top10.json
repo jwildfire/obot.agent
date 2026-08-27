@@ -21,11 +21,6 @@
       "why": "data coverage per visit is the figure that decides whether a quiet visit is reassuring or empty, and it is the one census number that genuinely wants a picture"
     },
     {
-      "issue": 153,
-      "why": "three consecutive weekly runs have failed and the published site still shows the last good one, so nothing looks broken from outside - which is exactly why it went three weeks",
-      "review": "the pipeline half is done - the scheduled run published on its own at 07:03 UTC on 24 Aug, the first Actions-produced snapshot this repo has had; only the goal binding remains and that is a carve-out edit"
-    },
-    {
       "issue": 34,
       "why": "a gate rather than work: the app's own goal says no requirement can be filed for it until this lands, and it has been open since 12 July"
     },
@@ -42,13 +37,18 @@
       "why": "the survey's strongest single finding: a reviewer opening the same study weekly can neither record what they have already seen nor see what arrived since"
     },
     {
-      "issue": 33,
-      "why": "eight original chart repositories still carry issues filed by the people who used them - charts to make grounded in what real reviewers asked for rather than in a competitor's marketing page",
-      "review": "the report is delivered and nothing is filed - 282 issues across twelve trackers classified on 24 Aug with nine quick wins, and his review gates any filing, which is what the requirement asked for"
-    },
-    {
       "issue": 176,
       "why": "twelve requirement proposals, none filed, four weeks old, and the issue asking which to file still open"
+    },
+    {
+      "issue": 281,
+      "why": "two R packages that thousands of people installed have been off CRAN since March for one chart that imports an abandoned dependency, and he already decided to remove it - the fix is small, the risk is that safetyCharts on GitHub is a version ahead of CRAN and has never faced R CMD check --as-cran",
+      "review": "promoted 2026-08-27 into the slot #153 vacated; charting rather than scaffold, so it holds to K0007; milestone 2026q3 and the tendril question answered 2026-08-19, so it is work-ready; NOTE the push lane is his - there is no jwildfire fork and the upstream org is off-limits to agents, so an agent can do the whole local half and hand it over"
+    },
+    {
+      "issue": 313,
+      "why": "two sites in the published demo were reported to a reviewer as improving while their own numbers did not change by a single event - the chip said better because the cohort moved, which is the direction that stops someone opening the one case that most deserved a look",
+      "review": "filed and promoted 2026-08-27, replacing #33 whose remaining work is his review gate; charting and clinical correctness so it holds to K0007; the measurement is already done and per-record (SITE4314 6/8 and SITE6991 3/3, identical numerator and denominator across ps-001 and ps-002, both flag 2 to 1) so an agent starts from evidence rather than from a hypothesis; DESIGN-GATED - three directions are written and none is chosen, so the increment is to build and measure all three the way D0027 and D0028 were done, not to pick one"
     }
   ]
 }
