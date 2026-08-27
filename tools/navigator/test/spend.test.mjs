@@ -588,7 +588,7 @@ function hook(command, { state = 'stop', ageS = 0, missing = false } = {}) {
     const t = new Date(Date.now() - ageS * 1000)
     fs.utimesSync(verdict, t, t)
   }
-  return execFileSync(path.join(REPO, 'tools', 'spend-cap-hook'), [], {
+  return execFileSync(path.join(REPO, 'hooks', 'spend-cap-hook.py'), [], {
     encoding: 'utf8',
     env: { ...process.env, OBOT_SPEND_VERDICT: verdict, OBOT_SPEND_VERDICT_MAX_AGE: '3600' },
     input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),

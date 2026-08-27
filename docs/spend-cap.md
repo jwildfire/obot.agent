@@ -169,7 +169,7 @@ morning he called the halt by hand.
 | `obot-auto` (autonomous lead) | pre-flight check 2 runs `tools/spend-guard check`; exit 2 or 4 aborts the launch | yes |
 | everything honouring the kill switch (`obot-auto`, the morning fold) | the Navigator sweep writes `.claude/autonomy-halt` on a stop and **lifts it automatically** when the reading clears | yes |
 | `worker-id claim` — every sibling and every autonomous lead | refuses past the cap, before the journal is touched, so no id is burned | yes |
-| an agent typing `claude --bg …` into a Bash call | `tools/spend-cap-hook`, a `PreToolUse` deny | **not installed** — see below |
+| an agent typing `claude --bg …` into a Bash call | `hooks/spend-cap-hook.py`, a `PreToolUse` deny | registered in the manifest — live on this machine once the installer is run |
 
 The Navigator, prime and the admiral claim no worker id and are never gated: blinding
 the surfaces that *report* the spend would be the worst possible way to control it.
@@ -187,17 +187,25 @@ about dispatch: obot-auto's pre-flight exits on it.
 
 ### The hook is one approval away
 
-`tools/spend-cap-hook` is written and tested but not registered, because registering
-a hook means editing `hooks/` — a policy carve-out path, and therefore @jwildfire's
-to approve. When he does it is one row in `hooks/install.sh`:
+`hooks/spend-cap-hook.py` is written, tested, and carried in the `hooks/install.sh`
+manifest as:
 
 ```
-"spend-cap-hook:PreToolUse:Bash"
+"spend-cap-hook.py:PreToolUse:Bash"
 ```
 
-(and the file moves to `hooks/`). Until then, the agent-typed spawn lane is covered
-by `worker-id claim` — which every documented spawn passes through — and not by
-anything that could stop a spawn that skipped the claim.
+Registering a hook means editing `hooks/`, which is a policy carve-out path, so the
+pull request that added that row is on the **attested lane** — a guard that can deny
+a spawn is @jwildfire's call and not an agent's.
+
+Two separate things, and the difference matters: the row being in the manifest is not
+the hook being live. It takes effect on a machine only when `hooks/install.sh` is run
+there, which copies it into `.claude/hooks/` and registers it in the workspace
+`settings.json`. Until the installer runs, the agent-typed spawn lane is covered by
+`worker-id claim` — which every documented spawn passes through — and not by anything
+that could stop a spawn that skipped the claim.
+
+`hooks/install.sh --check` reports the difference rather than assuming it.
 
 ## Where it is read
 
