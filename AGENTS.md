@@ -56,7 +56,7 @@ the worktree through absolute paths into it rather than switching the session in
 and never tell a spawned agent or ultracode job to use EnterWorktree here.
 
 Everything else in the upstream convention still applies: one branch per worktree, all
-commands run from inside the worktree, push and `gh pr create` from the worktree, and
+commands run from inside the worktree, push and `obot-gh pr create` from the worktree, and
 cleanup after merge (`git worktree remove .claude/worktrees/{branch}` from the repo
 root, then delete the branch). Do not remove other agents' in-flight worktrees, in
 either layout. Repo-wide searches from the main checkout may want
@@ -368,6 +368,38 @@ Three things about it that are load-bearing:
 
 Requirement: [obot.roadmap#272](https://github.com/jwildfire/obot.roadmap/issues/272).
 
+## Running a GitHub write
+
+Every `gh` write goes through the wrapper, which mints an `obotclaw[bot]` installation
+token and runs the command under it:
+
+```bash
+obot.agent/scripts/obot-gh issue edit <n> -R jwildfire/<repo> --add-label <label>
+```
+
+Typed the same way as `obot-merge` above — one command, undecorated — and for the same
+reason: the allowlist matches the three spellings of the wrapper and nothing decorated.
+
+**Why.** The ambient `gh` token authenticates as @jwildfire. For two days every structural
+roadmap edit — labels, milestones, sub-issue links, project additions, board moves — went
+out under his own account, on roughly a hundred issues he had not read. Issue *bodies* read
+`obotclaw` because the app token was passed to `gh issue create`; the pattern was never
+carried to the rest, and only the timeline disagrees, so nobody finds it unless already
+suspicious ([obot.agent#197](https://github.com/jwildfire/obot.agent/issues/197)).
+
+One consequence to know before it surprises you: **`--assignee @me` cannot be used through
+the wrapper.** A GitHub App bot is not an assignable user at all —
+`GET /repos/jwildfire/obot.roadmap/assignees/obotclaw[bot]` is a 404 — so name the assignee
+(`--assignee jwildfire`), which is what the hub's audit policy already required of anything
+filed there. This is a documented divergence from the upstream gsm.agent Assignee
+Convention, which predates the bot identity.
+
+It is not a rule to remember. `hooks/attribution-guard.sh` refuses the write at the moment
+it would run unauthenticated and names the wrapper in the refusal; the reasoning and the
+one case the bot cannot sign — a user-owned ProjectsV2 board, which no GitHub App can reach
+— are in [`skills/obot-identity`](skills/obot-identity/SKILL.md). Guarded by
+[`scripts/test/attribution-guard.test.mjs`](scripts/test/attribution-guard.test.mjs).
+
 ## Branching and release model (safety.viz only)
 
 This model applies to **safety.viz and nothing else** — it is not an ecosystem default.
@@ -403,7 +435,8 @@ repo's actual branch model. Established 2026-07-08 alongside the documentation-s
 ## Repository write policy
 
 All active repos live under the `jwildfire` account; agent-authored commits, pushes,
-and PRs come from `obotclaw[bot]` per `skills/obot-identity/SKILL.md`. Future transfer
+PRs, and every structural edit — labels, milestones, sub-issue links — come from
+`obotclaw[bot]` per `skills/obot-identity/SKILL.md`, via `scripts/obot-gh`. Future transfer
 to `SafetyGraphics` should happen only after repository scope, naming, permissions,
 and governance are clear.
 

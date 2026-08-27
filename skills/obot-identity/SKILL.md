@@ -83,15 +83,29 @@ obot.roadmap#3, `requirements/design/3_design.html`.
 
 ## Usage patterns
 
-Mint fresh per command — tokens are short-lived by design; never store one:
+Every `gh` write goes through the wrapper. It mints a fresh token, runs the command
+under it, and stores nothing:
 
 ```bash
-# API calls, issues, PRs, comments — as the bot
-GH_TOKEN=$(obot-app-token) gh api ...
-GH_TOKEN=$(obot-app-token) gh issue comment 3 -R jwildfire/obot.roadmap --body "..."
+obot.agent/scripts/obot-gh issue edit 197 -R jwildfire/obot.agent --add-label bug
+obot.agent/scripts/obot-gh issue create -R jwildfire/obot.roadmap --title "..." --body-file draft.md
+obot.agent/scripts/obot-gh api -X POST /repos/jwildfire/obot.roadmap/issues/215/sub_issues -F sub_issue_id=123
+obot.agent/scripts/obot-gh --who        # prints obotclaw[bot]
+```
 
+The wrapper is not a convention to remember. `hooks/attribution-guard.sh` refuses a
+GitHub write that is about to run on the ambient token and names the wrapper in the
+refusal — see [Why the wrapper exists](#why-the-wrapper-exists-obotagent197) below.
+
+Mint the token directly only where the wrapper cannot reach — inside a script doing many
+writes. Tokens are short-lived by design; never store one:
+
+```bash
 # git push as the bot — the wrapper, not the URL
 obot.agent/scripts/obot-push          # current branch; add -u to set upstream
+
+# inside a script doing many writes: mint once, and the wrapper reuses it
+export OBOT_GH_TOKEN=$(obot-app-token)
 ```
 
 `obot-push` exists because every remote here is SSH, so a plain `git push` authenticates
@@ -165,8 +179,45 @@ or `Worker:` trailer whose author does not link to the bot, under `## Commit ide
 In GitHub Actions, do not use this script — use `actions/create-github-app-token@v2` with
 the `OBOT_APP_ID` / `OBOT_APP_PRIVATE_KEY` repo secrets instead.
 
+## Why the wrapper exists (obot.agent#197)
+
+For two days every structural roadmap edit — labels, milestones, sub-issue links, project
+additions, board moves — was attributed to @jwildfire's own account, across roughly a
+hundred issues he had not read. Issue and comment *bodies* were correct, because the app
+token was passed to `gh issue create`; the pattern was never carried to anything else, and
+the ambient `gh` token authenticates as him.
+
+It was sharpest on hub#215 — the requirement about not letting an agent's inference read
+as his approval — whose own timeline said he applied a label he has never seen. And it was
+invisible where anyone looks: the body reads `obotclaw`, only the timeline disagrees, and
+nobody reads a timeline unless already suspicious.
+
+The mechanism was never in doubt. What was missing is that it cannot be forgotten, so the
+fix is a guard rather than a paragraph: two days of evidence say remembering does not work,
+the same way the `bash ` prefix habit broke `obot-merge` (#162) and `ops-answers` (#180).
+
+### The board is the one thing the bot cannot sign
+
+A GitHub App installed on a **user** account cannot reach a user-owned ProjectsV2 board at
+all. Verified 2026-08-17: the installation token gets `FORBIDDEN` — "Resource not
+accessible by integration" — on the board's node id, and `NOT_FOUND` on
+`user(login:"jwildfire"){projectV2(number:1)}`. It is a platform limit, not a missing flag.
+
+So a board move has no honest bot identity available today. It is not passed through
+silently: `obot-gh project ...` refuses and explains, and the only route is the explicit
+`--as-jeremy`, which requires a reason, records the write to
+`.claude/attribution.journal`, and says on stderr whose name it is going out under. An
+invisible default becomes a counted exception.
+
+Lifting it is @jwildfire's call — move the board to an organisation, or grant the app
+project access if GitHub ever offers it for user-account installations.
+
 ## Failure modes
 
+- `--assignee @me` fails, or the assignee is silently dropped — a GitHub App bot is not an
+  assignable user (`GET /repos/{owner}/{repo}/assignees/obotclaw[bot]` is a 404), so `@me`
+  has nothing to resolve to under an installation token. Name the assignee:
+  `--assignee jwildfire`.
 - `no Keychain item` — the key isn't seeded on this machine; see the script header for the
   `security add-generic-password` seed command (requires the PEM, which only Jeremy can
   regenerate from the app settings page).

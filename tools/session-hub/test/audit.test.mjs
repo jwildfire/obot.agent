@@ -77,6 +77,45 @@ test('agentPrompt runs one apply per entry, isolates in a worktree, and lands wi
   assert.match(p, /never force-push/i);
 });
 
+test('the apply lane writes as obotclaw[bot], and says out loud which half cannot', () => {
+  // obot.agent#197. This lane ran wholly on `gh auth token` — @jwildfire's own
+  // credential — so every label, milestone, assignee and close it applied was recorded
+  // by GitHub as his act on issues he had not read. The repo half moves to the app
+  // token; the board half cannot, because no GitHub App can reach a user-owned
+  // ProjectsV2 board, so it stays spelled out as a separate credential rather than
+  // being folded back into one token that hides which writes are which.
+  const p = agentPrompt({
+    entries: [{ decision: 'accept', findings: ['ASSIGNEE-MISSING:jwildfire/obot.roadmap#9'] }],
+    hub: '/ws/obot.roadmap',
+    workspace: '/ws',
+    runToken: 'local-abc123',
+    label: 'one decision',
+  });
+  assert.match(p, /GH_TOKEN="\$\(\/ws\/obot\.agent\/scripts\/obot-app-token\)"/);
+  assert.match(p, /PROJECT_TOKEN="\$\(gh auth token\)"/);
+  // GITHUB_TOKEN stays his, and is not an oversight. The apply re-runs the whole audit
+  // before touching anything, and lib/gh.mjs reads on `GITHUB_TOKEN || GH_TOKEN` —
+  // the opposite precedence to the write path. An audit that cannot see the board
+  // skips every board rule and reports live findings as stale, throwing away a
+  // decision @jwildfire actually made, silently.
+  assert.match(p, /GITHUB_TOKEN="\$\(gh auth token\)"/);
+  // What must NOT survive: GITHUB_TOKEN as the only credential, which is what made
+  // every write go out under his name.
+  assert.doesNotMatch(p, /GITHUB_TOKEN="\$\(gh auth token\)" node scripts\/apply_audit_decision/);
+  // The judgment half of the lane types its own gh commands, so it is told the wrapper.
+  assert.match(p, /\/ws\/obot\.agent\/scripts\/obot-gh/);
+});
+
+test('the workspace root falls back to the hub\'s parent when not passed', () => {
+  const p = agentPrompt({
+    entries: [{ decision: 'accept', findings: ['X:jwildfire/obot.roadmap#1'] }],
+    hub: '/ws/obot.roadmap',
+    runToken: 'local-t',
+    label: 'x',
+  });
+  assert.match(p, /\/ws\/obot\.agent\/scripts\/obot-app-token/);
+});
+
 test('the page-supplied label is stripped to inert text before it reaches the prompt', () => {
   const v = validateDecision({
     decision: 'reject',

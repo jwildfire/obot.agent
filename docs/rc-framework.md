@@ -152,7 +152,7 @@ the second line of an RC row from.
 3. **Retitle the same PR — never open a new one.** The review thread is the record: his
    comments, the review decisions, the Development links and the CI history all live on
    it, and he reviews `-RC2` by reading what he asked for on `-RC1`. A replacement PR
-   throws that away. Retitling costs one `gh pr edit --title`.
+   throws that away. Retitling costs one `obot-gh pr edit --title`.
    - A **mechanical** re-open is not a re-cut and does not move the counter — e.g.
      open.gismo #9 → #10 (2026-08-15), closed 33 seconds in and reopened under the bot so
      @jwildfire could hold the reviewer role. #10 is still `-RC1`.
