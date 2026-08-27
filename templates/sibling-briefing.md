@@ -250,6 +250,17 @@ GH_TOKEN=$T gh issue comment {n} -R jwildfire/{repo} --body-file {absolute path}
   reviewed it. That clause was on 75 of the hub's 113 requirements, none of which carried
   any record of a review, because it costs nothing to write and nothing checked it.
 - **GitHub bodies use one line per paragraph or bullet** — no hard-wrapped prose.
+- **A long commit message goes to the path git will read, and `git commit --file=` runs
+  undecorated.** Writing the message to a scratch file and then chaining
+  `cp <msgfile> .git/MSG.txt && git commit --file=.git/MSG.txt` is the trap: the `&&`
+  splits the command, an allowlist rule matches only when *every* sub-command matches, and
+  the whole thing falls through to the classifier as a prompt. W0136 sat parked on exactly
+  that for three hours with sixteen files staged, its rebase complete, and nothing on
+  GitHub — and nobody else could release it, because running a stopped command from another
+  session routes around a decision that is @jwildfire's. Write the message straight to the
+  path in the `--file=` argument, then run the commit on its own. The safe-looking spelling
+  is the one that stalls; the reason the `cp` is there at all is that a shell ate backticks
+  out of an inline `-m` on obot.agent#328 and shipped a commit missing three words.
 - **Every commit carries a `Worker: {W-id}` trailer**, and every issue or PR you open names
   your id. An unstamped write can never be attributed afterwards: the bot identity is shared,
   and reconstructing authorship from transcripts does not work — one job's transcript carried
