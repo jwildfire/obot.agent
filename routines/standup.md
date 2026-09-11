@@ -28,8 +28,8 @@ or write any local state other than the file you publish.
    its requirements (its sub-issues) and their tasks (theirs) — GET
    /repos/{owner}/{repo}/issues/{n}/sub_issues, paginated, across repositories. Count
    nodes closed, open without the `blocked` label, and open with the `blocked` label. For
-   each requirement, read its board status (projectItems → fieldValueByName "Status" on
-   project 1: Backlog, Ready, In session, Review, Released) and its latest comment whose
+   each requirement, read its `status:` label (backlog, ready, in session, review,
+   released — exactly one; two or none is drift, say so) and its latest comment whose
    body starts with "### Complete"; take the three sections verbatim and roll them up
    under the objective.
 

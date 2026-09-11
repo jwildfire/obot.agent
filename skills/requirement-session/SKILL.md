@@ -28,15 +28,15 @@ state, latest comment.
 ## 2. The clarity check — stop if it fails
 
 The session does not start building until all of these hold. Ready is the prep phase's
-output; a requirement that still reads Backlog on the board has a prep job in front of it,
+output; a requirement that still carries `status: backlog` has a prep job in front of it,
 and this session's answer is to do that prep (file what is missing) and stop for sign-off,
 not to build.
 
 - The objective's tree is signed off: a comment from @jwildfire on the objective issue
   saying so. Quote its link.
 - The requirement has its Design and Definition of done sections populated, a milestone,
-  at least one task, and a board status of Ready (set it — `03bd076a` — if the tree is
-  complete and signed off but the status still reads Backlog).
+  at least one task, and the `status: ready` label (set it, removing `status: backlog`, if
+  the tree is complete and signed off but the label still reads backlog).
 - Every task lives in exactly one implementation repo, carries its own definition of done,
   a `Parent:` line and a milestone in that repo, and is linked as a sub-issue of the
   requirement. No task without a milestone, no session.
@@ -64,17 +64,14 @@ listing each task with its state. Stop after <N> turns or by <date>, whichever c
 first, and post the nightly comment before stopping.
 ```
 
-Move the requirement's board status to In session — the board is the one place its
-status lives, and the write goes out under the connected account:
+Move the requirement's status label to in session — one status label at a time, the
+previous one removed:
 
 ```bash
-# item id of the requirement on the obot Roadmap project
-ITEM=$(gh api graphql -f query='{ repository(owner:"jwildfire", name:"obot.roadmap") { issue(number: <requirement>) { projectItems(first: 5) { nodes { id project { number } } } } } }' --jq '.data.repository.issue.projectItems.nodes[] | select(.project.number == 1) | .id')
-gh project item-edit --project-id PVT_kwHOADgnX84BcTPz --id "$ITEM" --field-id PVTSSF_lAHOADgnX84BcTPzzhW9FpU --single-select-option-id 34b8738c   # In session
+gh issue edit <requirement> -R jwildfire/obot.roadmap --add-label "status: in session" --remove-label "status: ready"
 ```
 
-Option ids: Backlog `87331fb3` · Ready `03bd076a` · In session `34b8738c` · Review
-`b5cd3859` · Released `1db40a3a`. Then post the start comment on the requirement:
+Then post the start comment on the requirement:
 
 ```markdown
 Session started <date> on <repo>. Tasks in order: sv#T1 → sv#T2 → sv#T3. Holding: #T1,
@@ -138,15 +135,15 @@ comment is that question; the standup routine reads the labels, not this comment
 
 When the requirement ships a release, follow the hub developer guidelines' Releases
 section: the `NEWS.md` section, the demo page on the hub, the RC PR titled
-`{package} vX.Y.Z-RCn` against the release branch with one `Closes #N` line per issue shipped, @jwildfire requested as reviewer. Move the requirement's board status to
-Review (`b5cd3859`) when the RC opens. The ruleset holds it for his review; never merge it
+`{package} vX.Y.Z-RCn` against the release branch with one `Closes #N` line per issue shipped, @jwildfire requested as reviewer. Move the requirement's status label to review
+(`--add-label "status: review" --remove-label "status: in session"`) when the RC opens. The ruleset holds it for his review; never merge it
 yourself.
 
 ## 8. Finish
 
 When every task is closed and the requirement's definition of done is proven: post the
 closing comment on the requirement with the proof and the sentence, close it, move its
-board status to Released (`1db40a3a`), post one line on the objective naming the
+status label to released (`--add-label "status: released" --remove-label "status: review"`), post one line on the objective naming the
 requirement and the sentence, clear the goal
 (`/goal clear` if it has not cleared itself), and stop. Do not start the next
 requirement in the same session — it gets its own.
