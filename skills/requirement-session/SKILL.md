@@ -135,9 +135,20 @@ comment is that question; the standup routine reads the labels, not this comment
 
 When the requirement ships a release, follow the hub developer guidelines' Releases
 section: the `NEWS.md` section, the demo page on the hub, the RC PR titled
-`{package} vX.Y.Z-RCn` against the release branch with one `Closes #N` line per issue shipped, @jwildfire requested as reviewer. Move the requirement's status label to review
-(`--add-label "status: review" --remove-label "status: in session"`) when the RC opens. The ruleset holds it for his review; never merge it
-yourself.
+`{package} vX.Y.Z-RCn` against the release branch with one `Closes #N` line per issue
+shipped — opened as a draft. Then the ultrareview gate, before anyone asks @jwildfire:
+
+1. Run `claude ultrareview <PR#> --post` (or `/code-review ultra <PR#> --post` in the
+   session). It takes five to ten minutes and posts its verified findings on the PR as one
+   comment from the connected account.
+2. Resolve every finding: fix and push, or reply under the comment saying why it does not
+   apply. Nothing stays open.
+3. Only then: mark the RC ready for review, request @jwildfire, and move the requirement's
+   status label to review (`--add-label "status: review" --remove-label "status: in session"`).
+
+The ruleset holds it for his review; never merge it yourself. Ultrareview bills as usage
+credits after the free runs — one run per RC, re-run only after a change large enough to
+invalidate the first.
 
 ## 8. Finish
 

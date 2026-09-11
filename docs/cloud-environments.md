@@ -66,6 +66,13 @@ Run one throwaway session in each environment before a requirement session start
 3. `ls ~/obot.roadmap/docs ~/.claude/skills/requirement-session` — the standards and the skill
    are on disk.
 
+## Ultrareview
+
+Every release candidate gets an ultrareview before @jwildfire sees it (developer guidelines →
+Releases). It runs on Claude Code on the web from any session signed in to his claude.ai
+account, bills as usage credits after the free runs, and needs usage credits turned on for
+the account (`/usage-credits`). Nothing else to install.
+
 ## Idle and expiry
 
 A cloud session's VM is reclaimed after a period of inactivity. A session waiting on

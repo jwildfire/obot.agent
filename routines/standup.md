@@ -55,7 +55,8 @@ or write any local state other than the file you publish.
 
    ## Release candidates waiting on Jeremy
    - <repo>#N <title> — open <days> days
-   (open PRs whose title matches `{package} vX.Y.Z-RCn`, any of the repositories above)
+   (open, non-draft PRs whose title matches `{package} vX.Y.Z-RCn`, any of the repositories
+   above — a draft RC is still behind its ultrareview gate and is not waiting on him)
 
 4. Publish the file as `standup.md` on the `session-state` branch of
    jwildfire/obot.roadmap via the contents API (PUT /repos/jwildfire/obot.roadmap/
