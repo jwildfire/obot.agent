@@ -6,7 +6,11 @@ account of what a user can now do. The GitHub release publishes from the section
 here, copied verbatim, when the release is approved and tagged.
 -->
 
-# obot.agent v0.5.0 (Upcoming)
+# obot.agent v0.6.0 (Upcoming)
+
+- Nothing yet.
+
+# obot.agent v0.5.0
 
 **See it move:** [Requirement Sessions: the Mid-October Plan](https://jwildfire.github.io/obot.roadmap/reports/requirement-sessions-plan-2026-09-10/) — the operating model this release installs, and the five objectives it runs.
 
