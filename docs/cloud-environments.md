@@ -1,14 +1,14 @@
 # Cloud environments
 
-Every goal session is a [Claude Code cloud session](https://code.claude.com/docs/en/claude-code-on-the-web)
-bound to the repository where the goal's tasks live, running in a
+Every requirement session is a [Claude Code cloud session](https://code.claude.com/docs/en/claude-code-on-the-web)
+bound to the repository where the objective's tasks live, running in a
 [cloud environment](https://code.claude.com/docs/en/cloud-environments) configured at
 claude.ai/code. Nothing runs on a person's machine unattended, and nothing is bridged
 through Remote Control.
 
 ## The environments
 
-One per repository the goals touch. Each is created once in the environment selector at
+One per repository the objectives touch. Each is created once in the environment selector at
 claude.ai/code; the setup script is cached, so the toolchain installs once per
 environment version.
 
@@ -26,10 +26,10 @@ files and run the procedure as a skill:
 ```bash
 # Standards: the hub's docs, readable at ~/obot.roadmap/docs/
 git clone --depth 1 https://github.com/jwildfire/obot.roadmap.git "$HOME/obot.roadmap"
-# The goal-session skill, installed as a user skill
+# The requirement-session skill, installed as a user skill
 git clone --depth 1 https://github.com/jwildfire/obot.agent.git "$HOME/obot.agent"
 mkdir -p "$HOME/.claude/skills"
-ln -sfn "$HOME/obot.agent/skills/goal-session" "$HOME/.claude/skills/goal-session"
+ln -sfn "$HOME/obot.agent/skills/requirement-session" "$HOME/.claude/skills/requirement-session"
 ```
 
 Each repository's own `CLAUDE.md` stays short and points at the same three documents;
@@ -39,7 +39,7 @@ the block the hub's developer guidelines ask every repository to carry is:
 # Standards
 The obot program's standards are mandatory here: the issue contract, ways of working and
 developer guidelines in jwildfire/obot.roadmap `docs/` (on disk at ~/obot.roadmap/docs/
-in a cloud environment). Work runs as a goal session (`/goal-session <hub issue>`).
+in a cloud environment). Work runs one requirement per session (`/requirement-session <hub requirement>`).
 ```
 
 ## Credentials
@@ -54,7 +54,7 @@ in a cloud environment). Work runs as a goal session (`/goal-session <hub issue>
 
 ## Verify before depending on it
 
-Run one throwaway session in each environment before a goal session starts there:
+Run one throwaway session in each environment before a requirement session starts there:
 
 1. `/goal the file VERIFY.md exists in the repository root with today's date in it` —
    confirms the goal command arms in a cloud session and the evaluator sees the result.
@@ -63,7 +63,7 @@ Run one throwaway session in each environment before a goal session starts there
    — confirms R and the dependencies installed within the setup's limits. If they do
    not, the fallback is a routine that runs the R checks in GitHub Actions while the
    session edits, or a single local session for that lane only.
-3. `ls ~/obot.roadmap/docs ~/.claude/skills/goal-session` — the standards and the skill
+3. `ls ~/obot.roadmap/docs ~/.claude/skills/requirement-session` — the standards and the skill
    are on disk.
 
 ## Idle and expiry

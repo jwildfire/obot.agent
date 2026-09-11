@@ -1,18 +1,18 @@
 # AGENTS.md — obot.agent
 
 This repo is the core of the obot program's semi-autonomous approach and nothing else:
-the `goal-session` skill a working session runs, the standup routine that reports on
-every goal, and the cloud environments the sessions run in. It carries no standards of
+the `requirement-session` skill a working session runs, the standup routine that reports on
+every objective, and the cloud environments the sessions run in. It carries no standards of
 its own.
 
 IMPORTANT: the standards live in `jwildfire/obot.roadmap` and compliance with them is
 the job. Read these three before doing anything, every session:
 
 - [Issue contract](https://github.com/jwildfire/obot.roadmap/blob/main/docs/issue-contract.md)
-  — goals, requirements and tasks, definitions of done, labels, milestones, blocked,
+  — objectives, requirements and tasks, definitions of done, labels, milestones, blocked,
   closing.
 - [Ways of working](https://github.com/jwildfire/obot.roadmap/blob/main/docs/ways-of-working.md)
-  — goal sessions, what @jwildfire reviews, the standup, steering, releases.
+  — requirement sessions, what @jwildfire reviews, the standup, steering, releases.
 - [Developer guidelines](https://github.com/jwildfire/obot.roadmap/blob/main/docs/developer-guidelines.md)
   — branching, PRs, commits and attribution, testing, merging via rulesets, release
   candidates, artifacts and style.
@@ -24,33 +24,35 @@ on the task and carry on.
 
 ## Three rules
 
-1. Work from an issue tree, never from chat. A session starts from a goal issue whose
-   requirements and tasks exist, each with a definition of done and a milestone, signed
-   off by @jwildfire on the goal issue. If the tree is incomplete, file what is missing
-   under the issue contract and stop for his sign-off.
-2. Write progress where the work is. Comment on the goal issue at start and nightly
+1. Work from an issue tree, never from chat. A session runs one requirement, under an
+   objective whose requirements and tasks exist, each with a definition of done and a
+   milestone, signed off by @jwildfire on the objective issue. If the tree is incomplete,
+   file what is missing under the issue contract and stop for his sign-off.
+2. Write progress where the work is. Comment on the requirement at start and nightly
    (complete / in progress / blocked); close each task with the evidence its definition
-   of done asked for and one sentence saying what he can now do. A question for him goes
+   of done asked for and one sentence saying what he can now do; close the requirement
+   with its proof and one line on the objective. A question for him goes
    on the issue it blocks, with the `blocked` label — never into chat, never into a
    standup by any other route.
 3. Prove it in the transcript. Every task names a check the conversation can show — a
    test result, a build exit code, a deployed URL and what it displays — and the `/goal`
-   condition names how the session proves the tree's state at the end of every turn.
+   condition is the requirement's definition of done, with how the session proves its
+   tasks' state at the end of every turn.
 
 ## How a session uses Claude Code
 
 This follows [Claude Code's best practices](https://code.claude.com/docs/en/best-practices);
 the features below are the whole toolkit, and nothing here is bespoke.
 
-- One goal per session, as a [cloud session](https://code.claude.com/docs/en/claude-code-on-the-web)
-  bound to the repository where the goal's tasks live, in
+- One requirement per session, as a [cloud session](https://code.claude.com/docs/en/claude-code-on-the-web)
+  bound to the repository where the requirement's tasks live, in
   [auto mode](https://code.claude.com/docs/en/auto-mode-config) so tool calls need no
   prompts. Steering happens on claude.ai/code or the phone.
 - [`/goal`](https://code.claude.com/docs/en/goal) anchors the session: the condition is
-  generated from the tree (the skill has the template), a separate evaluator re-checks
-  it after every turn, and the session keeps working until the tree is closed or
-  blocked. The evaluator reads only the transcript — end every turn with the tree's
-  state.
+  the requirement's definition of done plus its tasks (the skill has the template), a
+  separate evaluator re-checks it after every turn, and the session keeps working until
+  the requirement is proven or blocked. The evaluator reads only the transcript — end
+  every turn with the tasks' state.
 - [Plan mode](https://code.claude.com/docs/en/permission-modes#analyze-before-you-edit-with-plan-mode)
   before touching code on a task: explore, propose, then implement against the plan.
 - [Subagents](https://code.claude.com/docs/en/sub-agents) for investigation and for
@@ -74,11 +76,10 @@ the features below are the whole toolkit, and nothing here is bespoke.
 
 ## Repository layout
 
-- [`skills/goal-session/SKILL.md`](skills/goal-session/SKILL.md) — the procedure from
-  the goal issue to its closing comment. Installed into a cloud environment by the setup
+- [`skills/requirement-session/SKILL.md`](skills/requirement-session/SKILL.md) — the procedure from the requirement issue to its closing comment. Installed into a cloud environment by the setup
   script; locally, symlink it into a workspace's `.claude/skills/`.
 - [`routines/standup.md`](routines/standup.md) — the scheduled routine's prompt: every
-  goal's complete / in progress / blocked counts and one question per blocked issue,
+  objective's complete / in progress / blocked counts and one question per blocked issue,
   rendered from GitHub, published to the hub's voice-readable `standup.md`.
 - [`docs/cloud-environments.md`](docs/cloud-environments.md) — the environments per
   repository, their setup scripts, credentials, and what to verify first.

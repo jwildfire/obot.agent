@@ -24,29 +24,30 @@ actor.
 You are rendering tonight's standup for the obot program. Read GitHub only; do not read
 or write any local state other than the file you publish.
 
-1. List open issues labelled `goal` on jwildfire/obot.roadmap. For each goal, walk its
-   sub-issues and theirs (GET /repos/{owner}/{repo}/issues/{n}/sub_issues, paginated,
-   across repositories). Count nodes closed, open without the `blocked` label, and
-   open with the `blocked` label. Read the goal's latest comment whose body starts with
-   "### Complete" and take its three sections verbatim.
+1. List open issues labelled `objective` on jwildfire/obot.roadmap. For each objective, walk
+   its requirements (its sub-issues) and their tasks (theirs) — GET
+   /repos/{owner}/{repo}/issues/{n}/sub_issues, paginated, across repositories. Count
+   nodes closed, open without the `blocked` label, and open with the `blocked` label. For
+   each requirement, read its latest comment whose body starts with "### Complete" and
+   take its three sections verbatim; roll them up under the objective.
 
 2. List every open issue labelled `blocked` across jwildfire/obot.roadmap,
    jwildfire/safety.viz, jwildfire/gsm.safety, jwildfire/open.csr,
    jwildfire/open.gismo and jwildfire/demo-301. For each, take the latest comment's
-   first paragraph as the question, and the goal it belongs to by walking parents.
+   first paragraph as the question, and the objective it belongs to by walking parents.
 
 3. Write standup.md, plain text, no markup beyond headings, in this shape:
 
    # Standup — <date>
 
-   ## Goals
-   ### <goal title> (#N) — <complete>/<in progress>/<blocked> of <total>
-   Complete: <the sentences from the nightly comment, one per line>
+   ## Objectives
+   ### <objective title> (#N) — <complete>/<in progress>/<blocked> of <total>
+   Complete: <the sentences from the requirements' nightly comments, one per line>
    In progress: <one per line>
    Blocked: <one per line, "#N — question">
 
    ## Questions for Jeremy
-   - <repo>#N (<goal title>): <the question, quoted>
+   - <repo>#N (<objective title>): <the question, quoted>
    (If no issue is blocked: "No open questions.")
 
    ## Release candidates waiting on Jeremy
@@ -64,7 +65,7 @@ or write any local state other than the file you publish.
 
 ## Why this shape
 
-@jwildfire, 2026-09-10: "standup should give a summary of which goals are
+@jwildfire, 2026-09-10: "standup should give a summary of which objectives are
 complete/in progress/blocked. All questions in standup should be tied to blocked
 issues." The daily check-in reads `standup.md` aloud in voice mode, so the file stays
 plain text with no client-side rendering, as it did under the retired publisher.

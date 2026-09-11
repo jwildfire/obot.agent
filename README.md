@@ -1,22 +1,22 @@
 # obot.agent
 
 The core of the obot program's semi-autonomous approach: the skill a working session
-runs, the routine that reports on every goal, and the cloud environments the sessions run
+runs, the routine that reports on every objective, and the cloud environments the sessions run
 in. Standards — the issue contract, ways of working and developer guidelines — live in
 [jwildfire/obot.roadmap](https://github.com/jwildfire/obot.roadmap/tree/main/docs), and
 [`AGENTS.md`](AGENTS.md) makes complying with them the first rule.
 
 ## How work runs
 
-Since 2026-09-10 the program runs as goal-based sessions: one clearly defined goal per
-session, running in the cloud for as long as the goal takes, steered by @jwildfire
-through the issues on the hub. The plan that installed the model and the five goals it
-runs is [Goal Sessions: the Mid-October Plan](https://jwildfire.github.io/obot.roadmap/reports/goal-sessions-plan-2026-09-10/).
+Since 2026-09-10 the program runs as requirement sessions: objectives broken into
+requirements and tasks with definitions of done, one requirement per cloud session,
+running as long as it takes, steered by @jwildfire through the issues on the hub. The plan that installed the model and the five objectives it
+runs is [Requirement Sessions: the Mid-October Plan](https://jwildfire.github.io/obot.roadmap/reports/requirement-sessions-plan-2026-09-10/).
 
 | What | Where |
 |---|---|
 | The rules a session follows | [`AGENTS.md`](AGENTS.md) — three rules, and how a session uses Claude Code |
-| The procedure from goal issue to closing comment | [`skills/goal-session/SKILL.md`](skills/goal-session/SKILL.md) |
+| The procedure from requirement issue to closing comment | [`skills/requirement-session/SKILL.md`](skills/requirement-session/SKILL.md) |
 | The nightly standup, rendered from GitHub | [`routines/standup.md`](routines/standup.md) |
 | Where sessions run and what installs there | [`docs/cloud-environments.md`](docs/cloud-environments.md) |
 | The issue contract, ways of working, developer guidelines | [obot.roadmap `docs/`](https://github.com/jwildfire/obot.roadmap/tree/main/docs) |
