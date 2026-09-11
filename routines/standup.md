@@ -28,8 +28,10 @@ or write any local state other than the file you publish.
    its requirements (its sub-issues) and their tasks (theirs) — GET
    /repos/{owner}/{repo}/issues/{n}/sub_issues, paginated, across repositories. Count
    nodes closed, open without the `blocked` label, and open with the `blocked` label. For
-   each requirement, read its latest comment whose body starts with "### Complete" and
-   take its three sections verbatim; roll them up under the objective.
+   each requirement, read its board status (projectItems → fieldValueByName "Status" on
+   project 1: Backlog, Ready, In session, Review, Released) and its latest comment whose
+   body starts with "### Complete"; take the three sections verbatim and roll them up
+   under the objective.
 
 2. List every open issue labelled `blocked` across jwildfire/obot.roadmap,
    jwildfire/safety.viz, jwildfire/gsm.safety, jwildfire/open.csr,
@@ -42,6 +44,7 @@ or write any local state other than the file you publish.
 
    ## Objectives
    ### <objective title> (#N) — <complete>/<in progress>/<blocked> of <total>
+   Requirements: #N <status>, #N <status>, …
    Complete: <the sentences from the requirements' nightly comments, one per line>
    In progress: <one per line>
    Blocked: <one per line, "#N — question">

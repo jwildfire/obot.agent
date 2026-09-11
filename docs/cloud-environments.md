@@ -12,11 +12,11 @@ One per repository the objectives touch. Each is created once in the environment
 claude.ai/code; the setup script is cached, so the toolchain installs once per
 environment version.
 
-| Environment | Repository | Setup script installs | Network |
-|---|---|---|---|
-| `safety.viz` | jwildfire/safety.viz | Node 24, `npm ci`, Playwright's Chromium, the standards and the skill (below) | trusted allowlist |
-| `gsm.safety` | jwildfire/gsm.safety | R, `pak`, the package's dependencies from `DESCRIPTION`, the pharmaverse data packages, the standards and the skill | trusted allowlist plus CRAN and the pharmaverse mirrors |
-| `obot.roadmap` | jwildfire/obot.roadmap | Node 24 for the site scripts, the skill | trusted allowlist |
+| Environment | Repository | Used for | Setup script installs | Network |
+|---|---|---|---|---|
+| `safety.viz` | jwildfire/safety.viz | execution sessions (Ready → In session → Review) | Node 24, `npm ci`, Playwright's Chromium, the standards and the skill (below) | trusted allowlist |
+| `gsm.safety` | jwildfire/gsm.safety | execution sessions | R, `pak`, the package's dependencies from `DESCRIPTION`, the pharmaverse data packages, the standards and the skill | trusted allowlist plus CRAN and the pharmaverse mirrors |
+| `obot.roadmap` | jwildfire/obot.roadmap | prep sessions (Backlog → Ready, with @jwildfire) — the hub's `requirement-*` skills are in the clone | Node 24 for the site scripts, the skill | trusted allowlist |
 
 ## The common tail of every setup script
 
