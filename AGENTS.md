@@ -1,171 +1,101 @@
-# AGENTS.md — obot overlay on the gsm.agent harness
+# AGENTS.md — obot.agent
 
-## Overlay contract
+This repo is the core of the obot program's semi-autonomous approach and nothing else:
+the `requirement-session` skill a working session runs, the standup routine that reports on
+every objective, and the cloud environments the sessions run in. It carries no standards of
+its own.
 
-This repo is an **overlay** on the
-[gsm.agent](https://github.com/Gilead-BioStats/gsm.agent) harness (cloned as `.github/`
-in the obot2 workspace). gsm.agent's AGENTS.md conventions — drafts, attribution,
-approval gates, worktrees, TDD — apply here **in full**. This file adds only the obot
-program layer; it does not restate what upstream owns, and where the two appear to
-conflict, upstream wins unless the divergence is documented explicitly. The two
-documented divergences are commit attribution mechanics — see
-[`skills/obot-identity/SKILL.md`](skills/obot-identity/SKILL.md) — and worktree
-location, below.
+IMPORTANT: the standards live in `jwildfire/obot.roadmap` and compliance with them is
+the job. Read these three before doing anything, every session:
 
-The tiers of agent execution used in this program (*session* / *spawned agent* /
-*subagent*) are defined in [`docs/terminology.md`](docs/terminology.md), and which tier may
-sit in the lead's response path is set by
-[`docs/session-framework.md`](docs/session-framework.md).
+- [Issue contract](https://github.com/jwildfire/obot.roadmap/blob/main/docs/issue-contract.md)
+  — objectives, requirements and tasks, definitions of done, labels, milestones, blocked,
+  closing.
+- [Ways of working](https://github.com/jwildfire/obot.roadmap/blob/main/docs/ways-of-working.md)
+  — requirement sessions, what @jwildfire reviews, the standup, steering, releases.
+- [Developer guidelines](https://github.com/jwildfire/obot.roadmap/blob/main/docs/developer-guidelines.md)
+  — branching, PRs, commits and attribution, testing, merging via rulesets, release
+  candidates, artifacts and style.
 
-## Session framework: responsiveness
+In a cloud environment they are also on disk at `~/obot.roadmap/docs/` (the setup script
+clones the hub — [`docs/cloud-environments.md`](docs/cloud-environments.md)). Where a
+repository's own `CLAUDE.md` and these documents disagree, the hub documents win; say so
+on the task and carry on.
 
-- The session bookends and every chat reply answer to a responsiveness contract —
-  SLAs, the round-trip budget, the delegation rule, first-paint and revision handling,
-  and the declared exemptions. [`docs/session-framework.md`](docs/session-framework.md)
-  is that contract and the sole authority for it (@jwildfire's live mandate, 2026-08-01).
-- Read it before touching any session skill, command file, or briefing template. This
-  file deliberately does not restate its clauses, so there is only ever one copy to keep
-  current.
+## Three rules
 
-## Worktree location (documented divergence)
+1. Work from an issue tree, never from chat. A session runs one requirement, under an
+   objective whose requirements and tasks exist, each with a definition of done and a
+   milestone, signed off by @jwildfire on the objective issue. If the tree is incomplete,
+   file what is missing under the issue contract and stop for his sign-off.
+2. Write progress where the work is. Comment on the requirement at start and nightly
+   (complete / in progress / blocked); close each task with the evidence its definition
+   of done asked for and one sentence saying what he can now do; close the requirement
+   with its proof and one line on the objective. A question for him goes
+   on the issue it blocks, with the `blocked` label — never into chat, never into a
+   standup by any other route.
+3. Prove it in the transcript. Every task names a check the conversation can show — a
+   test result, a build exit code, a deployed URL and what it displays — and the `/goal`
+   condition is the requirement's definition of done, with how the session proves its
+   tasks' state at the end of every turn.
 
-Upstream's Parallel Worktree Convention places linked worktrees in a sibling
-`../{repo}-worktrees/` directory. In this program, place them **inside the repo** at
-`{repo}/.claude/worktrees/{branch}` instead:
+## How a session uses Claude Code
 
-```bash
-# From the repo root; base off the repo's integration branch as upstream directs
-git fetch origin
-git worktree add .claude/worktrees/{branch} -b {branch} origin/{base}
-# Once per repo, keep git status clean (covers all current and future worktrees):
-grep -qxF '.claude/worktrees/' .git/info/exclude 2>/dev/null || echo '.claude/worktrees/' >> .git/info/exclude
-```
+This follows [Claude Code's best practices](https://code.claude.com/docs/en/best-practices);
+the features below are the whole toolkit, and nothing here is bespoke.
 
-**Why:** Claude Code auto-approves worktrees under `.claude/worktrees/` and treats any
-other location as a "permission-root relocation" that requires a manual click from
-@jwildfire — which stalls every unattended session that isolates work the upstream way.
-**Never call the EnterWorktree tool in the obot2 workspace** (@jwildfire, 2026-08-04:
-"i really don't want you to prompt me to enter worktrees. just do it."). The workspace
-root is not a git repository, so the tool surfaces a permission prompt and then fails
-anyway with "current directory is not in a git repository". The scripted commands above
-are the only lane — interactive sessions, scripted lanes, and spawned agents alike. Work
-the worktree through absolute paths into it rather than switching the session into it,
-and never tell a spawned agent or ultracode job to use EnterWorktree here.
+- One requirement per session, as a [cloud session](https://code.claude.com/docs/en/claude-code-on-the-web)
+  bound to the repository where the requirement's tasks live, in
+  [auto mode](https://code.claude.com/docs/en/auto-mode-config) so tool calls need no
+  prompts. Steering happens on claude.ai/code or the phone.
+- [`/goal`](https://code.claude.com/docs/en/goal) anchors the session: the condition is
+  the requirement's definition of done plus its tasks (the skill has the template), a
+  separate evaluator re-checks it after every turn, and the session keeps working until
+  the requirement is proven or blocked. The evaluator reads only the transcript — end
+  every turn with the tasks' state.
+- [Plan mode](https://code.claude.com/docs/en/permission-modes#analyze-before-you-edit-with-plan-mode)
+  before touching code on a task: explore, propose, then implement against the plan.
+- [Subagents](https://code.claude.com/docs/en/sub-agents) for investigation and for
+  verification — a fresh context reads the codebase or tries to refute a result, and
+  the main conversation stays on the implementation. The
+  [Workflow tool](https://code.claude.com/docs/en/workflows) (ultracode) for multi-stage
+  fan-out when @jwildfire has opted in; [Claude Design](https://code.claude.com/docs/en/design)
+  (ultradesign) for visual design. Every brief names its task issue.
+- [Skills](https://code.claude.com/docs/en/skills) for procedures, `CLAUDE.md` for the
+  few rules that apply to every conversation in a repository — short, with `@` imports
+  where a document is worth loading — and [hooks](https://code.claude.com/docs/en/hooks-guide)
+  only for deterministic gates that must happen every time. Nothing here adds a hook.
+- [Routines](https://code.claude.com/docs/en/routines) for anything that runs on a
+  schedule; the standup is one. No launchd, no cron, no background process on a
+  person's machine.
+- Manage context: `/context` to see what loaded, `/compact` with a note on what to
+  preserve when the window fills, subagents so research does not consume the main
+  window.
+- Course-correct early: a wrong direction costs less at the first turn than at the
+  tenth. Rewind with checkpoints rather than patching over a bad path.
 
-Everything else in the upstream convention still applies: one branch per worktree, all
-commands run from inside the worktree, push and `gh pr create` from the worktree, and
-cleanup after merge (`git worktree remove .claude/worktrees/{branch}` from the repo
-root, then delete the branch). Do not remove other agents' in-flight worktrees, in
-either layout. Repo-wide searches from the main checkout may want
-`--exclude-dir=.claude` now that worktrees live inside the repo.
+## Repository layout
 
-## Mission
+- [`skills/requirement-session/SKILL.md`](skills/requirement-session/SKILL.md) — the procedure from the requirement issue to its closing comment. Installed into a cloud environment by the setup
+  script; locally, symlink it into a workspace's `.claude/skills/`.
+- [`routines/standup.md`](routines/standup.md) — the scheduled routine's prompt: every
+  objective's complete / in progress / blocked counts and one question per blocked issue,
+  rendered from GitHub, published to the hub's voice-readable `standup.md`.
+- [`docs/cloud-environments.md`](docs/cloud-environments.md) — the environments per
+  repository, their setup scripts, credentials, and what to verify first.
+- [`NEWS.md`](NEWS.md) — the running release log; the current section is the next
+  release's notes.
 
-Modernize SafetyGraphics JavaScript renderers with a GxP-oriented engineering discipline. Preserve clinically relevant behavior, replace legacy dependencies deliberately, and build a testable foundation for interactive and static safety displays.
+## Identity and attribution
 
-## Non-negotiables
+The actor is the connected GitHub account of the session. Authorship is on the object:
+the drafted-by line after a `---` rule at the foot of every issue, PR and comment, and
+the `Co-Authored-By` trailer the harness supplies on every commit. Say @jwildfire
+reviewed something only when he did. Full rules: the hub's developer guidelines.
 
-- Treat upstream wiki pages, settings schemas, examples, and regression tests as requirements sources.
-- Do not start a rendering rewrite before producing a requirements matrix for the feature area being changed.
-- Do not remove behavior because it is awkward to implement in Chart.js; document the requirement and propose a replacement or justified de-scope.
-- Preserve backward-compatible data mappings unless Jeremy explicitly approves a breaking API change.
-- Every migration PR must state which requirements it covers and which tests provide evidence.
-- Do not start work on an issue that carries no milestone — see [Milestone before work](#milestone-before-work).
-- Do not claim GxP validation. Use language like "GxP-oriented", "qualification-ready evidence", or "traceability support" unless a formal validation process exists.
+## What came before
 
-## Reference architecture
-
-Use gsm.viz as the reference implementation for nextgen JavaScript renderer architecture: ES modules, Chart.js, data schemas, `checkInputs()` -> `configure()` -> `structureData()` -> Chart.js render flow, Jest/jsdom/canvas tests, and static examples. See `docs/gsm-viz-reference.md`.
-
-## Stakeholder interviews
-
-Use `skills/stakeholder-interview/SKILL.md` for any Jeremy input needed through Telegram — architecture, prioritization, API design, validation strategy, review questions, and process decisions, not only requirements. Capture answers in `interviews/` and propagate decisions into the relevant durable artifacts.
-
-## Required artifacts per renderer
-
-- `requirements/<renderer>.md` in [safety.viz](https://github.com/jwildfire/safety.viz/tree/HEAD/requirements) — the requirement matrix (moved out of this repo in obot.roadmap#64)
-- requirement-keyed tests and the published evidence page in safety.viz
-- `docs/design/<renderer>-migration-plan.md`
-- baseline example fixture(s)
-- automated test plan
-- PR checklist with requirement IDs
-
-## Testing expectations
-
-Minimum test layers:
-
-1. **Schema tests** - settings and data mapping validation.
-2. **Pure function tests** - data preparation, binning, statistics, domain calculations.
-3. **Renderer integration tests** - DOM/canvas creation, lifecycle, settings updates.
-4. **Browser behavior tests** - controls, filtering, hover/click, listing, warnings.
-5. **Visual regression tests** - stable screenshots where feasible.
-6. **Requirements traceability tests** - every harvested requirement maps to test evidence or a documented manual review.
-
-This is the project-level test-first discipline for JS renderer work, used alongside the
-upstream [`tdd`](https://github.com/Gilead-BioStats/gsm.agent/blob/main/skills/tdd/SKILL.md)
-skill; how the two relate will be settled when gsm.agent's Q3 skills-library work lands
-(D1, deferred 2026-07-11).
-
-## Milestone before work
-
-**No work starts on an issue until a milestone is assigned** (@jwildfire, 2026-08-14).
-The milestone belongs to *picking the issue up* — it goes on before the branch, not at
-close-out.
-
-- **Selecting work.** An issue with no milestone is not pickable. Assign one first,
-  creating the release's milestone if it does not exist yet, or say plainly why the issue
-  belongs to no release and pick something else. The `--auto` selection criteria in
-  [`skills/session-init/SKILL.md`](skills/session-init/SKILL.md) carry this as an
-  eligibility check, and it is the earliest place the rule bites.
-- **Both halves are required, not either.** The **milestone groups** the release; the
-  **`Closes #N` keyword closes** the issue. `Closes` lines with no milestone ship work no
-  release accounts for; a milestone with no `Closes` lines leaves shipped issues open.
-- **Every RC PR body names the issues its release ships**, one `Closes #N` line each, even
-  when increment PRs already closed them — the RC body is the release's manifest.
-- **The milestone records the release that shipped the work**, not the wave that scoped it.
-  When an issue slips a release, move its milestone forward at ship time rather than
-  leaving the scoping wave's version on it.
-- Enforced mechanically by [`scripts/obot-merge`](scripts/obot-merge), which refuses a
-  merge whose `Closes` target carries no milestone and a release-role merge whose body
-  names no issue. `--no-milestone '<reason>'` and `--no-issues '<reason>'` are the escape
-  hatches; each wants a real reason, and neither is a substitute for assigning the
-  milestone.
-
-**Why this exists.** safety.viz v1.6.0 (2026-08-14) shipped four delivered issues and
-grouped none of them: no `v1.6.0` milestone existed, three of the issues still carried
-`v1.2.0` from the wave that scoped them, and the RC PR body carried no `Closes` lines. The
-release's own record had to be reconstructed from the diff the same night.
-
-## Branching and release model (safety.viz only)
-
-This model applies to **safety.viz and nothing else** — it is not an ecosystem default.
-For every other repo, follow the upstream rule: do not assume `dev`/`main`; check the
-repo's actual branch model. Established 2026-07-08 alongside the documentation-site design
-([obot.roadmap#21](https://github.com/jwildfire/obot.roadmap/issues/21),
-[design doc](https://jwildfire.github.io/obot.roadmap/requirements/design/21_design.html)):
-
-- **`dev` is the integration branch** — feature-branch PRs target `dev`.
-- **Releases are PRs from `dev` → `main`.** `main` is protected: PR required, the
-  "Build, format, and test" check must pass, no force pushes or deletions.
-- **The documentation site builds three tiers** from the `gh-pages` branch:
-  the site root from `main` (releases), `/dev/` from `dev` (integration preview),
-  and `/pr/{N}/` per open PR (removed on close).
-- **Definition of done:** a renderer module is not done — and its migration
-  requirement is not Released — until its site entry is complete: gallery demo,
-  test-evidence page (requirements → tests → screenshots), and API reference.
-
-## Preferred migration sequence
-
-1. Baseline and document current behavior.
-2. Add tests around pure logic and critical browser behavior.
-3. Extract data/state modules away from Webcharts lifecycle.
-4. Introduce a new renderer API with a compatibility shim.
-5. Replace Webcharts rendering with Chart.js or targeted custom rendering.
-6. Retire compatibility code only after review.
-
-## Repository write policy
-
-All active repos live under the `jwildfire` account; agent-authored commits, pushes,
-and PRs come from `obotclaw[bot]` per `skills/obot-identity/SKILL.md`. Future transfer
-to `SafetyGraphics` should happen only after repository scope, naming, permissions,
-and governance are clear.
+Until 2026-09-10 this repo carried a fully autonomous multi-agent prototype — navigator,
+admiral and prime sessions, a dispatcher, session bookends, dashboards, journals, a merge
+policy script and a bot identity. It was retired in v0.5.0 because it spent its effort on
+itself; [`NEWS.md`](NEWS.md) has the readout and the v0.4.0 tag has the code.
