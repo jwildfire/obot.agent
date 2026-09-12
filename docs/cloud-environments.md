@@ -79,3 +79,9 @@ A cloud session's VM is reclaimed after a period of inactivity. A session waitin
 @jwildfire idles; the question it is waiting on is on the blocked issue, so nothing is
 lost — the next session reads it there. `/goal` survives a resume, so a reclaimed session
 picked up again continues toward the same condition.
+
+The one thing that is lost with the container is its transcript store, the only record
+of what the session cost. The session publishes that itself, at its nightly comment and
+at close (`requirement-session` §6 and §8), by running the hub's
+`scripts/usage/publish_session_usage.sh`; the analytics page's Cost section carries
+cloud sessions only through that step.
