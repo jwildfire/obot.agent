@@ -112,7 +112,23 @@ State of requirement #<requirement>:
 
 ## 6. The nightly comment
 
-Once a day, and before the session stops for any reason, post on the requirement:
+Once a day, and before the session stops for any reason, first publish the session's
+own usage, then post on the requirement.
+
+The usage: this container's transcripts are the only record of what the session
+cost, and they vanish with the container. Run, from the repository checkout,
+
+```sh
+bash ~/obot.roadmap/scripts/usage/publish_session_usage.sh
+```
+
+which aggregates them and commits one fragment to `usage/sessions/` on the hub's
+`session-state` branch; the nightly site deploy merges it into the analytics page's
+Cost section (hub `scripts/usage/README.md`). Re-running overwrites the session's own
+fragment, so it never double-counts. A failed push is not a blocker — say so in the
+comment's In progress section and move on.
+
+The comment:
 
 ```markdown
 ### Complete
@@ -152,7 +168,8 @@ invalidate the first.
 
 ## 8. Finish
 
-When every task is closed and the requirement's definition of done is proven: post the
+When every task is closed and the requirement's definition of done is proven: publish
+the session's usage once more (the command in §6), post the
 closing comment on the requirement with the proof and the sentence, close it, move its
 status label to released (`--add-label "status: released" --remove-label "status: review"`), post one line on the objective naming the
 requirement and the sentence, clear the goal

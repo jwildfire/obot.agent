@@ -8,7 +8,7 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.6.0 (Upcoming)
 
-- Nothing yet.
+- **A session reports what it cost.** At its nightly comment and at close, a requirement session runs the hub's `scripts/usage/publish_session_usage.sh`, which aggregates the container's transcripts and commits one fragment to the hub's `session-state` branch; the analytics page's Cost section merges every fragment nightly, so cloud sessions appear on it for the first time.
 
 # obot.agent v0.5.0
 
