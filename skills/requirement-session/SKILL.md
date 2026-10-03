@@ -152,19 +152,26 @@ comment is that question; the standup routine reads the labels, not this comment
 When the requirement ships a release, follow the hub developer guidelines' Releases
 section: the `NEWS.md` section, the demo page on the hub, the RC PR titled
 `{package} vX.Y.Z-RCn` against the release branch with one `Closes #N` line per issue
-shipped — opened as a draft. Then the ultrareview gate, before anyone asks @jwildfire:
+shipped — opened as a draft. Then the review gate, before anyone asks @jwildfire (the
+guidelines' Releases section is the authority on its dimensions and comment shape):
 
-1. Run `claude ultrareview <PR#> --post` (or `/code-review ultra <PR#> --post` in the
-   session). It takes five to ten minutes and posts its verified findings on the PR as one
-   comment from the connected account.
-2. Resolve every finding: fix and push, or reply under the comment saying why it does not
-   apply. Nothing stays open.
-3. Only then: mark the RC ready for review, request @jwildfire, and move the requirement's
+1. Spawn three review subagents in parallel, one per dimension: correctness; the
+   definition of done and its proof; the hard rules (no statistical inference in
+   JavaScript, public or synthetic data only, the release-notes shape). Brief each with
+   the diff (`gh pr diff <PR#>`), the PR body, and the issues it closes with their
+   definitions of done — not your own verification conclusions. They are read-only: no
+   edits, commits, pushes or comments; each returns its findings with file, line and how
+   to see it.
+2. Verify every finding against the code before acting on it — reproduce it, or show why
+   it does not hold. Then fix and push, or answer it with the reason it does not apply.
+   Nothing stays open.
+3. Post the review and its resolution on the PR as one comment, in the guidelines' shape.
+4. Only then: mark the RC ready for review, request @jwildfire, and move the requirement's
    status label to review (`--add-label "status: review" --remove-label "status: in session"`).
 
-The ruleset holds it for his review; never merge it yourself. Ultrareview bills as usage
-credits after the free runs — one run per RC, re-run only after a change large enough to
-invalidate the first.
+The ruleset holds it for his review; never merge it yourself. A re-review is owed when
+the head changes after the review by anything other than the fixes for its findings, and
+for every new `-RCn`; it covers the diff since the reviewed commit.
 
 ## 8. Finish
 

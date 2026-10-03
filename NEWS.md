@@ -9,6 +9,7 @@ here, copied verbatim, when the release is approved and tagged.
 # obot.agent v0.6.0 (Upcoming)
 
 - **A session reports what it cost.** At its nightly comment and at close, a requirement session runs the hub's `scripts/usage/publish_session_usage.sh`, which aggregates the container's transcripts and commits one fragment to the hub's `session-state` branch; the analytics page's Cost section merges every fragment nightly, so cloud sessions appear on it for the first time.
+- **A release candidate is reviewed by subagents the session spawns itself.** Step 7 of the [`requirement-session`](skills/requirement-session/SKILL.md) skill no longer runs ultrareview, which only a person can launch: the session spawns three read-only reviewers (correctness, the definition of done and its proof, the hard rules), verifies each finding, fixes it or answers why it does not apply, and posts the review and its resolution on the PR as one comment before marking the candidate ready.
 
 # obot.agent v0.5.0
 
