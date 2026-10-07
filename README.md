@@ -17,6 +17,7 @@ runs is [Requirement Sessions: the Mid-October Plan](https://jwildfire.github.io
 |---|---|
 | The rules a session follows | [`AGENTS.md`](AGENTS.md) — three rules, and how a session uses Claude Code |
 | The procedure from requirement issue to closing comment | [`skills/requirement-session/SKILL.md`](skills/requirement-session/SKILL.md) |
+| How to write release notes short, and the checker that holds them to it | [`skills/release-notes/SKILL.md`](skills/release-notes/SKILL.md) |
 | The nightly standup, rendered from GitHub | [`routines/standup.md`](routines/standup.md) |
 | Where sessions run and what installs there | [`docs/cloud-environments.md`](docs/cloud-environments.md) |
 | The issue contract, ways of working, developer guidelines | [obot.roadmap `docs/`](https://github.com/jwildfire/obot.roadmap/tree/main/docs) |

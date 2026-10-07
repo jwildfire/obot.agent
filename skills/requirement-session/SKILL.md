@@ -150,7 +150,9 @@ comment is that question; the standup routine reads the labels, not this comment
 ## 7. Releases
 
 When the requirement ships a release, follow the hub developer guidelines' Releases
-section: the `NEWS.md` section, the demo page on the hub, the RC PR titled
+section: the `NEWS.md` section, written with the [`release-notes`](../release-notes/SKILL.md)
+skill and passing its checker (`node ~/obot.agent/skills/release-notes/check-notes.mjs NEWS.md`),
+the demo page on the hub, which carries the detail the notes leave out, the RC PR titled
 `{package} vX.Y.Z-RCn` against the release branch with one `Closes #N` line per issue
 shipped — opened as a draft. Then the review gate, before anyone asks @jwildfire (the
 guidelines' Releases section is the authority on its dimensions and comment shape):
