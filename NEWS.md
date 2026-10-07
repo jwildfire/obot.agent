@@ -1,6 +1,6 @@
 <!--
 NEWS.md is the running release log and the draft of each release's notes.
-Shape (per skills/rc-release-notes/SKILL.md): newest release first; every release
+Shape (per skills/release-notes/SKILL.md): newest release first; every release
 section opens with its demo-artifact link, then a text-only, functionality-first
 account of what a user can now do. The GitHub release publishes from the section
 here, copied verbatim, when the release is approved and tagged.
@@ -8,6 +8,7 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.6.0 (Upcoming)
 
+- **Release notes are held to a length.** The [`release-notes`](skills/release-notes/SKILL.md) skill gives the shape, taken from safety.viz v1.9.1, and what moves to the demo page; its checker fails a section over 600 words or a bullet over its limit. @jwildfire, 2026-10-06: "Release notes are way too wordy."
 - **A session reports what it cost.** At its nightly comment and at close, a requirement session runs the hub's `scripts/usage/publish_session_usage.sh`, which aggregates the container's transcripts and commits one fragment to the hub's `session-state` branch; the analytics page's Cost section merges every fragment nightly, so cloud sessions appear on it for the first time.
 - **A release candidate is reviewed by subagents the session spawns itself.** Step 7 of the [`requirement-session`](skills/requirement-session/SKILL.md) skill no longer runs ultrareview, which only a person can launch: the session spawns three read-only reviewers (correctness, the definition of done and its proof, the hard rules), verifies each finding, fixes it or answers why it does not apply, and posts the review and its resolution on the PR as one comment before marking the candidate ready.
 

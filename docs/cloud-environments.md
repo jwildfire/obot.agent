@@ -20,16 +20,18 @@ environment version.
 
 ## The common tail of every setup script
 
-The standards and the skill are cloned into the sandbox so a session can read them as
-files and run the procedure as a skill:
+The standards and the skills are cloned into the sandbox so a session can read them as
+files and run each procedure as a skill:
 
 ```bash
 # Standards: the hub's docs, readable at ~/obot.roadmap/docs/
 git clone --depth 1 https://github.com/jwildfire/obot.roadmap.git "$HOME/obot.roadmap"
-# The requirement-session skill, installed as a user skill
+# The skills, installed as user skills: requirement-session and release-notes
 git clone --depth 1 https://github.com/jwildfire/obot.agent.git "$HOME/obot.agent"
 mkdir -p "$HOME/.claude/skills"
-ln -sfn "$HOME/obot.agent/skills/requirement-session" "$HOME/.claude/skills/requirement-session"
+for skill in "$HOME"/obot.agent/skills/*/; do
+  ln -sfn "${skill%/}" "$HOME/.claude/skills/$(basename "$skill")"
+done
 ```
 
 Each repository's own `CLAUDE.md` stays short and points at the same three documents;
@@ -63,7 +65,7 @@ Run one throwaway session in each environment before a requirement session start
    — confirms R and the dependencies installed within the setup's limits. If they do
    not, the fallback is a routine that runs the R checks in GitHub Actions while the
    session edits, or a single local session for that lane only.
-3. `ls ~/obot.roadmap/docs ~/.claude/skills/requirement-session` — the standards and the skill
+3. `ls ~/obot.roadmap/docs ~/.claude/skills/requirement-session ~/.claude/skills/release-notes` — the standards and the skills
    are on disk.
 
 ## Release-candidate review
