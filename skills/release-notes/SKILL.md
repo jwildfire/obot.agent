@@ -110,6 +110,8 @@ does, add it there first: a detail is moved, never dropped.
 
    It prints the section's word count and each part over its limit, and exits 1 until
    there is none. Give it a version as a second argument to check an older section.
+   An `(Upcoming)` section with no change in it yet has nothing to check, and passes.
+   Its own tests: `node --test check-notes.test.mjs`, beside it.
 7. Check every link in the section answers, and that the demo page carries each detail
    that was cut.
 8. Read it once as someone who has never seen the repository. Whatever they would skip,

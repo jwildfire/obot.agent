@@ -5,11 +5,15 @@
 //   node check-notes.mjs path/to/NEWS.md            # the first (newest) section
 //   node check-notes.mjs path/to/NEWS.md v1.9.1     # the section for that version
 //
+// An "(Upcoming)" section with no change in it yet has nothing to check and
+// passes: every NEWS.md reads that way just after a release.
+//
 // Words are counted as a reader meets them: a link counts as its text, not its
 // address, and the issue and pull-request links that close a bullet are not
 // counted at all. Exit code 1 when a limit is passed, 2 when the file or the
 // section cannot be read.
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export const LIMITS = {
   section: 600, // every counted word of the section
@@ -40,10 +44,24 @@ export function words(text) {
 export function sectionOf(news, version) {
   const lines = news.replace(/<!--[\s\S]*?-->/g, '').split('\n');
   const starts = lines.map((line, i) => (/^# \S/.test(line) ? i : -1)).filter((i) => i >= 0);
-  const at = version ? starts.find((i) => lines[i].includes(version)) : starts[0];
+  // A version names the section whose heading carries exactly that version,
+  // with or without its "v": "v0.3.0" is not the section "v0.3.0.9000".
+  const bare = (word) => word.replace(/^v/, '');
+  const at = version
+    ? starts.find((i) => lines[i].split(/\s+/).some((word) => bare(word) === bare(version)))
+    : starts[0];
   if (at === undefined) return null;
   const next = starts.find((i) => i > at);
   return lines.slice(at, next === undefined ? lines.length : next);
+}
+
+// Whether a section is one still collecting changes with none in it yet: an
+// "(Upcoming)" heading with no bullet and no heading under it, only nothing or
+// a sentence saying so. The first change to land brings a bullet, and from
+// then on the section is checked.
+export function isEmpty(lines) {
+  if (!/\(Upcoming\)\s*$/.test(lines[0])) return false;
+  return !lines.slice(1).some((line) => /^(- |## |\*\*See it move:\*\*)/.test(line));
 }
 
 export function check(lines) {
@@ -112,7 +130,17 @@ export function check(lines) {
   return { total, problems };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Started as a command, by this file's own path or by a link to it: a skill is
+// linked into a session's skills directory, so the two usually differ.
+function startedDirectly() {
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (startedDirectly()) {
   const [file, version] = process.argv.slice(2);
   if (!file) {
     console.error('usage: node check-notes.mjs path/to/NEWS.md [version]');
@@ -129,6 +157,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (!lines) {
     console.error(`no section${version ? ` for ${version}` : ''} in ${file}`);
     process.exit(2);
+  }
+  if (isEmpty(lines)) {
+    console.log(`${lines[0].replace(/^# /, '')}: nothing merged yet, so there is nothing to check.`);
+    process.exit(0);
   }
   const { total, problems } = check(lines);
   console.log(`${lines[0].replace(/^# /, '')}: ${total} words (limit ${LIMITS.section})`);
