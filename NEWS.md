@@ -8,13 +8,26 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.6.0 (Upcoming)
 
-- **Four findings from a security review are fixed.** The release-notes checker no longer hangs on a line that ends in many links and one more word. A session checks who wrote an objective's sign-off from GitHub's record, not from the comment's words. The standup reads only comments from @jwildfire and the bot. The cloud setup installs the two skills from `stable`, by name. [#344](https://github.com/jwildfire/obot.agent/issues/344)
-- **Sessions run locally and write as the bot.** From 2026-10-07 a session runs from @jwildfire's workspace and authors its issues, pull requests and merges as obotclaw[bot]; cloud sessions are parked, and [the cloud page](docs/cloud-environments.md) says why. The skill, `AGENTS.md` and the README describe a session as it now runs. [#344](https://github.com/jwildfire/obot.agent/issues/344), [#346](https://github.com/jwildfire/obot.agent/issues/346)
-- **The checker's word total is right for a flat list.** A section with no headings was totalled by its first bullet alone. [#346](https://github.com/jwildfire/obot.agent/issues/346)
-- **Release notes are held to a length.** The [`release-notes`](skills/release-notes/SKILL.md) skill gives the shape, taken from safety.viz v1.9.1, and what moves to the demo page; its checker fails a section over 600 words or a bullet over its limit. @jwildfire, 2026-10-06: "Release notes are way too wordy."
-- **The release-notes checker checks when it is started through a link.** A session's skills are linked into its skills directory, and started that way the checker printed nothing and exited as if the notes had passed. It also read the wrong section for a version that another version starts with, and failed a section with nothing merged yet. All three are fixed, and the checker has tests. @jwildfire, 2026-10-07: "open the checker pr".
-- **A session reports what it cost.** At its nightly comment and at close, a requirement session runs the hub's `scripts/usage/publish_session_usage.sh`, which aggregates the container's transcripts and commits one fragment to the hub's `session-state` branch; the analytics page's Cost section merges every fragment nightly, so cloud sessions appear on it for the first time.
-- **A release candidate is reviewed by subagents the session spawns itself.** Step 7 of the [`requirement-session`](skills/requirement-session/SKILL.md) skill no longer runs ultrareview, which only a person can launch: the session spawns three read-only reviewers (correctness, the definition of done and its proof, the hard rules), verifies each finding, fixes it or answers why it does not apply, and posts the review and its resolution on the PR as one comment before marking the candidate ready.
+**See it move:** the [annotated v0.6.0 demo](https://jwildfire.github.io/obot.roadmap/reports/oa-v0.6-hub-v0.5-demo/) has captures, try-it steps and the detail behind everything below.
+
+A change of where sessions run, and the fixes from a security review. Since 2026-10-07 a session runs on @jwildfire's own machines and writes to GitHub as obotclaw[bot]; cloud sessions, which v0.5.0 introduced, are parked. The cloud setup script and the step that published a cloud session's cost no longer apply. Nothing else a session does changes.
+
+## What's new
+
+- **A session runs locally and writes to GitHub as the bot.** It starts from @jwildfire's workspace and authors its issues, pull requests and merges as obotclaw[bot], never as him. Approving a pull request, merging past a ruleset and changing a ruleset stay his alone. [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **Release notes are held to a length.** The [`release-notes`](skills/release-notes/SKILL.md) skill gives the shape and says what moves to the demo page; its checker fails a section over 600 words or a bullet over its limit. PR [#341](https://github.com/jwildfire/obot.agent/pull/341)
+- **A release candidate is reviewed by three subagents the session spawns.** One reads for correctness, one for the definition of done and its proof, one for the hard rules. The session resolves every finding and posts the review on the pull request before @jwildfire is asked. PR [#340](https://github.com/jwildfire/obot.agent/pull/340)
+- **A session checks who wrote a sign-off.** It takes the author of an objective's sign-off from GitHub's record of the comment, not from the comment's words, and the standup reads only comments from @jwildfire and the bot. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#345](https://github.com/jwildfire/obot.agent/pull/345)
+
+## Also in this release
+
+- **The release-notes checker cannot be hung, and its count is right.** A line ending in many links and one more word no longer stalls it, a flat list is totalled bullet by bullet, and started through a link it checks instead of passing in silence. [#344](https://github.com/jwildfire/obot.agent/issues/344), [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#343](https://github.com/jwildfire/obot.agent/pull/343), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **Cloud sessions are parked, and their page is kept.** Its setup script now installs the two skills from `stable`, by name. The step in which a session published its own cost, added earlier in this cycle, is removed with them. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#339](https://github.com/jwildfire/obot.agent/pull/339), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **The standup says it is not scheduled.** Its published file is still the placeholder of 2026-09-11. [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+
+## Tests and provenance
+
+11 checker tests pass (`node --test skills/release-notes/check-notes.test.mjs`). Each security finding fixed here was reproduced before its fix. The bot's token and the guard that enforces the first bullet are tooling of @jwildfire's workspace and are in no repository.
 
 # obot.agent v0.5.0
 
