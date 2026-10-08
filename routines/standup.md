@@ -1,6 +1,6 @@
 # Standup routine
 
-The nightly standup is a scheduled Claude Code cloud routine
+The nightly standup is written to run as a scheduled Claude Code cloud routine
 ([docs](https://code.claude.com/docs/en/routines)) on the `jwildfire/obot.roadmap`
 repository. It reads GitHub and nothing else, and it asks nothing that is not a blocked
 issue.

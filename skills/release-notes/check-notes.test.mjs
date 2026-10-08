@@ -151,3 +151,95 @@ test('found in use: a flat list with no headings is totalled bullet by bullet, n
   assert.equal(check(sectionOf(news)).total, 11 + 21 + 31);
 });
 
+// --- found by the release review of v0.6.0-RC1 (2026-10-07) ---------------------
+// A reviewer switched each limit off in a copy of the checker and every test still
+// passed. Each test below fails when the rule it names is removed.
+const bullet = (n, claim = 'A claim.') => `- **${claim}** ${long(n)}`;
+const shaped = ({ intro = 'A patch release. Nothing a user already has stops working.', news = [bullet(10)], also = [], demo = true, headings } = {}) =>
+  section(
+    'pkg v1.0.0 (Upcoming)',
+    [
+      ...(demo ? [`**See it move:** the [annotated demo](${DEMO}) has the detail.`, ''] : []),
+      intro,
+      '',
+      ...(headings || ["## What's new", '', ...news, '', ...(also.length ? ['## Also in this release', '', ...also, ''] : []), '## Tests and provenance', '', '10 tests pass.'])
+    ].join('\n')
+  );
+const problemsOf = (news) => check(sectionOf(news)).problems.join('\n');
+
+test('review: a section over 600 words fails, with every bullet inside its own limit', () => {
+  const news = shaped({ news: Array.from({ length: 6 }, () => bullet(60)), also: Array.from({ length: 5 }, () => bullet(50)) });
+  assert.match(problemsOf(news), /The section is \d+ words; the limit is 600/);
+  assert.doesNotMatch(problemsOf(news), /words, limit \d+, under/);
+});
+
+test('review: an introduction over 80 words fails', () => {
+  assert.match(problemsOf(shaped({ intro: long(90) })), /The introduction is 90 words; the limit is 80/);
+});
+
+test("review: a seventh What's new bullet fails", () => {
+  assert.match(problemsOf(shaped({ news: Array.from({ length: 7 }, () => bullet(5)) })), /"What's new" has 7 bullets; the limit is 6/);
+});
+
+test('review: a bullet that does not open with its claim in bold fails', () => {
+  assert.match(problemsOf(shaped({ news: ['- A claim with no bold. ' + long(5)] })), /does not open with its claim in bold/);
+});
+
+test('review: a heading out of order, and a heading that is not one of the five, each fail', () => {
+  const out = shaped({ headings: ['## Also in this release', '', bullet(5), '', "## What's new", '', bullet(5), '', '## Tests and provenance', '', '10 tests pass.'] });
+  assert.match(problemsOf(out), /"## What's new" is out of order/);
+  const odd = shaped({ headings: ["## What's new", '', bullet(5), '', '## Internals', '', bullet(5)] });
+  assert.match(problemsOf(odd), /"## Internals" is not one of the headings/);
+});
+
+test('review: a section with no demo line fails', () => {
+  assert.match(problemsOf(shaped({ demo: false })), /does not open with a "\*\*See it move:\*\*" line/);
+});
+
+test('review: an upcoming section is empty only when it says next to nothing', () => {
+  const upcoming = (body) => sectionOf(section('pkg v0.4.0 (Upcoming)', body));
+  assert.equal(isEmpty(upcoming(NOTHING)), true);
+  assert.equal(isEmpty(upcoming('* **A change.** Written with a star for its bullet.')), false, 'a star bullet is a bullet');
+  assert.equal(isEmpty(upcoming(long(400))), false, 'four hundred words of prose is not nothing');
+});
+
+test('review: a star bullet is held to the limits a dash bullet is', () => {
+  const news = shaped({ news: ['* **A claim.** ' + long(90)] });
+  assert.match(problemsOf(news), /words, limit 70, under "What's new"/);
+});
+
+test('review: a bullet wrapped over several lines is counted as one bullet', () => {
+  const wrapped = [bullet(55), '  ' + long(60), '  ' + long(60)].join('\n');
+  assert.match(problemsOf(shaped({ news: [wrapped] })), /17\d words, limit 70, under "What's new"/);
+});
+
+test('review: a "# comment" inside a code fence does not end the section', () => {
+  const news = shaped({ news: [bullet(30), '', '```bash', '# a comment in a shell example', 'echo hello', '```', '', bullet(30, 'A second claim.')] });
+  const { total } = check(sectionOf(news));
+  assert.ok(total > 70, `the second bullet was not counted: total ${total}`);
+});
+
+test('review: only an issue or pull-request reference is a citation', () => {
+  assert.equal(words('One two [see v#12](https://example.org/u)'), 4);
+  assert.equal(words('One two three. [the fix in #3](https://example.org/u)'), 7);
+  assert.equal(words('One two three. [roadmap #3](https://example.org/u)'), 3, 'a repository name, a space, a number');
+  assert.equal(words('One two three. [jwildfire/obot.agent#3](https://example.org/u)'), 3);
+  assert.equal(words('One two three. [obot.roadmap#343](https://example.org/u), PR [#7](https://example.org/p)'), 3);
+});
+
+test('review: a very long line is counted in bounded time', () => {
+  const started = Date.now();
+  const count = words('x' + ' '.repeat(200000) + '[#1](https://example.org/u) end');
+  for (const unit of ['![', '[a](', '<', '[#1](u) ', '<!--']) words(unit.repeat(50000));
+  sectionOf('# pkg v1\n\n' + '<!--'.repeat(50000));
+  assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
+  assert.equal(count, 3, 'the link is not at the end of the line, so it is read as a word');
+});
+
+test('review: a Tests and provenance part over 100 words fails, as prose or as bullets', () => {
+  const tests = (lines) => shaped({ headings: ["## What's new", '', bullet(5), '', '## Tests and provenance', '', ...lines] });
+  assert.match(problemsOf(tests([long(120)])), /"Tests and provenance" is 120 words; the limit is 100/);
+  assert.match(problemsOf(tests(['- ' + long(60), '- ' + long(60)])), /"Tests and provenance" is 120 words; the limit is 100/);
+  assert.equal(problemsOf(tests([long(100)])), '');
+});
+
