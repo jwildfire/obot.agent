@@ -28,30 +28,69 @@ export const LIMITS = {
 export const HEADINGS = ["What's new", 'Deprecated', 'Removed', 'Also in this release', 'Tests and provenance'];
 
 // The citation that closes a bullet or a paragraph: links to issues and pull
-// requests, with "PR" and punctuation between them. One link at a time, from the
-// end: a single pattern for the whole run of links can be matched in a number of
-// ways that doubles with each link, and on a line that ends in a word after the
-// links it tried them all and did not return.
-const LAST_CITATION = /[\s,;(]*(?:PR\s+)?\[[^\]]*#\d+\]\([^)]*\)[\s,;).]*$/;
+// requests, with "PR" and punctuation between them. Only a link whose text is a
+// reference is one: "#12", "repo#12", "owner/repo#12" or "roadmap #12". A link
+// that merely ends in a number ("see v#12", "the fix in #3") is prose and is
+// counted. One link at a time, from the end, and only in the last few hundred
+// characters of the line: a single pattern for the whole run of links can be
+// matched in a number of ways that doubles with each link, and a pattern free to
+// start anywhere takes time that grows with the square of the line.
+const LAST_CITATION = /[\s,;(]*(?:PR\s+)?\[(?:[\w.-]+(?:\/[\w.-]+)?\s?)?#\d+\]\([^)\s]*\)[\s,;).]*$/;
+const TAIL = 400;
 
 function withoutCitations(text) {
-  let rest = text;
-  for (let cut = rest.replace(LAST_CITATION, ''); cut !== rest; cut = rest.replace(LAST_CITATION, '')) rest = cut;
-  return rest;
+  let end = text.length;
+  for (;;) {
+    const tail = text.slice(Math.max(0, end - TAIL), end);
+    const cut = tail.replace(LAST_CITATION, '');
+    if (cut === tail) return text.slice(0, end);
+    end -= tail.length - cut.length;
+  }
 }
 
+// Each pattern stops at the character that would open the next match, so a line
+// of nothing but openers is read once and not once for every opener in it.
 export function words(text) {
   const read = withoutCitations(text)
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/!\[[^\][]*\]\([^)[]*\)/g, ' ')
+    .replace(/\[([^\][]*)\]\([^)[]*\)/g, '$1')
+    .replace(/<[^<>]+>/g, ' ')
     .replace(/[*_`]/g, '');
   return read.split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
 }
 
+function withoutComments(text) {
+  let out = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', at);
+    const close = open < 0 ? -1 : text.indexOf('-->', open + 4);
+    if (close < 0) return out + text.slice(at);
+    out += text.slice(at, open);
+    at = close + 3;
+  }
+}
+
+const FENCE = /^\s*(```|~~~)/;
+const BULLET = /^[-*+] /;
+
+// The lines outside code fences: a "# comment" in a shell example is not a
+// heading, and a "- flag" in one is not a bullet.
+function outsideFences(lines) {
+  let fenced = false;
+  return lines.map((line) => {
+    if (FENCE.test(line)) {
+      fenced = !fenced;
+      return false;
+    }
+    return !fenced;
+  });
+}
+
 export function sectionOf(news, version) {
-  const lines = news.replace(/<!--[\s\S]*?-->/g, '').split('\n');
-  const starts = lines.map((line, i) => (/^# \S/.test(line) ? i : -1)).filter((i) => i >= 0);
+  const lines = withoutComments(news).split('\n');
+  const open = outsideFences(lines);
+  const starts = lines.map((line, i) => (open[i] && /^# \S/.test(line) ? i : -1)).filter((i) => i >= 0);
   // A version names the section whose heading carries exactly that version,
   // with or without its "v": "v0.3.0" is not the section "v0.3.0.9000".
   const bare = (word) => word.replace(/^v/, '');
@@ -63,13 +102,50 @@ export function sectionOf(news, version) {
   return lines.slice(at, next === undefined ? lines.length : next);
 }
 
+// A part of a section as a reader meets it: its bullets, each with the lines
+// it was wrapped over joined back on, and its other lines. A bullet opens with
+// "-", "*" or "+". A line straight under a bullet, or an indented one after a
+// gap, belongs to that bullet. What is inside a code fence is counted as prose.
+function itemsOf(lines) {
+  const bullets = [];
+  const prose = [];
+  const open = outsideFences(lines);
+  let inBullet = false;
+  let gap = true;
+  lines.forEach((line, i) => {
+    if (FENCE.test(line)) return;
+    if (line.trim() === '') {
+      gap = true;
+      return;
+    }
+    if (!open[i]) prose.push(line);
+    else if (BULLET.test(line)) {
+      bullets.push(`- ${line.slice(2)}`);
+      inBullet = true;
+    } else if (inBullet && (!gap || /^\s{2,}\S/.test(line))) {
+      bullets[bullets.length - 1] += ` ${line.trim()}`;
+    } else {
+      prose.push(line);
+      inBullet = false;
+    }
+    gap = false;
+  });
+  return { bullets, prose };
+}
+
 // Whether a section is one still collecting changes with none in it yet: an
 // "(Upcoming)" heading with no bullet and no heading under it, only nothing or
 // a sentence saying so. The first change to land brings a bullet, and from
-// then on the section is checked.
+// then on the section is checked. A section that says more than a sentence or
+// two is not empty however it is written.
+const NOTHING_YET = 40;
+
 export function isEmpty(lines) {
   if (!/\(Upcoming\)\s*$/.test(lines[0])) return false;
-  return !lines.slice(1).some((line) => /^(- |## |\*\*See it move:\*\*)/.test(line));
+  const body = lines.slice(1);
+  if (body.some((line) => /^(## |\*\*See it move:\*\*)/.test(line))) return false;
+  const { bullets, prose } = itemsOf(body);
+  return bullets.length === 0 && prose.reduce((sum, line) => sum + words(line), 0) <= NOTHING_YET;
 }
 
 export function check(lines) {
@@ -83,23 +159,25 @@ export function check(lines) {
 
   // Split into the opening part and the parts under each "##" heading.
   const parts = [{ heading: null, lines: [] }];
-  for (const line of body) {
-    const heading = /^## (.+?)\s*$/.exec(line);
+  const open = outsideFences(body);
+  body.forEach((line, i) => {
+    const heading = open[i] && /^## (.+?)\s*$/.exec(line);
     if (heading) parts.push({ heading: heading[1], lines: [] });
     else parts[parts.length - 1].lines.push(line);
-  }
+  });
+  for (const part of parts) Object.assign(part, itemsOf(part.lines));
 
   let total = 0;
-  const bulletsOf = (part) => part.lines.filter((line) => /^- /.test(line));
-  const proseOf = (part) => part.lines.filter((line) => line.trim() !== '' && !/^- /.test(line));
+  const bulletsOf = (part) => part.bullets;
+  const proseOf = (part) => part.prose;
+  const count = (texts) => texts.reduce((sum, text) => sum + words(text), 0);
 
   const opening = parts[0];
   const introLines = proseOf(opening).filter((line) => line !== firstText);
-  const intro = introLines.reduce((sum, line) => sum + words(line), 0);
+  const intro = count(introLines);
   // Bullets before any heading are counted too. A section still being written is
   // often a flat list, and its total used to be its first bullet alone.
-  const loose = bulletsOf(opening).filter((line) => line !== firstText);
-  total += words(firstText) + intro + loose.reduce((sum, line) => sum + words(line), 0);
+  total += count(proseOf(opening)) + count(bulletsOf(opening));
   if (intro > LIMITS.intro) fail(`The introduction is ${intro} words; the limit is ${LIMITS.intro}.`);
   if (introLines.length === 0) fail('The section has no introduction: say in two to four sentences what the release is.');
   if (bulletsOf(opening).length > 0 && parts.length > 1) fail('Bullets come under a heading, not before the first one.');

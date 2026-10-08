@@ -15,19 +15,19 @@ A change of where sessions run, and the fixes from a security review. Since 2026
 ## What's new
 
 - **A session runs locally and writes to GitHub as the bot.** It starts from @jwildfire's workspace and authors its issues, pull requests and merges as obotclaw[bot], never as him. Approving a pull request, merging past a ruleset and changing a ruleset stay his alone. [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
-- **Release notes are held to a length.** The [`release-notes`](skills/release-notes/SKILL.md) skill gives the shape and says what moves to the demo page; its checker fails a section over 600 words or a bullet over its limit. PR [#341](https://github.com/jwildfire/obot.agent/pull/341)
+- **Release notes are held to a length.** The [`release-notes`](https://github.com/jwildfire/obot.agent/blob/main/skills/release-notes/SKILL.md) skill gives the shape and says what moves to the demo page; its checker fails a section over 600 words or a bullet over its limit. PR [#341](https://github.com/jwildfire/obot.agent/pull/341)
 - **A release candidate is reviewed by three subagents the session spawns.** One reads for correctness, one for the definition of done and its proof, one for the hard rules. The session resolves every finding and posts the review on the pull request before @jwildfire is asked. PR [#340](https://github.com/jwildfire/obot.agent/pull/340)
 - **A session checks who wrote a sign-off.** It takes the author of an objective's sign-off from GitHub's record of the comment, not from the comment's words, and the standup reads only comments from @jwildfire and the bot. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#345](https://github.com/jwildfire/obot.agent/pull/345)
 
 ## Also in this release
 
-- **The release-notes checker cannot be hung, and its count is right.** A line ending in many links and one more word no longer stalls it, a flat list is totalled bullet by bullet, and started through a link it checks instead of passing in silence. [#344](https://github.com/jwildfire/obot.agent/issues/344), [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#343](https://github.com/jwildfire/obot.agent/pull/343), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **The release-notes checker cannot be hung, and its count is right.** A line of links no longer stalls it, a flat list is totalled bullet by bullet, a wrapped or starred bullet is read as a bullet, and started through a link it checks instead of passing in silence. Every rule has a test that fails without it. [#342](https://github.com/jwildfire/obot.agent/issues/342), [#344](https://github.com/jwildfire/obot.agent/issues/344), [#346](https://github.com/jwildfire/obot.agent/issues/346), [#351](https://github.com/jwildfire/obot.agent/issues/351), PR [#343](https://github.com/jwildfire/obot.agent/pull/343), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
 - **Cloud sessions are parked, and their page is kept.** Its setup script now installs the two skills from `stable`, by name. The step in which a session published its own cost, added earlier in this cycle, is removed with them. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#339](https://github.com/jwildfire/obot.agent/pull/339), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
 - **The standup says it is not scheduled.** Its published file is still the placeholder of 2026-09-11. [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
 
 ## Tests and provenance
 
-11 checker tests pass (`node --test skills/release-notes/check-notes.test.mjs`). Each security finding fixed here was reproduced before its fix. The bot's token and the guard that enforces the first bullet are tooling of @jwildfire's workspace and are in no repository.
+24 checker tests pass (`node --test skills/release-notes/check-notes.test.mjs`). Each security finding fixed here was reproduced before its fix. The bot's token and the guard that enforces the first bullet are tooling of @jwildfire's workspace and are in no repository.
 
 # obot.agent v0.5.0
 
