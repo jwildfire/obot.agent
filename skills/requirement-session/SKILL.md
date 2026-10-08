@@ -1,6 +1,6 @@
 ---
 name: requirement-session
-description: "Run a working session on one hub requirement: check that its objective's tree is signed off and every task under the requirement has a definition of done and a milestone, set Claude Code's built-in /goal from the requirement's definition of done, work the tasks with every PR bound to its issue, list the tasks' state at the end of every turn, post the nightly complete / in progress / blocked comment on the requirement, and close the requirement with its proof. Use when @jwildfire says 'start the session for #N', 'run requirement N', '/requirement-session N', or a cloud session is launched with a requirement issue as its task. Do NOT use for an objective (an objective is never a session — pick its next requirement), for a single question (answer it), for filing the tree itself (that is the hub's requirement-drafting and requirement-tasks skills, which this hands off to when the tree is incomplete), or for a release candidate's review (that is @jwildfire's)."
+description: "Run a working session on one hub requirement: check that its objective's tree is signed off and every task under the requirement has a definition of done and a milestone, set Claude Code's built-in /goal from the requirement's definition of done, work the tasks with every PR bound to its issue, list the tasks' state at the end of every turn, post the nightly complete / in progress / blocked comment on the requirement, and close the requirement with its proof. Use when @jwildfire says 'start the session for #N', 'run requirement N', '/requirement-session N', or a session is started with a requirement issue as its task. Do NOT use for an objective (an objective is never a session — pick its next requirement), for a single question (answer it), for filing the tree itself (that is the hub's requirement-drafting and requirement-tasks skills, which this hands off to when the tree is incomplete), or for a release candidate's review (that is @jwildfire's)."
 argument-hint: "Requirement issue number on jwildfire/obot.roadmap"
 ---
 
@@ -9,8 +9,16 @@ argument-hint: "Requirement issue number on jwildfire/obot.roadmap"
 The contract this follows is the hub's [issue contract](https://github.com/jwildfire/obot.roadmap/blob/main/docs/issue-contract.md)
 and [ways of working](https://github.com/jwildfire/obot.roadmap/blob/main/docs/ways-of-working.md);
 the engineering rules are its [developer guidelines](https://github.com/jwildfire/obot.roadmap/blob/main/docs/developer-guidelines.md).
-In a cloud environment those three files are also at `~/obot.roadmap/docs/`. One requirement
-per session; an objective is the steering unit and is never a session.
+In @jwildfire's workspace those three files are on disk in the `obot.roadmap` clone beside
+this repository's. One requirement per session; an objective is the steering unit and is
+never a session.
+
+A session runs locally, from that workspace, and writes to GitHub as obotclaw[bot]: every
+issue, comment, commit, push, pull request and merge of an increment. The workspace's
+README gives the one form a write takes and the guard that refuses any other. Three things
+are @jwildfire's alone, with any token: approving a pull request, merging past a ruleset,
+and changing a ruleset. Cloud sessions are parked
+([`docs/cloud-environments.md`](../../docs/cloud-environments.md)).
 
 ## 1. Read the requirement and its tree
 
@@ -117,21 +125,11 @@ State of requirement #<requirement>:
 
 ## 6. The nightly comment
 
-Once a day, and before the session stops for any reason, first publish the session's
-own usage, then post on the requirement.
+Once a day, and before the session stops for any reason, post on the requirement.
 
-The usage: this container's transcripts are the only record of what the session
-cost, and they vanish with the container. Run, from the repository checkout,
-
-```sh
-bash ~/obot.roadmap/scripts/usage/publish_session_usage.sh
-```
-
-which aggregates them and commits one fragment to `usage/sessions/` on the hub's
-`session-state` branch; the nightly site deploy merges it into the analytics page's
-Cost section (hub `scripts/usage/README.md`). Re-running overwrites the session's own
-fragment, so it never double-counts. A failed push is not a blocker — say so in the
-comment's In progress section and move on.
+There is no usage to publish. A local session's transcripts stay on the machine, and
+the hub's analytics page reads them when @jwildfire refreshes it by hand (hub
+`scripts/usage/README.md`).
 
 The comment:
 
@@ -156,10 +154,11 @@ comment is that question; the standup routine reads the labels, not this comment
 
 When the requirement ships a release, follow the hub developer guidelines' Releases
 section: the `NEWS.md` section, written with the [`release-notes`](../release-notes/SKILL.md)
-skill and passing its checker (`node ~/obot.agent/skills/release-notes/check-notes.mjs NEWS.md`),
+skill and passing its checker (`check-notes.mjs`, beside that skill),
 the demo page on the hub, which carries the detail the notes leave out, the RC PR titled
 `{package} vX.Y.Z-RCn` against the release branch with one `Closes #N` line per issue
-shipped — opened as a draft. Then the review gate, before anyone asks @jwildfire (the
+shipped — opened as a draft, by obotclaw[bot], because GitHub does not let @jwildfire
+approve a pull request he authored. Then the review gate, before anyone asks him (the
 guidelines' Releases section is the authority on its dimensions and comment shape):
 
 1. Spawn three review subagents in parallel, one per dimension: correctness; the
@@ -182,8 +181,7 @@ for every new `-RCn`; it covers the diff since the reviewed commit.
 
 ## 8. Finish
 
-When every task is closed and the requirement's definition of done is proven: publish
-the session's usage once more (the command in §6), post the
+When every task is closed and the requirement's definition of done is proven: post the
 closing comment on the requirement with the proof and the sentence, close it, move its
 status label to released (`--add-label "status: released" --remove-label "status: review"`), post one line on the objective naming the
 requirement and the sentence, clear the goal

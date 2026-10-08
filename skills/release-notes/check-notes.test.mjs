@@ -144,3 +144,10 @@ test('the citations that close a line are not counted, however they are punctuat
   assert.equal(cited(' [#1](https://example.org/1) and more'), 6, 'a link mid-line counts as its text');
   assert.equal(cited(' [the guide](https://example.org/g)'), 5, 'a link that is not a citation is read');
 });
+
+test('found in use: a flat list with no headings is totalled bullet by bullet, not by its first', () => {
+  // This repository's own upcoming section printed 46 words where its lines came to 246.
+  const news = section('pkg v0.4.0 (Upcoming)', ['- **One.** ' + long(10), '- **Two.** ' + long(20), '- **Three.** ' + long(30)].join('\n'));
+  assert.equal(check(sectionOf(news)).total, 11 + 21 + 31);
+});
+

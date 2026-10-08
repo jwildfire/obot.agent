@@ -2,8 +2,8 @@
 
 This repo is the core of the obot program's semi-autonomous approach and nothing else:
 the `requirement-session` skill a working session runs, the standup routine that reports on
-every objective, and the cloud environments the sessions run in. It carries no standards of
-its own.
+every objective, and a page on cloud environments, which are parked. It carries no
+standards of its own.
 
 IMPORTANT: the standards live in `jwildfire/obot.roadmap` and compliance with them is
 the job. Read these three before doing anything, every session:
@@ -17,8 +17,8 @@ the job. Read these three before doing anything, every session:
   — branching, PRs, commits and attribution, testing, merging via rulesets, release
   candidates, artifacts and style.
 
-In a cloud environment they are also on disk at `~/obot.roadmap/docs/` (the setup script
-clones the hub — [`docs/cloud-environments.md`](docs/cloud-environments.md)). Where a
+In @jwildfire's workspace they are on disk in the `obot.roadmap` clone beside this one.
+Where a
 repository's own `CLAUDE.md` and these documents disagree, the hub documents win; say so
 on the task and carry on.
 
@@ -44,10 +44,11 @@ on the task and carry on.
 This follows [Claude Code's best practices](https://code.claude.com/docs/en/best-practices);
 the features below are the whole toolkit, and nothing here is bespoke.
 
-- One requirement per session, as a [cloud session](https://code.claude.com/docs/en/claude-code-on-the-web)
-  bound to the repository where the requirement's tasks live, in
+- One requirement per session, run locally from @jwildfire's workspace — the folder
+  that holds the program's repositories side by side — on his own machines, in
   [auto mode](https://code.claude.com/docs/en/auto-mode-config) so tool calls need no
-  prompts. Steering happens on claude.ai/code or the phone.
+  prompts. He steers on the issue or in the session. Cloud sessions are parked since
+  2026-10-07 ([`docs/cloud-environments.md`](docs/cloud-environments.md) says why).
 - [`/goal`](https://code.claude.com/docs/en/goal) anchors the session: the condition is
   the requirement's definition of done plus its tasks (the skill has the template), a
   separate evaluator re-checks it after every turn, and the session keeps working until
@@ -65,6 +66,8 @@ the features below are the whole toolkit, and nothing here is bespoke.
   few rules that apply to every conversation in a repository — short, with `@` imports
   where a document is worth loading — and [hooks](https://code.claude.com/docs/en/hooks-guide)
   only for deterministic gates that must happen every time. Nothing here adds a hook.
+  The workspace has one, which refuses a GitHub write that would go out under
+  @jwildfire's name.
 - [Routines](https://code.claude.com/docs/en/routines) for anything that runs on a
   schedule; the standup is one. No launchd, no cron, no background process on a
   person's machine.
@@ -76,26 +79,38 @@ the features below are the whole toolkit, and nothing here is bespoke.
 
 ## Repository layout
 
-- [`skills/requirement-session/SKILL.md`](skills/requirement-session/SKILL.md) — the procedure from the requirement issue to its closing comment. Installed into a cloud environment by the setup
-  script; locally, symlink it into a workspace's `.claude/skills/`.
+- [`skills/requirement-session/SKILL.md`](skills/requirement-session/SKILL.md) — the procedure from the requirement issue to its closing comment. Linked into the workspace's `.claude/skills/`.
 - [`routines/standup.md`](routines/standup.md) — the scheduled routine's prompt: every
   objective's complete / in progress / blocked counts and one question per blocked issue,
   rendered from GitHub, published to the hub's voice-readable `standup.md`.
-- [`docs/cloud-environments.md`](docs/cloud-environments.md) — the environments per
-  repository, their setup scripts, credentials, and what to verify first.
+- [`docs/cloud-environments.md`](docs/cloud-environments.md) — parked on 2026-10-07 and
+  kept for when cloud sessions resume: the environments per repository, their setup
+  scripts, credentials, and what to verify first.
 - [`NEWS.md`](NEWS.md) — the running release log; the current section is the next
   release's notes.
 
 ## Identity and attribution
 
-The actor is the connected GitHub account of the session. Authorship is on the object:
-the drafted-by line after a `---` rule at the foot of every issue, PR and comment, and
-the `Co-Authored-By` trailer the harness supplies on every commit. Say @jwildfire
-reviewed something only when he did. Full rules: the hub's developer guidelines.
+A session writes to GitHub as obotclaw[bot], the program's GitHub App, and never as
+@jwildfire: issues, comments, commits, pushes, pull requests and the merges of
+increments. `gh` on his machine is signed in as him and he is admin on every repository,
+so a write with no token set would be recorded as his. The token and the guard that
+refuses any other kind of write are tooling of his workspace, not of this or any other
+repository; the workspace's README describes them.
+
+Three things are his alone, and a session does not do them with any token: approving a
+pull request, merging past a ruleset, and changing a ruleset.
+
+Authorship is also on the object: the drafted-by line after a `---` rule at the foot of
+every issue, PR and comment, and the `Co-Authored-By` trailer the harness supplies on
+every commit. Say @jwildfire reviewed something only when he did. Full rules: the hub's
+developer guidelines.
 
 ## What came before
 
 Until 2026-09-10 this repo carried a fully autonomous multi-agent prototype — navigator,
 admiral and prime sessions, a dispatcher, session bookends, dashboards, journals, a merge
 policy script and a bot identity. It was retired in v0.5.0 because it spent its effort on
-itself; [`NEWS.md`](NEWS.md) has the readout and the v0.4.0 tag has the code.
+itself; [`NEWS.md`](NEWS.md) has the readout and the v0.4.0 tag has the code. v0.5.0 moved
+sessions to the cloud, acting as the connected account. v0.6.0 parked that and brought the
+bot back as the author, with its tooling kept on @jwildfire's machines instead of here.

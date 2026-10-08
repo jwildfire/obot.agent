@@ -105,7 +105,7 @@ does, add it there first: a detail is moved, never dropped.
 6. Run the checker, and cut until it passes:
 
    ```bash
-   node ~/obot.agent/skills/release-notes/check-notes.mjs NEWS.md
+   node /path/to/obot.agent/skills/release-notes/check-notes.mjs NEWS.md
    ```
 
    It prints the section's word count and each part over its limit, and exits 1 until
