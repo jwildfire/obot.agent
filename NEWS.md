@@ -6,7 +6,9 @@ account of what a user can now do. The GitHub release publishes from the section
 here, copied verbatim, when the release is approved and tagged.
 -->
 
-# obot.agent v0.6.0 (Upcoming)
+# obot.agent v0.7.0 (Upcoming)
+
+# obot.agent v0.6.0 — sessions run locally and write as the bot
 
 **See it move:** the [annotated v0.6.0 demo](https://jwildfire.github.io/obot.roadmap/reports/oa-v0.6-hub-v0.5-demo/) has captures, try-it steps and the detail behind everything below.
 
