@@ -54,8 +54,20 @@ same file, 345 words, passes every limit.
 
 Counted as a reader meets the words: a link counts as its text, and the issue and
 pull-request links that close a bullet are not counted. A closing link is one of those only
-when its text is the reference (`#12`, `repo#12`, `roadmap #12`) and its address ends in the
-same number; a bullet wrapped over several lines is one bullet; a code block is counted.
+when its text is the reference (`#12`, `repo#12`, `owner/repo#12`, `roadmap #12`) and its
+address is that issue, pull request or discussion; ten a line at most. A bullet wrapped
+over several lines is one bullet.
+
+The checker reads this shape and no other, and reports what it cannot read:
+
+- Bullets are `- ` at the margin (`* ` and `+ ` are read the same). A list item that is
+  indented with no bullet above it, numbered, or followed by a tab is reported.
+- Headings are `## ` at the margin, the five above, once each and in that order.
+- No code blocks. A command or a snippet goes on the demo page; inline code is fine. A line
+  that opens with three backticks or tildes is reported, and its words are counted.
+
+Where it still reads something differently from a reader is listed in
+[obot.agent#354](https://github.com/jwildfire/obot.agent/issues/354).
 
 | Part | Limit |
 |---|---|
@@ -112,8 +124,8 @@ does, add it there first: a detail is moved, never dropped.
    node /path/to/obot.agent/skills/release-notes/check-notes.mjs NEWS.md
    ```
 
-   It prints the section's word count and each part over its limit, and exits 1 until
-   there is none. Give it a version as a second argument to check an older section.
+   It prints the section's word count, each part over its limit and each line it
+   cannot read, and exits 1 until there is none. Give it a version as a second argument to check an older section.
    An `(Upcoming)` section with no change in it yet has nothing to check, and passes.
    Its own tests: `node --test check-notes.test.mjs`, beside it.
 7. Check every link in the section answers, and that the demo page carries each detail
