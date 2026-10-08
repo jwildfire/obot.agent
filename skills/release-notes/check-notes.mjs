@@ -96,7 +96,10 @@ export function check(lines) {
   const opening = parts[0];
   const introLines = proseOf(opening).filter((line) => line !== firstText);
   const intro = introLines.reduce((sum, line) => sum + words(line), 0);
-  total += words(firstText) + intro;
+  // Bullets before any heading are counted too. A section still being written is
+  // often a flat list, and its total used to be its first bullet alone.
+  const loose = bulletsOf(opening).filter((line) => line !== firstText);
+  total += words(firstText) + intro + loose.reduce((sum, line) => sum + words(line), 0);
   if (intro > LIMITS.intro) fail(`The introduction is ${intro} words; the limit is ${LIMITS.intro}.`);
   if (introLines.length === 0) fail('The section has no introduction: say in two to four sentences what the release is.');
   if (bulletsOf(opening).length > 0 && parts.length > 1) fail('Bullets come under a heading, not before the first one.');

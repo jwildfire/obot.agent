@@ -5,6 +5,11 @@ The nightly standup is a scheduled Claude Code cloud routine
 repository. It reads GitHub and nothing else, and it asks nothing that is not a blocked
 issue.
 
+> Not scheduled as of 2026-10-07: the published `standup.md` is still the placeholder of
+> 2026-09-11. It is the one piece of the program written to run in the cloud, where the
+> actor is @jwildfire's connected account, and cloud sessions are parked. It writes one
+> file and changes nothing else. Scheduling it is his call.
+
 ## Schedule it
 
 From any Claude Code session signed in to @jwildfire's account:
