@@ -52,19 +52,22 @@ same file, 345 words, passes every limit.
 
 ## The limits
 
-Counted as a reader meets the words: a link counts as its text, and the issue and
-pull-request links that close a bullet are not counted. A closing link is one of those only
-when its text is the reference (`#12`, `repo#12`, `owner/repo#12`, `roadmap #12`) and its
-address is that issue, pull request or discussion; ten a line at most. A bullet wrapped
-over several lines is one bullet.
+Counted as a reader meets the words, a line at a time: a link counts as its text, and the
+issue and pull-request links that close a line are not counted. A closing link is one of
+those only when its text is the reference (`#12`, `repo#12`, `owner/repo#12`,
+`roadmap #12`) and its address is that issue, pull request or discussion; ten a line at
+most. A bullet wrapped over several lines is one bullet.
 
 The checker reads this shape and no other, and reports what it cannot read:
 
 - Bullets are `- ` at the margin (`* ` and `+ ` are read the same). A list item that is
-  indented with no bullet above it, numbered, or followed by a tab is reported.
+  numbered, followed by a tab, or indented with no bullet above it is reported.
 - Headings are `## ` at the margin, the five above, once each and in that order.
-- No code blocks. A command or a snippet goes on the demo page; inline code is fine. A line
-  that opens with three backticks or tildes is reported, and its words are counted.
+- No fenced code blocks. A command or a snippet goes on the demo page; inline code is
+  fine. A line that opens with three backticks or tildes is reported, and its words are
+  counted.
+- A comment sits on its own lines, opening at the start of a line. A `<!--` or `-->`
+  anywhere else is reported.
 
 Where it still reads something differently from a reader is listed in
 [obot.agent#354](https://github.com/jwildfire/obot.agent/issues/354).

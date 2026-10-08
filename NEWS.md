@@ -21,13 +21,13 @@ A change of where sessions run, and the fixes from a security review. Since 2026
 
 ## Also in this release
 
-- **The release-notes checker reports what it cannot read, and its count is right.** A code block or an indented list is named, not guessed at. A line of links no longer hangs it, a wrapped bullet is one bullet, and started through a link it checks. Each limit is tested at its edge; what it still misreads is listed. [#342](https://github.com/jwildfire/obot.agent/issues/342), [#344](https://github.com/jwildfire/obot.agent/issues/344), [#346](https://github.com/jwildfire/obot.agent/issues/346), [#351](https://github.com/jwildfire/obot.agent/issues/351), [#353](https://github.com/jwildfire/obot.agent/issues/353), [#354](https://github.com/jwildfire/obot.agent/issues/354), PR [#343](https://github.com/jwildfire/obot.agent/pull/343), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **The release-notes checker reports what it cannot read.** A code block, an indented list or a stray comment marker is named, not guessed at. A line of links no longer hangs it, a wrapped bullet is one bullet, and started through a link it checks. Each limit is tested at its edge; what it still misreads is listed. [#342](https://github.com/jwildfire/obot.agent/issues/342), [#344](https://github.com/jwildfire/obot.agent/issues/344), [#346](https://github.com/jwildfire/obot.agent/issues/346), [#351](https://github.com/jwildfire/obot.agent/issues/351), [#353](https://github.com/jwildfire/obot.agent/issues/353), [#354](https://github.com/jwildfire/obot.agent/issues/354), PR [#343](https://github.com/jwildfire/obot.agent/pull/343), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
 - **Cloud sessions are parked, and their page is kept.** Its setup script now installs the two skills from `stable`, by name. The step in which a session published its own cost, added earlier in this cycle, is removed with them. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#339](https://github.com/jwildfire/obot.agent/pull/339), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
 - **The standup says it is not scheduled.** Its published file is still the placeholder of 2026-09-11. [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
 
 ## Tests and provenance
 
-33 checker tests pass (`node --test skills/release-notes/check-notes.test.mjs`). Each security finding fixed here was reproduced before its fix. The bot's token and the guard that enforces the first bullet are tooling of @jwildfire's workspace and are in no repository.
+36 checker tests pass (`node --test skills/release-notes/check-notes.test.mjs`). Each security finding fixed here was reproduced before its fix. The bot's token and the guard that enforces the first bullet are tooling of @jwildfire's workspace and are in no repository.
 
 # obot.agent v0.5.0
 

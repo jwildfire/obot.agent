@@ -13,11 +13,13 @@
 // counted at all.
 //
 // This reads the shape SKILL.md describes and no other. It is not a Markdown
-// parser, and three attempts to make it read code fences each left a way to
-// lose words or switch a rule off. So what it cannot read it reports: a code
+// parser, and two attempts to make it read code fences each left a way to lose
+// words or switch a rule off. So what it cannot read it reports: a fenced code
 // block, a list item that is not "- " at the margin, a heading that is not at
-// the margin. Every line that is not blank is counted. What it still reads
-// wrongly is listed in the follow-up issue, obot.agent#354.
+// the margin, a comment marker that is not a comment on its own lines. Words are
+// counted a line at a time, so nothing that spans lines can take words out, and
+// every line that is not blank or a "## " heading is counted. What it still
+// reads differently from a reader is listed in obot.agent#354.
 //
 // Exit code 1 when a limit is passed, 2 when the file or the section cannot be
 // read.
@@ -69,37 +71,48 @@ function withoutCitations(text) {
   return text.slice(0, end);
 }
 
-// Each pattern stops at the character that would open the next match, so a line
-// of nothing but openers is read once and not once for every opener in it. A
-// link's address has no space in it, so "[see](a sentence)" is counted as it is
-// read. A tag opens with a letter, so "<5 and >10" loses nothing.
+// The words of one line. Each pattern stops at the character that would open
+// the next match, so a line of nothing but openers is read once and not once
+// for every opener in it. A link's address has no space in it, though a title
+// in quotes may follow it, so "[see](a sentence)" is counted as it is read. A
+// tag opens with a letter, so "<5 and >10" loses nothing.
+const ADDRESS = String.raw`\([^)[\s]*(?:\s+(?:"[^"()]*"|'[^'()]*'))?\)`;
+const IMAGE = new RegExp(String.raw`!\[[^\][]*\]${ADDRESS}`, 'g');
+const LINK = new RegExp(String.raw`\[([^\][]*)\]${ADDRESS}`, 'g');
+
 export function words(text) {
   const read = withoutCitations(text)
-    .replace(/!\[[^\][]*\]\([^)[\s]*\)/g, ' ')
-    .replace(/\[([^\][]*)\]\([^)[\s]*\)/g, '$1')
+    .replace(IMAGE, ' ')
+    .replace(LINK, '$1')
     .replace(/<\/?[a-zA-Z][^<>]*>/g, ' ');
   // A word is anything with a letter or a digit in it, so emphasis marks and
   // stray punctuation need no removing: on their own they are not words.
   return read.split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
 }
 
-// A comment is one that opens at the start of a line, as Markdown reads it.
-// "<!--" inside a sentence is text: taken for a comment, it paired with the next
-// "-->" anywhere below and everything between went uncounted.
+// A comment is taken out only when it opens at the start of a line and closes.
+// Any marker left after that (one inside a sentence, one indented, one never
+// closed, the empty "<!-->") is reported by check: taken for a comment, a marker
+// in a sentence paired with the next "-->" anywhere below and everything between
+// went uncounted; left as text, an indented comment's words were read as notes.
 function withoutComments(text) {
   const from = `\n${text}`;
   let out = '';
   let at = 0;
   for (;;) {
-    const open = from.indexOf('\n<!--', at);
+    let open = from.indexOf('\n<!--', at);
+    while (open >= 0 && from[open + 5] === '>') open = from.indexOf('\n<!--', open + 5);
     const close = open < 0 ? -1 : from.indexOf('-->', open + 5);
     if (close < 0) return (out + from.slice(at)).slice(1);
     out += from.slice(at, open + 1);
     at = close + 3;
   }
 }
+const COMMENT_MARK = /<!--|-->/;
 
 const BULLET = /^[-*+] /;
+// A bullet's opening claim: bold that starts and ends on a character, not a space.
+const BOLD_CLAIM = /^- \*\*(?:[^\s*]|[^\s*][^*]*[^\s*])\*\*/;
 // A rule across the page: "---", "* * *", "___". Not a bullet, and no words.
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 // What Markdown may read as a list item or a heading and this does not: a
@@ -124,19 +137,24 @@ export function sectionOf(news, version) {
 }
 
 // A part of a section as a reader meets it: its bullets, each with the lines
-// that belong to it joined back on, and its other lines. Every line that is not
-// blank lands in one or the other, so no word goes uncounted. A bullet opens
-// with "-", "*" or "+" at the margin. A line straight under a bullet belongs to
-// it, and so does an indented line after a gap. A smaller heading ends a
-// bullet, and so do a rule across the page and a list item at the margin that
-// is not a bullet; those last, and any off the margin outside a bullet, are
-// returned as unread.
+// that belong to it, and its other lines. Every line that is not blank lands in
+// one or the other with its own word count, so no word goes uncounted and
+// nothing that spans two lines can hide one. A bullet opens with "-", "*" or "+"
+// at the margin. A line straight under a bullet belongs to it, and so does an
+// indented line after a gap. A smaller heading ends a bullet, and so do a rule
+// across the page and a list item at the margin that is not a bullet; those
+// last, and any off the margin outside a bullet, are returned as unread.
 function itemsOf(lines) {
   const bullets = [];
   const prose = [];
   const unread = [];
   let inBullet = false;
-  let gap = true;
+  let gap = true; // nothing above that this line could be going on from
+  const joins = (line) => {
+    const bullet = bullets[bullets.length - 1];
+    bullet.text += ` ${line.trim()}`;
+    bullet.size += words(line);
+  };
   for (const line of lines) {
     if (line.trim() === '') {
       gap = true;
@@ -145,47 +163,51 @@ function itemsOf(lines) {
     const indented = /^(?:\t| {2,})\S/.test(line);
     const mark = LIST_MARK.exec(line);
     // Only "1." can break into a paragraph; any other number straight under a
-    // line is that line going on.
+    // line of text is that line going on.
     const listLike = mark && (mark[1] === undefined || gap || mark[1] === '1');
+    const afterGap = gap;
+    gap = false;
     if (RULE.test(line)) {
       inBullet = false;
+      gap = true;
     } else if (BULLET.test(line)) {
-      bullets.push(`- ${line.slice(2)}`);
+      bullets.push({ text: `- ${line.slice(2)}`, size: words(line.slice(2)) });
       inBullet = true;
     } else if (inBullet && indented) {
-      bullets[bullets.length - 1] += ` ${line.trim()}`;
+      joins(line);
     } else if (/^#{1,6} /.test(line)) {
-      prose.push(line);
+      prose.push({ line, size: words(line) });
       inBullet = false;
+      gap = true;
     } else if (listLike || OFF_MARGIN_HEADING.test(line)) {
-      prose.push(line);
+      prose.push({ line, size: words(line) });
       unread.push(line);
       inBullet = false;
-    } else if (inBullet && !gap) {
-      bullets[bullets.length - 1] += ` ${line.trim()}`;
+    } else if (inBullet && !afterGap) {
+      joins(line);
     } else {
-      prose.push(line);
+      prose.push({ line, size: words(line) });
       inBullet = false;
     }
-    gap = false;
   }
   return { bullets, prose, unread };
 }
 
 // Whether a section is one still collecting changes with none in it yet: an
-// "(Upcoming)" heading with no bullet, no heading and no code block under it,
-// only nothing or a sentence saying so. The first change to land brings a
-// bullet, and from then on the section is checked. A section that says more
-// than a sentence or two is not empty however it is written.
+// "(Upcoming)" heading with nothing under it but a sentence or two of plain
+// prose saying so. A bullet, a heading of any size, a demo line, a code block,
+// a comment marker or a list item it cannot read each mean there is something
+// to check. The first change to land brings a bullet, and from then on the
+// section is checked.
 const NOTHING_YET = 40;
 
 export function isEmpty(lines) {
   if (!lines[0].trimEnd().endsWith('(Upcoming)')) return false;
   const body = lines.slice(1);
-  if (body.some((line) => line.startsWith('## ') || line.startsWith('**See it move:**') || FENCE.test(line))) return false;
+  if (body.some((line) => /^ {0,3}#/.test(line) || line.startsWith('**See it move:**') || FENCE.test(line) || COMMENT_MARK.test(line))) return false;
   const { bullets, prose, unread } = itemsOf(body);
   if (bullets.length > 0 || unread.length > 0) return false;
-  return prose.reduce((sum, line) => sum + words(line), 0) <= NOTHING_YET;
+  return prose.reduce((sum, item) => sum + item.size, 0) <= NOTHING_YET;
 }
 
 export function check(lines) {
@@ -199,6 +221,10 @@ export function check(lines) {
   const fences = body.filter((line) => FENCE.test(line));
   if (fences.length > 0) {
     fail(`A line opens with a code-block marker (${fences.length} of them): a command or a snippet goes on the demo page, and inline code is fine.`);
+  }
+  const marks = body.filter((line) => COMMENT_MARK.test(line));
+  if (marks.length > 0) {
+    fail(`A comment marker is not part of a comment on its own lines (${marks.length} of them): open "<!--" at the start of a line and close it, or take it out: ${marks[0].trim().slice(0, 50)}…`);
   }
 
   // Split into the opening part and the parts under each "##" heading. Not by
@@ -216,10 +242,10 @@ export function check(lines) {
   }
 
   let total = 0;
-  const count = (texts) => texts.reduce((sum, text) => sum + words(text), 0);
+  const count = (items) => items.reduce((sum, item) => sum + item.size, 0);
 
   const opening = parts[0];
-  const introLines = opening.prose.filter((line) => line !== firstText);
+  const introLines = opening.prose.filter((item) => item.line !== firstText);
   const intro = count(introLines);
   // Bullets before any heading are counted too. A section still being written is
   // often a flat list, and its total used to be its first bullet alone.
@@ -242,14 +268,13 @@ export function check(lines) {
     if (part.heading === "What's new" && bullets.length > LIMITS.whatsNewBullets) {
       fail(`"What's new" has ${bullets.length} bullets; the limit is ${LIMITS.whatsNewBullets}. Move the smaller ones to "Also in this release".`);
     }
-    for (const bullet of bullets) {
-      const size = words(bullet.replace(/^- /, ''));
+    for (const { text, size } of bullets) {
       total += size;
       if (part.heading !== 'Tests and provenance' && size > limit) {
-        fail(`${size} words, limit ${limit}, under "${part.heading}": ${bullet.slice(2, 62)}…`);
+        fail(`${size} words, limit ${limit}, under "${part.heading}": ${text.slice(2, 62)}…`);
       }
-      if (part.heading !== 'Tests and provenance' && !/^- \*\*[^*]+\*\*/.test(bullet)) {
-        fail(`A bullet under "${part.heading}" does not open with its claim in bold: ${bullet.slice(2, 62)}…`);
+      if (part.heading !== 'Tests and provenance' && !BOLD_CLAIM.test(text)) {
+        fail(`A bullet under "${part.heading}" does not open with its claim in bold: ${text.slice(2, 62)}…`);
       }
     }
     const prose = count(part.prose);

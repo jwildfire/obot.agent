@@ -156,7 +156,9 @@ test('found in use: a flat list with no headings is totalled bullet by bullet, n
 // The second and third found that two attempts to read code fences had each left
 // a way to lose words or switch a rule off. So the checker reports what it cannot
 // read, and every limit below is tested at its edge: the last count that passes
-// and the first that fails.
+// and the first that fails. A fourth compared it with the checker before any of
+// this on a million generated sections; the four differences it found that were
+// wrong are the cases marked "fourth review" below.
 const REF = 'https://example.org/o/r/issues/';
 const bullet = (n, claim = 'A claim.') => `- **${claim}** ${long(n)}`;
 const shaped = ({ intro = 'A patch release. Nothing a user already has stops working.', news = [bullet(10)], also = [], demo = true, headings } = {}) =>
@@ -226,12 +228,15 @@ test('limits: Tests and provenance is 100 words, as prose or as bullets, and its
   assert.equal(problemsOf(tests(['- ' + long(50), '- ' + long(50)])), '', 'two plain bullets of 50');
   assert.match(problemsOf(tests(['- ' + long(51), '- ' + long(50)])), /"Tests and provenance" is 101 words/);
   assert.equal(problemsOf(tests(['- ' + long(90)])), '', 'one plain bullet of 90: no bold rule, no 60-word rule');
+  assert.match(problemsOf(tests([long(60), '', '- ' + long(41)])), /"Tests and provenance" is 101 words/, 'a paragraph and a bullet together');
 });
 
 // ---- the shape
 
 test('shape: the demo line comes first and links the demo', () => {
   assert.match(problemsOf(shaped({ demo: false })), /does not open with a "\*\*See it move:\*\*" line/);
+  const second = section('pkg v1.0.0 (Upcoming)', ['An introduction first.', '', GOOD].join('\n'));
+  assert.match(problemsOf(second), /does not open with a "\*\*See it move:\*\*" line/, 'first, not merely present');
   const unlinked = section('pkg v1.0.0 (Upcoming)', GOOD.replace(`the [annotated demo](${DEMO})`, 'the annotated demo'));
   assert.match(problemsOf(unlinked), /does not open with a "\*\*See it move:\*\*" line that links the demo page/);
 });
@@ -239,12 +244,20 @@ test('shape: the demo line comes first and links the demo', () => {
 test('shape: a bullet opens with its claim in bold, closed', () => {
   assert.match(problemsOf(shaped({ news: ['- A claim with no bold. ' + long(5)] })), /does not open with its claim in bold/);
   assert.match(problemsOf(shaped({ news: ['- **A claim never closed. ' + long(5)] })), /does not open with its claim in bold/);
+  assert.match(problemsOf(shaped({ news: ['- A plain opening, then **bold later**.'] })), /does not open with its claim in bold/);
+  // fourth review's fuzzing: bold around nothing is not a claim
+  for (const lines of [['- **', '**'], ['- ** **'], ['- ** A claim. **'], ['- ****']]) {
+    assert.match(problemsOf(shaped({ news: lines })), /does not open with its claim in bold/, lines.join('|'));
+  }
+  assert.equal(problemsOf(shaped({ news: ['- **A** one-letter claim.'] })), '');
+  assert.equal(problemsOf(shaped({ news: ['- **A claim wrapped', '  over two lines.** And more.'] })), '');
   assert.match(problemsOf(shaped({ also: ['- Plain. ' + long(5)] })), /under "Also in this release" does not open with its claim in bold/);
 });
 
 test('shape: headings are the five, in order, once each, with What\'s new among them', () => {
   const heads = (...names) => problemsOf(shaped({ headings: names.flatMap((name) => [`## ${name}`, '', bullet(5), '']) }));
   assert.equal(heads("What's new", 'Deprecated', 'Removed', 'Also in this release'), '');
+  assert.equal(heads("What's new  ", ' Deprecated'.trim() + '\t'), '', 'space after a heading is not part of its name');
   assert.match(heads('Also in this release', "What's new"), /"## What's new" is repeated or out of order/);
   assert.match(heads("What's new", "What's new"), /"## What's new" is repeated or out of order/);
   assert.match(heads("What's new", 'Internals'), /"## Internals" is not one of the headings/);
@@ -261,6 +274,7 @@ test('shape: bullets come under a heading', () => {
 
 test('bullets: a star and a plus are bullets too', () => {
   for (const mark of ['*', '+']) {
+    assert.equal(problemsOf(shaped({ news: [`${mark} **A claim.** ` + long(10)] })), '', `${mark}: in bold, so nothing to report`);
     assert.match(problemsOf(shaped({ news: [`${mark} **A claim.** ` + long(90)] })), OVER, mark);
     assert.equal(isEmpty(upcoming(`${mark} **A change.** Written so.`)), false, mark);
   }
@@ -278,11 +292,15 @@ test('bullets: a line joins a bullet only when Markdown would put it there', () 
   assert.match(under([bullet(40), '', '\t' + long(40)]).problems.join('\n'), OVER, 'a tab is an indent');
   assert.deepEqual(under([bullet(40), '', ' ' + long(40)]).problems, [], 'one space is no indent');
   assert.deepEqual(under([bullet(40), '', long(40)]).problems, []);
+  assert.deepEqual(under([bullet(40), '', long(20), long(40)]).problems, [], 'nor is the second line of the paragraph after it');
   // a nested bullet is part of its parent
   assert.match(under([bullet(40), '  - ' + long(40)]).problems.join('\n'), OVER);
   // a smaller heading or a rule across the page ends a bullet
   assert.deepEqual(under([bullet(40), '### A sub-heading', long(40)]).problems, []);
   assert.deepEqual(under([bullet(40), '***', long(40)]).problems, []);
+  // and what follows it is not the bullet's even when indented
+  assert.deepEqual(under([bullet(40), '### A sub-heading', '  ' + long(40)]).problems, []);
+  assert.deepEqual(under([bullet(40), '***', '  ' + long(40)]).problems, []);
   // only "1." can break into a paragraph; another number straight under a line is that line going on
   assert.match(under([bullet(40), '10. ' + long(40)]).problems.join('\n'), OVER);
   // and none of it loses a word
@@ -335,6 +353,15 @@ test('unread: a list item or a heading off the margin is reported, and is not no
   }
   // its words are still counted
   assert.equal(result(shaped({ news: [bullet(5), '', ' - ' + long(20)] })).total, result(shaped()).total - 12 + 7 + 20);
+  // in the part before the first heading too, a list item and a code block alike
+  assert.match(problemsOf(shaped({ intro: 'An introduction.\n\n1. A step.' })), off);
+  assert.match(problemsOf(shaped({ intro: 'An introduction.\n\n```\nnpm test\n```' })), /code-block marker/);
+  // indented by a tab, or numbered in two digits, after a gap
+  assert.match(problemsOf(shaped({ news: [long(5), '', '\t- x', '', bullet(5)] })), off);
+  assert.match(problemsOf(shaped({ news: [bullet(5), '', '12. x'] })), off);
+  // straight under a smaller heading or a rule, any number starts a list
+  assert.match(problemsOf(shaped({ news: [bullet(5), '', '### Steps', '2. second'] })), off);
+  assert.match(problemsOf(shaped({ news: [bullet(5), '', '---', '2. second'] })), off);
   // straight under a bullet, "1." starts a list and is reported
   assert.match(problemsOf(shaped({ news: [bullet(5), '1. x'] })), off);
   // prose that only looks a little like one is left alone
@@ -355,21 +382,63 @@ test('words: a link is its text; an image, a tag and a comment are nothing', () 
   const news = shaped({ news: [bullet(10), '', `<!-- ${long(700)}`, '# not a heading', '-->'] }) + '\n' + section('pkg v0.9.0', long(900));
   assert.deepEqual(result(news).problems, []);
   assert.equal(result(news).total, result(shaped()).total);
+  assert.equal(words('word </b> word'), 2, 'a closing tag too');
 });
 
 test('words: what only looks like markup is counted', () => {
   assert.equal(words('Values <5 are flagged and counts >10 are capped'), 9, 'a tag opens with a letter');
   assert.equal(words('[see](one two three four)'), 4, 'an address has no space in it, so this is four words and not one');
-  assert.equal(words('[one](https://example.org/a "the title of it") two'), 6);
-  // "<!--" in a sentence is text, and does not pair with a later "-->"
-  const marker = shaped({ news: [bullet(10) + ' The `<!--` marker.', bullet(60, 'Two.'), bullet(10, 'Three.') + ' `-->` ends it.'] });
-  // three bullets of 14, 61 and 13 words in place of the one of 12
-  assert.equal(result(marker).total, result(shaped()).total - 12 + 14 + 61 + 13);
+  assert.equal(words('Привет мир, 你好'), 3, 'a word is letters of any alphabet');
+  assert.equal(words('a -- b ** c'), 3, 'marks on their own are not words');
+});
+
+test('words: a title after an address is not read, in a link or an image', () => {
+  assert.equal(words('See [the guide](https://example.org/g "The guide to it") now'), 4);
+  assert.equal(words("See [the guide](https://example.org/g 'The guide to it') now"), 4);
+  assert.equal(words('![a chart](https://example.org/c.png "Counts by arm") word'), 1);
+});
+
+test('words: counted a line at a time, so nothing that spans lines takes words out', () => {
+  // fourth review: "<LLN, … >ULN" over a wrapped bullet was read as one tag, 80 words as 15
+  const wrapped = shaped({ news: ['- **Values are flagged.** Those <LLN, ' + long(75), '  and those >ULN.'] });
+  assert.match(problemsOf(wrapped), /8\d words, limit 70/);
+  const image = shaped({ news: ['- **A claim.** ![' + long(75), '  more](https://example.org/c.png)'] });
+  assert.match(problemsOf(image), /words, limit 70/);
+  // a wrapped bullet is the sum of its lines, with no word lost at a join
+  const sum = result(shaped({ news: [bullet(20), long(20), '  ' + long(20)] })).total - result(shaped()).total;
+  assert.equal(sum, 22 + 20 + 20 - 12);
+});
+
+test('comments: one on its own lines is not read; any other marker is reported', () => {
+  const marker = /comment marker is not part of a comment on its own lines/;
+  const base = result(shaped()).total;
+  // on its own lines: gone, and what follows the close on its last line is kept
+  const block = shaped({ news: [bullet(10), '', '<!-- ' + long(300), long(300), '--> kept words'] });
+  assert.deepEqual(result(block).problems, []);
+  assert.equal(result(block).total, base + 2);
+  assert.deepEqual(result(shaped({ news: [bullet(10), '<!-- one line -->'] })).problems, []);
+  // fourth review: an indented comment was read as text, and a "# " line in it ended the section
+  const indented = shaped({ headings: [' <!--', '# to do before release', ' -->', "## What's new", '', '- ' + long(81)] });
+  assert.match(problemsOf(indented), marker);
+  assert.equal(isEmpty(upcoming([' <!--', '# to do', ' -->', '- ' + long(81)].join('\n'))), false);
+  // fourth review: its words were read as the introduction
+  assert.match(problemsOf(shaped({ intro: ' <!-- introduction to come -->' })), marker);
+  // fourth review: the empty comment "<!-->" paired with a "-->" further down
+  const empty = shaped({ news: [bullet(10) + ' <!-- old', '<!--> ', '- ' + long(80), '-->'] });
+  assert.match(problemsOf(empty), marker);
+  assert.match(problemsOf(empty), OVER);
+  // in a sentence, never closed, or closed twice: reported, and the words around it counted
+  for (const lines of [[bullet(10) + ' The `<!--` marker.'], [bullet(10), '', '<!-- never closed', bullet(10, 'Two.')], [bullet(10) + ' One <!-- two --> three.'], [bullet(10), '-->']]) {
+    assert.match(problemsOf(shaped({ news: lines })), marker, lines.join('|'));
+    assert.ok(result(shaped({ news: lines })).total >= base, lines.join('|'));
+  }
+  assert.equal(isEmpty(upcoming('Nothing yet. <!-- ' + long(5))), false);
 });
 
 test('words: a closing citation is left out only when it is a real reference', () => {
   const cited = (tail) => words(`One two. ${tail}`);
   assert.equal(cited(`[#7](${REF}7)`), 2);
+  assert.equal(words(`One two [#7](${REF}7)`), 2, 'with no full stop before it, the word before it is still a word');
   assert.equal(cited(`[r#7](${REF}7), PR [o/r#8](https://example.org/o/r/pull/8).`), 2);
   assert.equal(cited('[roadmap #7](https://github.com/jwildfire/obot.roadmap/issues/7)'), 2, 'the part of the name after a dot');
   assert.equal(cited('[jwildfire/obot.agent#3](https://github.com/jwildfire/obot.agent/discussions/3#discussioncomment-1)'), 2);
@@ -396,6 +465,8 @@ test('empty: only an upcoming section that says next to nothing', () => {
   assert.equal(isEmpty(upcoming(NOTHING)), true);
   assert.equal(isEmpty(upcoming(long(40))), true);
   assert.equal(isEmpty(upcoming(long(41))), false);
+  assert.equal(isEmpty(upcoming('### Fixes\n\nOne sentence.')), false, 'a heading of any size is something');
+  assert.equal(isEmpty(upcoming('#NoSpace is prose here.')), false, 'and anything that might be one');
   assert.equal(isEmpty(sectionOf(section('pkg v0.4.0', NOTHING))), false, 'a released section is never empty');
   assert.equal(isEmpty(sectionOf(section('pkg (Upcoming) v0.4.0', NOTHING))), false, 'the heading ends with it');
   assert.equal(isEmpty(sectionOf(section('pkg v0.4.0 (Upcoming)  ', NOTHING))), true);
