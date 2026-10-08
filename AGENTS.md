@@ -99,7 +99,10 @@ refuses any other kind of write are tooling of his workspace, not of this or any
 repository; the workspace's README describes them.
 
 Three things are his alone, and a session does not do them with any token: approving a
-pull request, merging past a ruleset, and changing a ruleset.
+pull request, merging past a ruleset, and changing a ruleset. His approval of a release
+candidate may be given in the session's approval prompt; the session then records it as
+his review and merges, tags and publishes as the bot (his decision, 2026-10-07; the
+session skill's step 7). A "yes" typed in chat is not that approval.
 
 Authorship is also on the object: the drafted-by line after a `---` rule at the foot of
 every issue, PR and comment, and the `Co-Authored-By` trailer the harness supplies on
