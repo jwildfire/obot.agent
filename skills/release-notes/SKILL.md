@@ -20,7 +20,9 @@ This skill is how to write the notes those rules ask for.
 ## The template
 
 [safety.viz v1.9.1](https://github.com/jwildfire/safety.viz/blob/dev/NEWS.md) is the
-template: 475 words. Copy its shape, not its length to the word.
+template: 475 words. Copy its shape, not its length to the word. One bullet in it, under
+"Also in this release", runs to 90 words against the limit of 60 set since; v1.9.2 in the
+same file, 345 words, passes every limit.
 
 ```markdown
 # {package} vX.Y.Z (Upcoming)
@@ -50,8 +52,25 @@ template: 475 words. Copy its shape, not its length to the word.
 
 ## The limits
 
-Counted as a reader meets the words: a link counts as its text, and the issue and
-pull-request links that close a bullet are not counted.
+Counted as a reader meets the words, a line at a time: a link counts as its text, and the
+issue and pull-request links that close a line are not counted. A closing link is one of
+those only when its text is the reference (`#12`, `repo#12`, `owner/repo#12`,
+`roadmap #12`) and its address is that issue, pull request or discussion; ten a line at
+most. A bullet wrapped over several lines is one bullet.
+
+The checker reads this shape and no other, and reports what it cannot read:
+
+- Bullets are `- ` at the margin (`* ` and `+ ` are read the same). A list item that is
+  numbered, followed by a tab, or indented with no bullet above it is reported.
+- Headings are `## ` at the margin, the five above, once each and in that order.
+- No fenced code blocks. A command or a snippet goes on the demo page; inline code is
+  fine. A line that opens with three backticks or tildes is reported, and its words are
+  counted.
+- A comment sits on its own lines, opening at the start of a line. A `<!--` or `-->`
+  anywhere else is reported.
+
+Where it still reads something differently from a reader is listed in
+[obot.agent#354](https://github.com/jwildfire/obot.agent/issues/354).
 
 | Part | Limit |
 |---|---|
@@ -108,8 +127,8 @@ does, add it there first: a detail is moved, never dropped.
    node /path/to/obot.agent/skills/release-notes/check-notes.mjs NEWS.md
    ```
 
-   It prints the section's word count and each part over its limit, and exits 1 until
-   there is none. Give it a version as a second argument to check an older section.
+   It prints the section's word count, each part over its limit and each line it
+   cannot read, and exits 1 until there is none. Give it a version as a second argument to check an older section.
    An `(Upcoming)` section with no change in it yet has nothing to check, and passes.
    Its own tests: `node --test check-notes.test.mjs`, beside it.
 7. Check every link in the section answers, and that the demo page carries each detail
