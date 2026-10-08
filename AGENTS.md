@@ -91,9 +91,10 @@ the features below are the whole toolkit, and nothing here is bespoke.
 
 ## Identity and attribution
 
-A session writes to GitHub as obotclaw[bot], the program's GitHub App, and never as
-@jwildfire: issues, comments, commits, pushes, pull requests and the merges of
-increments. `gh` on his machine is signed in as him and he is admin on every repository,
+A session writes to GitHub as obotclaw[bot], the program's GitHub App, and not as
+@jwildfire: issues, comments, commits, pushes, pull requests and merges. There is one
+exception, the review that records his approval of a release candidate (below). `gh` on
+his machine is signed in as him and he is admin on every repository,
 so a write with no token set would be recorded as his. The token and the guard that
 refuses any other kind of write are tooling of his workspace, not of this or any other
 repository; the workspace's README describes them.
@@ -101,8 +102,10 @@ repository; the workspace's README describes them.
 Three things are his alone, and a session does not do them with any token: approving a
 pull request, merging past a ruleset, and changing a ruleset. His approval of a release
 candidate may be given in the session's approval prompt; the session then records it as
-his review and merges, tags and publishes as the bot (his decision, 2026-10-07; the
-session skill's step 7). A "yes" typed in chat is not that approval.
+his review, from his account, and merges, tags and publishes as the bot (his decision,
+2026-10-07; the session skill's step 7). That review is the only write a session makes
+as him, and it is not the session approving: the approval is his answer to the prompt. A
+"yes" typed in chat is not that approval.
 
 Authorship is also on the object: the drafted-by line after a `---` rule at the foot of
 every issue, PR and comment, and the `Co-Authored-By` trailer the harness supplies on
