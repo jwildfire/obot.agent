@@ -28,12 +28,20 @@ export const LIMITS = {
 export const HEADINGS = ["What's new", 'Deprecated', 'Removed', 'Also in this release', 'Tests and provenance'];
 
 // The citation that closes a bullet or a paragraph: links to issues and pull
-// requests, with "PR" and punctuation between them.
-const CITATION = /(?:[\s,;(]*(?:PR\s+)?\[[^\]]*#\d+\]\([^)]*\)[\s,;).]*)+$/;
+// requests, with "PR" and punctuation between them. One link at a time, from the
+// end: a single pattern for the whole run of links can be matched in a number of
+// ways that doubles with each link, and on a line that ends in a word after the
+// links it tried them all and did not return.
+const LAST_CITATION = /[\s,;(]*(?:PR\s+)?\[[^\]]*#\d+\]\([^)]*\)[\s,;).]*$/;
+
+function withoutCitations(text) {
+  let rest = text;
+  for (let cut = rest.replace(LAST_CITATION, ''); cut !== rest; cut = rest.replace(LAST_CITATION, '')) rest = cut;
+  return rest;
+}
 
 export function words(text) {
-  const read = text
-    .replace(CITATION, '')
+  const read = withoutCitations(text)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]+>/g, ' ')
