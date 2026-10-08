@@ -20,7 +20,9 @@ This skill is how to write the notes those rules ask for.
 ## The template
 
 [safety.viz v1.9.1](https://github.com/jwildfire/safety.viz/blob/dev/NEWS.md) is the
-template: 475 words. Copy its shape, not its length to the word.
+template: 475 words. Copy its shape, not its length to the word. One bullet in it, under
+"Also in this release", runs to 90 words against the limit of 60 set since; v1.9.2 in the
+same file, 345 words, passes every limit.
 
 ```markdown
 # {package} vX.Y.Z (Upcoming)
@@ -51,7 +53,9 @@ template: 475 words. Copy its shape, not its length to the word.
 ## The limits
 
 Counted as a reader meets the words: a link counts as its text, and the issue and
-pull-request links that close a bullet are not counted.
+pull-request links that close a bullet are not counted. A closing link is one of those only
+when its text is the reference (`#12`, `repo#12`, `roadmap #12`) and its address ends in the
+same number; a bullet wrapped over several lines is one bullet; a code block is counted.
 
 | Part | Limit |
 |---|---|

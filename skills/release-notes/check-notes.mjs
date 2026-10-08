@@ -10,8 +10,9 @@
 //
 // Words are counted as a reader meets them: a link counts as its text, not its
 // address, and the issue and pull-request links that close a bullet are not
-// counted at all. Exit code 1 when a limit is passed, 2 when the file or the
-// section cannot be read.
+// counted at all. A code block is counted, and nothing in one is taken for a
+// heading or a bullet. Exit code 1 when a limit is passed, 2 when the file or
+// the section cannot be read.
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -28,23 +29,34 @@ export const LIMITS = {
 export const HEADINGS = ["What's new", 'Deprecated', 'Removed', 'Also in this release', 'Tests and provenance'];
 
 // The citation that closes a bullet or a paragraph: links to issues and pull
-// requests, with "PR" and punctuation between them. Only a link whose text is a
-// reference is one: "#12", "repo#12", "owner/repo#12" or "roadmap #12". A link
-// that merely ends in a number ("see v#12", "the fix in #3") is prose and is
-// counted. One link at a time, from the end, and only in the last few hundred
-// characters of the line: a single pattern for the whole run of links can be
-// matched in a number of ways that doubles with each link, and a pattern free to
-// start anywhere takes time that grows with the square of the line.
-const LAST_CITATION = /[\s,;(]*(?:PR\s+)?\[(?:[\w.-]+(?:\/[\w.-]+)?\s?)?#\d+\]\([^)\s]*\)[\s,;).]*$/;
+// requests, with "PR" and punctuation between them. A link is a citation only
+// when it is a reference and nothing else: its text is "#12", "repo#12",
+// "owner/repo#12" or "roadmap #12", its address ends in that same number as an
+// issue, a pull request or a discussion, and any name in the text is in the
+// address. Anything else that closes a line is prose and is counted, so a
+// sentence cannot be put out of the count a word at a time. One link at a time,
+// from the end, and only in the last few hundred characters of the line: a
+// single pattern for the whole run of links can be matched in a number of ways
+// that doubles with each link, and a pattern free to start anywhere takes time
+// that grows with the square of the line.
+const LAST_CITATION = /[\s,;(]*(?:PR\s+)?\[((?:[\w.-]+(?:\/[\w.-]+)?\s?)?)#(\d+)\]\(([^)\s]*)\)[\s,;).]*$/;
+const REFERENCE = /\/(?:issues|pull|discussions)\/(\d+)(?:[#?][^/]*)?$/;
 const TAIL = 400;
+
+function isReference(name, number, address) {
+  const at = REFERENCE.exec(address);
+  if (!at || at[1] !== number) return false;
+  const where = address.toLowerCase();
+  return name.trim().toLowerCase().split('/').every((part) => where.includes(part));
+}
 
 function withoutCitations(text) {
   let end = text.length;
   for (;;) {
     const tail = text.slice(Math.max(0, end - TAIL), end);
-    const cut = tail.replace(LAST_CITATION, '');
-    if (cut === tail) return text.slice(0, end);
-    end -= tail.length - cut.length;
+    const found = LAST_CITATION.exec(tail);
+    if (!found || !isReference(found[1], found[2], found[3])) return text.slice(0, end);
+    end -= found[0].length;
   }
 }
 
@@ -71,26 +83,49 @@ function withoutComments(text) {
   }
 }
 
-const FENCE = /^\s*(```|~~~)/;
 const BULLET = /^[-*+] /;
+// A rule across the page: "---", "* * *", "___". Not a bullet, and no words.
+const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+// A fence opens on a line that is its marker and at most one word naming the
+// language, and closes on a line of the same character, at least as long, with
+// nothing after it. A line that merely begins with backticks is a line of prose.
+const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([\w+.#-]{0,40})[ \t]*$/;
 
-// The lines outside code fences: a "# comment" in a shell example is not a
-// heading, and a "- flag" in one is not a bullet.
-function outsideFences(lines) {
-  let fenced = false;
-  return lines.map((line) => {
-    if (FENCE.test(line)) {
-      fenced = !fenced;
-      return false;
+// Which lines sit inside a code fence, its two marker lines included, and which
+// lines open a fence that never closes. An unclosed fence fences nothing: read
+// as "code from here on", one stray marker switched off every rule below it.
+function fencesOf(lines) {
+  const fenced = lines.map(() => false);
+  const unclosed = [];
+  // Once a marker of some length has found no closer, no later marker that long
+  // can: without this a file of openers is searched to its end once for each.
+  const hopeless = { '`': Infinity, '~': Infinity };
+  for (let i = 0; i < lines.length; i++) {
+    const open = FENCE.exec(lines[i]);
+    if (!open) continue;
+    const [kind, length] = [open[1][0], open[1].length];
+    let close = -1;
+    if (length < hopeless[kind]) {
+      for (let j = i + 1; j < lines.length && close < 0; j++) {
+        const mark = FENCE.exec(lines[j]);
+        if (mark && mark[2] === '' && mark[1][0] === kind && mark[1].length >= length) close = j;
+      }
     }
-    return !fenced;
-  });
+    if (close < 0) {
+      hopeless[kind] = Math.min(hopeless[kind], length);
+      unclosed.push(i);
+      continue;
+    }
+    for (let j = i; j <= close; j++) fenced[j] = true;
+    i = close;
+  }
+  return { fenced, unclosed };
 }
 
 export function sectionOf(news, version) {
   const lines = withoutComments(news).split('\n');
-  const open = outsideFences(lines);
-  const starts = lines.map((line, i) => (open[i] && /^# \S/.test(line) ? i : -1)).filter((i) => i >= 0);
+  const { fenced } = fencesOf(lines);
+  const starts = lines.map((line, i) => (!fenced[i] && /^# \S/.test(line) ? i : -1)).filter((i) => i >= 0);
   // A version names the section whose heading carries exactly that version,
   // with or without its "v": "v0.3.0" is not the section "v0.3.0.9000".
   const bare = (word) => word.replace(/^v/, '');
@@ -103,27 +138,41 @@ export function sectionOf(news, version) {
 }
 
 // A part of a section as a reader meets it: its bullets, each with the lines
-// it was wrapped over joined back on, and its other lines. A bullet opens with
-// "-", "*" or "+". A line straight under a bullet, or an indented one after a
-// gap, belongs to that bullet. What is inside a code fence is counted as prose.
+// that belong to it joined back on, and its other lines. Every line that is not
+// blank lands in one or the other, so no word goes uncounted. A bullet opens
+// with "-", "*" or "+". A line straight under a bullet belongs to it, and so
+// does an indented line after a gap. A code block belongs to a bullet only when
+// it is indented under one; at the margin it is prose, and it ends the bullet.
+// So does a smaller heading, and so does a rule across the page.
 function itemsOf(lines) {
   const bullets = [];
   const prose = [];
-  const open = outsideFences(lines);
+  const { fenced } = fencesOf(lines);
   let inBullet = false;
   let gap = true;
   lines.forEach((line, i) => {
-    if (FENCE.test(line)) return;
     if (line.trim() === '') {
       gap = true;
       return;
     }
-    if (!open[i]) prose.push(line);
-    else if (BULLET.test(line)) {
+    const indented = /^(?:\t| {2,})\S/.test(line);
+    const joins = () => (bullets[bullets.length - 1] += ` ${line.trim()}`);
+    if (fenced[i]) {
+      if (inBullet && indented) joins();
+      else {
+        prose.push(line);
+        inBullet = false;
+      }
+    } else if (RULE.test(line)) {
+      inBullet = false;
+    } else if (BULLET.test(line)) {
       bullets.push(`- ${line.slice(2)}`);
       inBullet = true;
-    } else if (inBullet && (!gap || /^\s{2,}\S/.test(line))) {
-      bullets[bullets.length - 1] += ` ${line.trim()}`;
+    } else if (/^#{1,6} /.test(line)) {
+      prose.push(line);
+      inBullet = false;
+    } else if (inBullet && (!gap || indented)) {
+      joins();
     } else {
       prose.push(line);
       inBullet = false;
@@ -134,16 +183,18 @@ function itemsOf(lines) {
 }
 
 // Whether a section is one still collecting changes with none in it yet: an
-// "(Upcoming)" heading with no bullet and no heading under it, only nothing or
-// a sentence saying so. The first change to land brings a bullet, and from
-// then on the section is checked. A section that says more than a sentence or
-// two is not empty however it is written.
+// "(Upcoming)" heading with no bullet, no heading and no code block under it,
+// only nothing or a sentence saying so. The first change to land brings a
+// bullet, and from then on the section is checked. A section that says more
+// than a sentence or two is not empty however it is written.
 const NOTHING_YET = 40;
 
 export function isEmpty(lines) {
-  if (!/\(Upcoming\)\s*$/.test(lines[0])) return false;
+  if (!lines[0].trimEnd().endsWith('(Upcoming)')) return false;
   const body = lines.slice(1);
-  if (body.some((line) => /^(## |\*\*See it move:\*\*)/.test(line))) return false;
+  if (body.some((line) => line.startsWith('## ') || line.startsWith('**See it move:**'))) return false;
+  const { fenced, unclosed } = fencesOf(body);
+  if (fenced.includes(true) || unclosed.length > 0) return false;
   const { bullets, prose } = itemsOf(body);
   return bullets.length === 0 && prose.reduce((sum, line) => sum + words(line), 0) <= NOTHING_YET;
 }
@@ -159,10 +210,12 @@ export function check(lines) {
 
   // Split into the opening part and the parts under each "##" heading.
   const parts = [{ heading: null, lines: [] }];
-  const open = outsideFences(body);
+  const { fenced, unclosed } = fencesOf(body);
+  for (const at of unclosed) fail(`A code fence is opened and never closed: ${body[at].trim().slice(0, 40)}`);
   body.forEach((line, i) => {
-    const heading = open[i] && /^## (.+?)\s*$/.exec(line);
-    if (heading) parts.push({ heading: heading[1], lines: [] });
+    // Not a pattern ending in "\s*$": on a heading followed by a long run of
+    // spaces that took time growing with the square of the run.
+    if (!fenced[i] && line.startsWith('## ')) parts.push({ heading: line.slice(3).trim(), lines: [] });
     else parts[parts.length - 1].lines.push(line);
   });
   for (const part of parts) Object.assign(part, itemsOf(part.lines));
