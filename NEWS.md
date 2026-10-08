@@ -1,6 +1,6 @@
 <!--
 NEWS.md is the running release log and the draft of each release's notes.
-Shape (per skills/rc-release-notes/SKILL.md): newest release first; every release
+Shape (per skills/release-notes/SKILL.md): newest release first; every release
 section opens with its demo-artifact link, then a text-only, functionality-first
 account of what a user can now do. The GitHub release publishes from the section
 here, copied verbatim, when the release is approved and tagged.
@@ -8,7 +8,27 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.6.0 (Upcoming)
 
-- Nothing yet.
+**See it move:** the [annotated v0.6.0 demo](https://jwildfire.github.io/obot.roadmap/reports/oa-v0.6-hub-v0.5-demo/) has captures, try-it steps and the detail behind everything below.
+
+A change of where sessions run, and the fixes from a security review. Since 2026-10-07 a session runs on @jwildfire's own machines and writes to GitHub as obotclaw[bot]; cloud sessions, which v0.5.0 introduced, are parked. The cloud setup script and the step that published a cloud session's cost no longer apply. @jwildfire can now approve a release in the session, which then merges and publishes it.
+
+## What's new
+
+- **A session runs locally and writes to GitHub as the bot.** It starts from @jwildfire's workspace and authors its issues, pull requests and merges as obotclaw[bot], never as him. Approving a pull request, merging past a ruleset and changing a ruleset stay his alone. [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **Release notes are held to a length.** The [`release-notes`](https://github.com/jwildfire/obot.agent/blob/main/skills/release-notes/SKILL.md) skill gives the shape and says what moves to the demo page; its checker fails a section over 600 words or a bullet over its limit. PR [#341](https://github.com/jwildfire/obot.agent/pull/341)
+- **A release candidate is reviewed by three subagents the session spawns.** One reads for correctness, one for the definition of done and its proof, one for the hard rules. The session resolves every finding and posts the review on the pull request before @jwildfire is asked. PR [#340](https://github.com/jwildfire/obot.agent/pull/340)
+- **A session checks who wrote a sign-off.** It takes the author of an objective's sign-off from GitHub's record of the comment, not from the comment's words, and the standup reads only comments from @jwildfire and the bot. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#345](https://github.com/jwildfire/obot.agent/pull/345)
+- **@jwildfire can approve a release in the session.** Once the review gate has passed, the session asks him in a fixed prompt that names the pull request and its head commit; he can still approve on GitHub. On "Approve and continue" it records his review from his account, merges as obotclaw[bot], tags and publishes. A new commit needs a new answer, and a "yes" typed in chat does not count. [#356](https://github.com/jwildfire/obot.agent/issues/356), [#358](https://github.com/jwildfire/obot.agent/issues/358), PR [#357](https://github.com/jwildfire/obot.agent/pull/357)
+
+## Also in this release
+
+- **The release-notes checker reports what it cannot read.** A code block, an indented list or a stray comment marker is named, not guessed at. A line of links no longer hangs it, a wrapped bullet is one bullet, and started through a link it checks. Each limit is tested at its edge; what it still misreads is listed. [#342](https://github.com/jwildfire/obot.agent/issues/342), [#344](https://github.com/jwildfire/obot.agent/issues/344), [#346](https://github.com/jwildfire/obot.agent/issues/346), [#351](https://github.com/jwildfire/obot.agent/issues/351), [#353](https://github.com/jwildfire/obot.agent/issues/353), [#354](https://github.com/jwildfire/obot.agent/issues/354), PR [#343](https://github.com/jwildfire/obot.agent/pull/343), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **Cloud sessions are parked, and their page is kept.** Its setup script now installs the two skills from `stable`, by name. The step in which a session published its own cost, added earlier in this cycle, is removed with them. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#339](https://github.com/jwildfire/obot.agent/pull/339), PR [#345](https://github.com/jwildfire/obot.agent/pull/345), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+- **The standup says it is not scheduled.** Its published file is still the placeholder of 2026-09-11. [#346](https://github.com/jwildfire/obot.agent/issues/346), PR [#347](https://github.com/jwildfire/obot.agent/pull/347)
+
+## Tests and provenance
+
+36 checker tests pass (`node --test skills/release-notes/check-notes.test.mjs`). Each security finding fixed here was reproduced before its fix. The bot's token and the guard that enforces the first bullet are tooling of @jwildfire's workspace and are in no repository.
 
 # obot.agent v0.5.0
 
