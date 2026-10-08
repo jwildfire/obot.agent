@@ -1,5 +1,12 @@
 # Cloud environments
 
+> Parked on 2026-10-07. Sessions run locally for now, from @jwildfire's workspace on his
+> own machines, where they write to GitHub as obotclaw[bot]. This page is kept for when
+> cloud sessions resume and describes nothing that is running today. Two things here are
+> unsolved and are the reason for parking: a cloud session acts as the account that
+> connected it, which is @jwildfire's and is admin on every repository, and the bot's
+> key cannot be placed in a sandbox without giving it to everything that runs there.
+
 Every requirement session is a [Claude Code cloud session](https://code.claude.com/docs/en/claude-code-on-the-web)
 bound to the repository where the objective's tasks live, running in a
 [cloud environment](https://code.claude.com/docs/en/cloud-environments) configured at
@@ -26,13 +33,20 @@ files and run each procedure as a skill:
 ```bash
 # Standards: the hub's docs, readable at ~/obot.roadmap/docs/
 git clone --depth 1 https://github.com/jwildfire/obot.roadmap.git "$HOME/obot.roadmap"
-# The skills, installed as user skills: requirement-session and release-notes
-git clone --depth 1 https://github.com/jwildfire/obot.agent.git "$HOME/obot.agent"
+# The skills, installed as user skills: requirement-session and release-notes.
+# From `stable`, the released branch, which changes only on @jwildfire's approving
+# review - never `main`, where a merge would reach every environment on its next start.
+git clone --depth 1 --branch stable https://github.com/jwildfire/obot.agent.git "$HOME/obot.agent"
 mkdir -p "$HOME/.claude/skills"
-for skill in "$HOME"/obot.agent/skills/*/; do
-  ln -sfn "${skill%/}" "$HOME/.claude/skills/$(basename "$skill")"
+for skill in requirement-session release-notes; do
+  [ -d "$HOME/obot.agent/skills/$skill" ] || { echo "skill $skill is not in the stable release" >&2; continue; }
+  ln -sfn "$HOME/obot.agent/skills/$skill" "$HOME/.claude/skills/$skill"
 done
 ```
+
+The two skills are linked by name. A loop over everything under `skills/` would install
+whatever directory a later change added there. `release-notes` reaches `stable` with
+v0.6.0; until then the script says it is missing and links the other.
 
 Each repository's own `CLAUDE.md` stays short and points at the same three documents;
 the block the hub's developer guidelines ask every repository to carry is:

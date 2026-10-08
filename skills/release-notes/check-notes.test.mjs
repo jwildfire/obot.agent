@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, isEmpty, sectionOf } from './check-notes.mjs';
+import { check, isEmpty, sectionOf, words } from './check-notes.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const checker = join(here, 'check-notes.mjs');
@@ -121,4 +121,26 @@ test('an upcoming section with a bullet, a heading or a demo line in it is check
     assert.equal(isEmpty(sectionOf(news)), false, body);
     assert.equal(run(checker, write('started.md', news)).status, 1, body);
   }
+});
+
+test('security review: a bullet that ends in many links and then a word is counted, not searched for ever', () => {
+  // Thirty citations and one more word. On the version before this test the word
+  // counter did not return: its pattern for the closing citations could be matched
+  // in a number of ways that doubles with each link, and it tried them all.
+  const links = Array.from({ length: 30 }, (_, i) => `[#${i}](https://example.org/${i})`).join(', ');
+  const body = GOOD.replace('[#1](https://example.org/1), PR [#2](https://example.org/2)', `${links} end`);
+  const file = write('many-links.md', section('pkg v1.0.0 (Upcoming)', body));
+  const result = spawnSync(process.execPath, [checker, file], { encoding: 'utf8', timeout: 5000 });
+  assert.equal(result.signal, null, 'the checker was still running after five seconds');
+  assert.equal(result.status, 0);
+});
+
+test('the citations that close a line are not counted, however they are punctuated', () => {
+  const cited = (tail) => words(`One two three.${tail}`);
+  assert.equal(cited(''), 3);
+  assert.equal(cited(' [#1](https://example.org/1)'), 3);
+  assert.equal(cited(' [#1](https://example.org/1), PR [#2](https://example.org/2).'), 3);
+  assert.equal(cited(' ([hub#3](https://example.org/3); [#4](https://example.org/4))'), 3);
+  assert.equal(cited(' [#1](https://example.org/1) and more'), 6, 'a link mid-line counts as its text');
+  assert.equal(cited(' [the guide](https://example.org/g)'), 5, 'a link that is not a citation is read');
 });
