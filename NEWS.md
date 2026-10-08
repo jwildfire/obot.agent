@@ -18,6 +18,7 @@ A change of where sessions run, and the fixes from a security review. Since 2026
 - **Release notes are held to a length.** The [`release-notes`](https://github.com/jwildfire/obot.agent/blob/main/skills/release-notes/SKILL.md) skill gives the shape and says what moves to the demo page; its checker fails a section over 600 words or a bullet over its limit. PR [#341](https://github.com/jwildfire/obot.agent/pull/341)
 - **A release candidate is reviewed by three subagents the session spawns.** One reads for correctness, one for the definition of done and its proof, one for the hard rules. The session resolves every finding and posts the review on the pull request before @jwildfire is asked. PR [#340](https://github.com/jwildfire/obot.agent/pull/340)
 - **A session checks who wrote a sign-off.** It takes the author of an objective's sign-off from GitHub's record of the comment, not from the comment's words, and the standup reads only comments from @jwildfire and the bot. [#344](https://github.com/jwildfire/obot.agent/issues/344), PR [#345](https://github.com/jwildfire/obot.agent/pull/345)
+- **A release is approved in the session.** Once the review gate has passed, the session asks @jwildfire in a prompt that names the pull request and its head commit. On "Approve and continue" it records his approving review on GitHub, merges as obotclaw[bot], tags and publishes. A new commit needs a new answer, and a "yes" typed in chat does not count. [#356](https://github.com/jwildfire/obot.agent/issues/356)
 
 ## Also in this release
 

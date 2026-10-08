@@ -14,10 +14,11 @@ this repository's. One requirement per session; an objective is the steering uni
 never a session.
 
 A session runs locally, from that workspace, and writes to GitHub as obotclaw[bot]: every
-issue, comment, commit, push, pull request and merge of an increment. The workspace's
+issue, comment, commit, push, pull request and merge. The workspace's
 README gives the one form a write takes and the guard that refuses any other. Three things
 are @jwildfire's alone, with any token: approving a pull request, merging past a ruleset,
-and changing a ruleset. Cloud sessions are parked
+and changing a ruleset. His approval of a release candidate may be given in the session
+and is then recorded by it as his review (step 7). Cloud sessions are parked
 ([`docs/cloud-environments.md`](../../docs/cloud-environments.md)).
 
 ## 1. Read the requirement and its tree
@@ -175,9 +176,30 @@ guidelines' Releases section is the authority on its dimensions and comment shap
 4. Only then: mark the RC ready for review, request @jwildfire, and move the requirement's
    status label to review (`--add-label "status: review" --remove-label "status: in session"`).
 
-The ruleset holds it for his review; never merge it yourself. A re-review is owed when
-the head changes after the review by anything other than the fixes for its findings, and
-for every new `-RCn`; it covers the diff since the reviewed commit.
+A re-review is owed when the head changes after the review by anything other than the
+fixes for its findings, and for every new `-RCn`; it covers the diff since the reviewed
+commit.
+
+The ruleset holds the release candidate for his approving review, and he gives it in one
+of two places (his decision, 2026-10-07; the developer guidelines' Commits section is the
+authority):
+
+- On GitHub, as a review of the pull request.
+- In the session. Run the workspace's `bin/obot-approval-prompt <repo> <n>` and put the
+  prompt it prints to him with AskUserQuestion, exactly as printed: one question, naming
+  the pull request by its title, address and head commit, with the options "Approve and
+  continue", "Request changes" and "Pause". On "Approve and continue", run the command it
+  prints, alone and with no token; it records his review on that commit. The workspace's
+  guard admits it only for that prompt, that answer and that commit, while the answer is
+  his last word in the session, so run it at once. A new commit needs a new answer, and
+  so does anything he says after answering. A "yes" typed in chat is not his review: put
+  the prompt to him.
+
+With his review on the pull request, and not before: merge it as obotclaw[bot] with
+`--match-head-commit <the commit he approved>`, never past the ruleset; create the tag on
+the release branch; publish the GitHub release from
+the `NEWS.md` section; and take "(Upcoming)" off that section's heading on the
+integration branch. On "Request changes", fix, re-review and bring back `-RCn+1`.
 
 ## 8. Finish
 
