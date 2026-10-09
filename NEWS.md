@@ -8,6 +8,14 @@ here, copied verbatim, when the release is approved and tagged.
 
 # obot.agent v0.7.0 (Upcoming)
 
+**See it move:** the [`requirement-session` skill on `main`](https://github.com/jwildfire/obot.agent/blob/main/skills/requirement-session/SKILL.md#4-work-the-tasks) is the release as it stands; the annotated demo page comes with the release candidate.
+
+A requirement session now checks what it built by looking at it. The rule comes from the design work for safety.viz release 1.11 and is one step in the session skill. Nothing a session already does changes.
+
+## What's new
+
+- **A session builds a visible change from its mockup and looks at it.** Before such a task closes, the session renders the result in a browser at the design's width, compares it with the mockup and puts the screenshot in the pull request. Where the mockup cannot be built as drawn, it asks. [#361](https://github.com/jwildfire/obot.agent/issues/361)
+
 # obot.agent v0.6.0 — sessions run locally and write as the bot
 
 **See it move:** the [annotated v0.6.0 demo](https://jwildfire.github.io/obot.roadmap/reports/oa-v0.6-hub-v0.5-demo/) has captures, try-it steps and the detail behind everything below.
