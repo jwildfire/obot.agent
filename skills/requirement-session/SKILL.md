@@ -106,6 +106,11 @@ This comment was drafted by Claude Code using <model>.
   assigned or requested.
 - Tests first where the change is testable (the upstream `tdd` skill); the repo's check
   must be green before the PR is opened, not after.
+- A task that changes what a person sees is built from the mockup its requirement's
+  Design names. Before it closes, render the result in a browser at the design's width,
+  compare it with the mockup, and put the screenshot in the pull request's evidence.
+  Where the mockup cannot be built as drawn, ask on the requirement; do not redesign
+  (the hub developer guidelines' Designing and checking what people look at).
 - A subagent or Workflow stage gets a brief that names its task issue and the definition
   of done, and returns the evidence, not a summary.
 - When a task's PR merges, comment on the task with the evidence and one sentence saying
