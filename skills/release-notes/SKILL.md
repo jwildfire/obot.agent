@@ -1,6 +1,6 @@
 ---
 name: release-notes
-description: "Write or cut a release's section of NEWS.md so it is short: one line to the demo page, a few sentences on what the release is, one short bullet per feature, a line on tests. Use when drafting release notes, preparing a release or a release candidate, adding an entry to NEWS.md as a change lands, or when @jwildfire says the notes are too long. Runs a checker that fails notes over the length limits. Do NOT use for the demo page itself (the detail the notes leave out goes there, under the hub developer guidelines' Releases section), for the release-candidate pull request's body, or for a commit message."
+description: "Write or cut a release's section of NEWS.md so it is short: one line to the demo page, a first sentence that stands alone on the homepage feed, a few sentences on what the release is, one short bullet per feature, a line on tests. Use when drafting release notes, preparing a release or a release candidate, adding an entry to NEWS.md as a change lands, or when @jwildfire says the notes are too long. Runs a checker that fails notes over the length limits. Do NOT use for the demo page itself (the detail the notes leave out goes there, under the hub developer guidelines' Releases section), for the release-candidate pull request's body, or for a commit message."
 argument-hint: "Path to NEWS.md, and the version if not the newest section"
 ---
 
@@ -22,14 +22,15 @@ This skill is how to write the notes those rules ask for.
 [safety.viz v1.9.1](https://github.com/jwildfire/safety.viz/blob/dev/NEWS.md) is the
 template: 475 words. Copy its shape, not its length to the word. One bullet in it, under
 "Also in this release", runs to 90 words against the limit of 60 set since; v1.9.2 in the
-same file, 345 words, passes every limit.
+same file, 345 words, passes every limit. Both open their introduction with "A patch
+release on …", which the homepage feed now refuses: see [The feed line](#the-feed-line).
 
 ```markdown
 # {package} vX.Y.Z (Upcoming)
 
 **See it move:** the [annotated vX.Y.Z demo]({deployed hub URL}) has captures, try-it steps and the detail behind everything below.
 
-{Two to four sentences: what the release is, what it needs, and whether anything a user already has stops working or behaves differently.}
+{The feed line: one sentence, at most 110 characters, that says what someone can now do. Then one to three sentences: what the release needs, and whether anything a user already has stops working or behaves differently.}
 
 ## What's new
 
@@ -76,6 +77,7 @@ Where it still reads something differently from a reader is listed in
 |---|---|
 | The whole section | 600 words |
 | The introduction | 80 words |
+| The introduction's first sentence | 110 characters |
 | What's new | 6 bullets, 70 words each |
 | Deprecated, Removed | 100 words a bullet: the reader has to act |
 | Also in this release | 60 words a bullet |
@@ -83,6 +85,29 @@ Where it still reads something differently from a reader is listed in
 
 A patch release is far shorter than the limit. If the notes do not fit, the release is
 not too big for the limits; the notes are carrying the demo page's work.
+
+## The feed line
+
+The first sentence of the introduction is posted on its own, as the release's line in the
+News feed on [jwildfire.github.io](https://jwildfire.github.io/). Every night
+`scripts/sync-releases.mjs` in that site's repository reads the release's notes on GitHub
+and commits that sentence to the feed without review. Only safety.viz and gsm.safety are
+in the feed today. Write every release's first sentence for it anyway.
+
+- It is the first paragraph after the demo line, without its links and markup, up to the
+  first `.`, `!` or `?` that a space and a capital letter follow. `v1.9.0` and `e.g.` do
+  not end it.
+- At most 110 characters. The site cuts anything longer and adds "…".
+- It names what someone can now do, as the bold claims below it do. It must make sense
+  with nothing around it: no "this", and no "on v1.9.0" for the reader to look up.
+- It does not open with the kind of release: "A patch release", "A patch to", "This
+  release", "An update to". The checker refuses those openings. A patch says what it fixes.
+
+| Posted as written | Better |
+|---|---|
+| A patch release on v1.9.1 | Run the demo app on your own machine with one script, and a cross-tabulation chart |
+| A patch to Hep Explorer | Hep Explorer sizes points by the new R ratio (nR), which the original renderer offered |
+| The demo app gains an RBQM tab: gsm's site metrics, worked out by R in your browser and drawn with gsm.viz's… | The demo app gains an RBQM tab: gsm's site metrics, run by R in your browser |
 
 ## What stays, and what goes to the demo page
 
@@ -120,15 +145,17 @@ does, add it there first: a detail is moved, never dropped.
 3. Write each bullet's bold sentence first. If the bold sentences read in a row do not
    tell someone what the release is, rewrite them before adding anything.
 4. Add at most two sentences to a bullet, then its links.
-5. Write the introduction last, from the bold sentences.
+5. Write the introduction last, from the bold sentences. Its first sentence is the
+   feed line: say the release's main claim in 110 characters or fewer.
 6. Run the checker, and cut until it passes:
 
    ```bash
    node /path/to/obot.agent/skills/release-notes/check-notes.mjs NEWS.md
    ```
 
-   It prints the section's word count, each part over its limit and each line it
-   cannot read, and exits 1 until there is none. Give it a version as a second argument to check an older section.
+   It prints the section's word count, each part over its limit, a feed line that is too
+   long or names only the kind of release, and each line it cannot read, and exits 1
+   until there is none. Give it a version as a second argument to check an older section.
    An `(Upcoming)` section with no change in it yet has nothing to check, and passes.
    Its own tests: `node --test check-notes.test.mjs`, beside it.
 7. Check every link in the section answers, and that the demo page carries each detail

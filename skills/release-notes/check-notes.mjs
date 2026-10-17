@@ -34,7 +34,8 @@ export const LIMITS = {
   noticeBullet: 100, // Deprecated, Removed: the reader has to act, so say how
   alsoBullet: 60, // Also in this release
   tests: 100, // the Tests and provenance paragraph
-  citations: 10 // closing references left out of one line's count
+  citations: 10, // closing references left out of one line's count
+  feedLine: 110 // characters in the introduction's first sentence
 };
 
 export const HEADINGS = ["What's new", 'Deprecated', 'Removed', 'Also in this release', 'Tests and provenance'];
@@ -210,6 +211,45 @@ export function isEmpty(lines) {
   return prose.reduce((sum, item) => sum + item.size, 0) <= NOTHING_YET;
 }
 
+// The line the homepage feed on jwildfire.github.io posts for a release, read
+// the way its scripts/sync-releases.mjs reads the release's notes: the first
+// paragraph of the introduction with twenty characters or more, without its
+// markup, up to the first ".", "!" or "?" followed by a space and a capital
+// letter, a quote or a bracket. So "v1.9.0" and "e.g. bio.viz" do not end it.
+// Keep the two in step: a change to one is a change to the other.
+function plainText(text) {
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/(^|\s)[*_]([^*_]+)[*_](?=[\s.,;:!?]|$)/g, '$1$2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function feedLine(lines) {
+  const opening = [];
+  for (const line of lines.slice(1)) {
+    if (line.startsWith('## ')) break;
+    opening.push(line);
+  }
+  const paragraphs = opening.join('\n').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  for (const p of paragraphs) {
+    if (/^#/.test(p) || /^\*\*see it move/i.test(p) || /^\|/.test(p) || /^```/.test(p) || /^[-*]\s/.test(p)) continue;
+    const text = plainText(p);
+    if (text.length < 20) continue;
+    const sentence = /^(.+?[.!?])(?=\s+[A-Z"(])/.exec(text);
+    return (sentence ? sentence[1] : text).replace(/[.:;,]\s*$/, '');
+  }
+  return '';
+}
+
+// An opening that says what kind of release this is and not what it does:
+// "A patch release on v1.9.1", "A patch to Hep Explorer", "This release adds".
+const KIND_OF_RELEASE = /^(?:a|an|this)\s+(?:(?:patch|minor|major|maintenance|bug-?fix)\s+)?(?:release|patch|update)\b/i;
+
 export function check(lines) {
   const problems = [];
   const fail = (text) => problems.push(text);
@@ -253,6 +293,13 @@ export function check(lines) {
   if (intro > LIMITS.intro) fail(`The introduction is ${intro} words; the limit is ${LIMITS.intro}.`);
   if (introLines.length === 0) fail('The section has no introduction: say in two to four sentences what the release is.');
   if (opening.bullets.length > 0) fail('Bullets come under a heading, not before the first one.');
+  const feed = feedLine(lines);
+  if (feed.length > LIMITS.feedLine) {
+    fail(`The introduction's first sentence is the line the homepage feed posts, and it is ${feed.length} characters; the homepage feed shows ${LIMITS.feedLine} and cuts the rest: ${feed.slice(0, 50)}…`);
+  }
+  if (KIND_OF_RELEASE.test(feed)) {
+    fail(`The introduction's first sentence names the kind of release, and the homepage feed posts it alone: say what the release lets someone do instead. "${feed}"`);
+  }
 
   const order = parts.slice(1).map((part) => HEADINGS.indexOf(part.heading));
   parts.slice(1).forEach((part, i) => {

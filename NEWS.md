@@ -10,11 +10,12 @@ here, copied verbatim, when the release is approved and tagged.
 
 **See it move:** the [`requirement-session` skill on `main`](https://github.com/jwildfire/obot.agent/blob/main/skills/requirement-session/SKILL.md#4-work-the-tasks) is the release as it stands; the annotated demo page comes with the release candidate.
 
-A requirement session now checks what it built by looking at it. The rule comes from the design work for safety.viz release 1.11 and is one step in the session skill. Nothing a session already does changes.
+A session checks what it built by looking at it, and release notes open with a line the homepage feed can post. The first rule comes from the design work for safety.viz release 1.11. Nothing a session already does changes.
 
 ## What's new
 
 - **A session builds a visible change from its mockup and looks at it.** Before such a task closes, the session renders the result in a browser at the design's width, compares it with the mockup and puts the screenshot in the pull request. Where the mockup cannot be built as drawn, it asks. [#361](https://github.com/jwildfire/obot.agent/issues/361)
+- **Release notes open with a sentence the homepage feed posts on its own.** The [`release-notes`](https://github.com/jwildfire/obot.agent/blob/main/skills/release-notes/SKILL.md#the-feed-line) checker fails a first sentence over 110 characters, or one that only names the kind of release, such as "A patch release on v1.9.1". PR [#363](https://github.com/jwildfire/obot.agent/pull/363)
 
 # obot.agent v0.6.0 — sessions run locally and write as the bot
 
