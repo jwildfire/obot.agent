@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, isEmpty, sectionOf, words } from './check-notes.mjs';
+import { check, feedLine, isEmpty, sectionOf, words } from './check-notes.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const checker = join(here, 'check-notes.mjs');
@@ -23,7 +23,7 @@ const section = (heading, body) => `# ${heading}\n\n${body}\n`;
 const GOOD = [
   `**See it move:** the [annotated demo](${DEMO}) has the detail.`,
   '',
-  'A patch release. Nothing a user already has stops working.',
+  'Charts draw faster. Nothing a user already has stops working.',
   '',
   "## What's new",
   '',
@@ -161,7 +161,7 @@ test('found in use: a flat list with no headings is totalled bullet by bullet, n
 // wrong are the cases marked "fourth review" below.
 const REF = 'https://example.org/o/r/issues/';
 const bullet = (n, claim = 'A claim.') => `- **${claim}** ${long(n)}`;
-const shaped = ({ intro = 'A patch release. Nothing a user already has stops working.', news = [bullet(10)], also = [], demo = true, headings } = {}) =>
+const shaped = ({ intro = 'Charts draw faster. Nothing a user already has stops working.', news = [bullet(10)], also = [], demo = true, headings } = {}) =>
   section(
     'pkg v1.0.0 (Upcoming)',
     [
@@ -197,9 +197,40 @@ test('limits: every kind of line is in the total', () => {
 });
 
 test('limits: the introduction, at 80 and at 81', () => {
-  assert.deepEqual(result(shaped({ intro: long(80) })).problems, []);
-  assert.match(problemsOf(shaped({ intro: long(81) })), /The introduction is 81 words; the limit is 80/);
+  // A short first sentence, so only the introduction's length is under test.
+  const intro = (n) => `One new thing for readers. Then ${long(n - 6)}`;
+  assert.deepEqual(result(shaped({ intro: intro(80) })).problems, []);
+  assert.match(problemsOf(shaped({ intro: intro(81) })), /The introduction is 81 words; the limit is 80/);
   assert.match(problemsOf(shaped({ intro: '' })), /has no introduction/);
+});
+
+const withIntro = (intro) => sectionOf(section('pkg v1.0.0', GOOD.replace('Charts draw faster. Nothing a user already has stops working.', intro)));
+
+test('feed line: the first sentence of the introduction, read as the homepage feed reads it', () => {
+  // jwildfire.github.io's scripts/sync-releases.mjs posts this sentence alone.
+  assert.equal(feedLine(withIntro('The demo app loads your own study. Nothing breaks.')), 'The demo app loads your own study');
+  assert.equal(
+    feedLine(withIntro('The [demo app](https://example.org/demo/) gains `SafetyViz.kit` and a **cross-tab**. More.')),
+    'The demo app gains SafetyViz.kit and a cross-tab'
+  );
+  assert.equal(feedLine(withIntro('Charts built on v1.9.0 and e.g. bio.viz still draw. Then more.')), 'Charts built on v1.9.0 and e.g. bio.viz still draw');
+  assert.equal(feedLine(withIntro('A first paragraph with no full stop\non two lines\n\nA second paragraph.')), 'A first paragraph with no full stop on two lines');
+});
+
+test('feed line: 110 characters, and 111 fails', () => {
+  const at = (n) => `${'x'.repeat(n - 1)}y. Then more.`;
+  assert.equal(feedLine(withIntro(at(110))).length, 110);
+  assert.deepEqual(check(withIntro(at(110))).problems, []);
+  assert.match(check(withIntro(at(111))).problems.join('\n'), /first sentence .* 111 characters; the homepage feed shows 110/);
+});
+
+test('feed line: a sentence that only names the kind of release fails', () => {
+  for (const opening of ['A patch release on v1.9.1.', 'A patch to Hep Explorer.', 'This release adds a chart.', 'A minor release with fixes.', 'An update to the demo app.']) {
+    assert.match(check(withIntro(`${opening} Then more.`)).problems.join('\n'), /names the kind of release/, opening);
+  }
+  for (const opening of ['Patching a chart is now one click.', 'A patched chart draws faster.', 'Hep Explorer sizes points by the new R ratio.']) {
+    assert.deepEqual(check(withIntro(`${opening} Then more.`)).problems, [], opening);
+  }
 });
 
 test("limits: What's new takes six bullets, and only What's new is held to six", () => {
