@@ -32,3 +32,7 @@ Overlay releases are tagged `vX.Y.Z` from the lagging `stable` branch by a
 [releases page](https://github.com/jwildfire/obot.agent/releases). The fully autonomous
 prototype this replaced was retired in v0.5.0; the v0.4.0 tag and the git history are
 its archive.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

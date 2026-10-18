@@ -16,6 +16,7 @@ A session checks what it built by looking at it, and release notes open with a l
 
 - **A session builds a visible change from its mockup and looks at it.** Before such a task closes, the session renders the result in a browser at the design's width, compares it with the mockup and puts the screenshot in the pull request. Where the mockup cannot be built as drawn, it asks. [#361](https://github.com/jwildfire/obot.agent/issues/361)
 - **Release notes open with a sentence the homepage feed posts on its own.** The [`release-notes`](https://github.com/jwildfire/obot.agent/blob/main/skills/release-notes/SKILL.md#the-feed-line) checker fails a first sentence over 110 characters, or one that only names the kind of release, such as "A patch release on v1.9.1". PR [#363](https://github.com/jwildfire/obot.agent/pull/363)
+- **obot.agent is licensed under the Apache License 2.0,** the licence the other obot repositories carry. The repository has a LICENSE file and the README says so.
 
 # obot.agent v0.6.0 — sessions run locally and write as the bot
 
